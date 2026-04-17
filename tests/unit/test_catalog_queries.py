@@ -46,3 +46,7 @@ def test_cross_database_flag_matches_sql_marker() -> None:
 def test_all_queries_are_marked_with_tested_version() -> None:
     for query in queries.ALL_QUERIES:
         assert query.tested_versions == ("NPS 11.2.1.11-IF1",)
+
+
+def test_catalog_query_map_contains_all_ids() -> None:
+    assert set(queries.CATALOG_QUERY_MAP) == {query.id for query in queries.ALL_QUERIES}

@@ -7,7 +7,7 @@ from typing import Any, Final, Protocol, cast
 
 from nz_mcp.auth import get_password
 from nz_mcp.catalog.identifier import render_cross_db
-from nz_mcp.catalog.queries import LIST_DATABASES
+from nz_mcp.catalog.resolver import resolve_query
 from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
 from nz_mcp.errors import NetezzaError
@@ -31,7 +31,8 @@ def list_databases(profile: Profile, pattern: str | None = None) -> list[dict[st
     like_pattern = pattern if pattern else None
     params: tuple[str | None, str | None] = (like_pattern, like_pattern)
     password = get_password(profile.name)
-    sql = render_cross_db(LIST_DATABASES.sql, database=profile.database)
+    base_sql = resolve_query("list_databases", profile)
+    sql = render_cross_db(base_sql, database=profile.database)
 
     connection = cast(_ConnectionLike, open_connection(profile, password))
     try:
@@ -52,10 +53,12 @@ def list_databases(profile: Profile, pattern: str | None = None) -> list[dict[st
 
 def _row_to_database(row: Any) -> dict[str, str]:
     if isinstance(row, dict):
-        return {
-            "name": str(row["DATABASE"]),
-            "owner": str(row["OWNER"]),
-        }
+        if "DATABASE" not in row or "OWNER" not in row:
+            raise NetezzaError(
+                operation="list_databases",
+                detail="Catalog query must return DATABASE and OWNER columns.",
+            )
+        return {"name": str(row["DATABASE"]), "owner": str(row["OWNER"])}
     if isinstance(row, tuple) and len(row) >= _DATABASE_ROW_MIN_ITEMS:
         return {"name": str(row[0]), "owner": str(row[1])}
     raise NetezzaError(operation="list_databases", detail="Unexpected row shape from _v_database")

@@ -168,6 +168,23 @@ en runtime antes del `cursor.execute()`. Como `nzpy` no parametriza identificado
 Invariante de seguridad: no concatenar identifiers sin pasar por este validador.
 Relajar este patrón requiere ADR y aprobación humana explícita.
 
+## Catalog overrides por perfil
+
+Los perfiles pueden declarar `catalog_overrides` en `profiles.toml` para reemplazar
+queries de catálogo por `query_id`.
+
+Riesgo explícito:
+
+- El SQL de `catalog_overrides` se ejecuta tal cual.
+- Estas queries de catálogo no pasan por `sql_guard`.
+- Se asume que el humano controla su propio `profiles.toml` y sus permisos.
+
+Controles implementados:
+
+- Solo se aceptan `query_id` existentes en `CATALOG_QUERY_MAP`.
+- Overrides con `query_id` desconocido fallan con `InvalidProfileError`.
+- Si un override incluye `<BD>..` en una query no cross-db, se emite warning.
+
 ## Checklist para Security Engineer antes de commit
 
 - [ ] Todo SQL ejecutable pasa por `sql_guard.validate()` en el camino.
