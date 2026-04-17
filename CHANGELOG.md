@@ -9,6 +9,12 @@ Cada entrada se documenta en **español** y **english**.
 ## [Unreleased]
 
 ### Added
+- ES: tool `nz_list_databases` implementada con query a `_v_database` y filtro `LIKE` opcional.
+- EN: implemented `nz_list_databases` tool using `_v_database` with optional `LIKE` filter.
+- ES: capa de conexión real con `nzpy` (`open_connection`) con `timeout`, `application_name="nz-mcp"` y errores tipados.
+- EN: real `nzpy` connection layer (`open_connection`) with `timeout`, `application_name="nz-mcp"`, and typed errors.
+- ES: tests unitarios para conexión, catálogo y tool; además de test de integración local para `nz_list_databases`.
+- EN: unit tests for connection, catalog, and tool; plus local integration test for `nz_list_databases`.
 - ES: integración MCP real por stdio en `nz-mcp serve`, conectando `initialize`, `tools/list` y `tools/call` al dispatcher interno.
 - EN: real MCP stdio integration in `nz-mcp serve`, wiring `initialize`, `tools/list`, and `tools/call` to the internal dispatcher.
 - ES: test de contrato wire-level in-process para validar handshake, listado de tools y llamada con error estructurado.
