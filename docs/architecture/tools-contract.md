@@ -81,7 +81,8 @@ Lista bases de datos visibles para el usuario del perfil.
 
 | Input | Tipo | Descripción |
 |---|---|---|
-| `database` | string (required) | BD a inspeccionar. |
+| `database` | string (required) | BD a inspeccionar (identificador validado para interpolación `<BD>..`). |
+| `pattern` | string (optional) | Filtro tipo `LIKE` sobre el nombre de schema. |
 
 **Output**: `{ "schemas": [{"name": "PUBLIC", "owner": "ADMIN"}] }`
 
