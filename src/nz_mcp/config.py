@@ -87,12 +87,16 @@ def get_profile(name: str, path: Path | None = None) -> Profile:
 
 def get_active_profile(path: Path | None = None) -> Profile:
     file = load_profiles_file(path)
-    name = file.active or os.environ.get("NZ_MCP_PROFILE") or _single_profile_or_none(file)
+    name = file.active or os.environ.get("NZ_MCP_PROFILE") or single_profile_name_or_none(file)
     if not name:
         raise ProfileNotFoundError(profile="<active>")
     return get_profile(name, path=path)
 
 
-def _single_profile_or_none(file: ProfilesFile) -> str | None:
+def single_profile_name_or_none(file: ProfilesFile) -> str | None:
+    """Return the profile name when ``file`` defines exactly one profile, else ``None``.
+
+    Used to infer the active profile when ``active`` and ``NZ_MCP_PROFILE`` are unset.
+    """
     keys = list(file.profiles.keys())
     return keys[0] if len(keys) == 1 else None
