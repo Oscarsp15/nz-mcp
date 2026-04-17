@@ -5,6 +5,7 @@ Commands:
 - ``add-profile``        add another profile.
 - ``list-profiles``      list configured profiles.
 - ``doctor``             print local diagnostics (no Netezza connection).
+- ``probe-catalog``      execute every catalog query with dummy parameters (validates overrides).
 - ``test-connection``    verify the active profile (stubbed in v0.1.0a0).
 - ``serve``              run the MCP server over stdio.
 - ``version``            print the package version.
@@ -13,6 +14,7 @@ Commands:
 from __future__ import annotations
 
 import contextlib
+import json
 from pathlib import Path
 from typing import cast
 
@@ -20,16 +22,20 @@ import typer
 
 from nz_mcp import __version__
 from nz_mcp.auth import store_password
+from nz_mcp.catalog.probe import probe_has_hard_failure, probe_run_to_json_dict, run_probe_catalog
 from nz_mcp.config import (
     DEFAULT_MAX_ROWS,
     DEFAULT_TIMEOUT_S,
     PermissionMode,
     config_dir,
+    get_active_profile,
+    get_profile,
     list_profile_names,
     profiles_path,
 )
 from nz_mcp.diagnostic import collect_diagnostic, format_diagnostic_report
-from nz_mcp.i18n import resolve_locale
+from nz_mcp.errors import InvalidProfileError, ProfileNotFoundError
+from nz_mcp.i18n import resolve_locale, t
 from nz_mcp.server import run_stdio_server
 
 app = typer.Typer(
@@ -82,6 +88,68 @@ def doctor_cmd() -> None:
     locale = resolve_locale()
     typer.echo(format_diagnostic_report(report, locale=locale))
     raise typer.Exit(code=0 if report.is_healthy else 1)
+
+
+@app.command("probe-catalog")
+def probe_catalog_cmd(
+    profile: str | None = typer.Option(
+        None,
+        "--profile",
+        "-p",
+        help="Profile name (default: active)",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Print machine-readable JSON"),
+) -> None:
+    """Run every registered catalog query with dummy parameters against Netezza."""
+    locale = resolve_locale()
+    try:
+        prof = get_profile(profile) if profile is not None else get_active_profile()
+    except ProfileNotFoundError as exc:
+        typer.secho(t("PROFILE_NOT_FOUND", locale, profile=exc.context["profile"]), err=True)
+        raise typer.Exit(code=1) from exc
+    except InvalidProfileError as exc:
+        typer.secho(t("INVALID_CONFIG", locale, detail=str(exc)), err=True)
+        raise typer.Exit(code=1) from exc
+
+    run = run_probe_catalog(prof)
+    if as_json:
+        typer.echo(json.dumps(probe_run_to_json_dict(run), indent=2, ensure_ascii=False))
+    else:
+        typer.secho(t("PROBE_CATALOG.HEADER", locale, profile=run.profile_name), bold=True)
+        if run.config_error is not None:
+            typer.secho(
+                t("PROBE_CATALOG.CONFIG_ERROR", locale, detail=run.config_error),
+                fg=typer.colors.RED,
+                err=True,
+            )
+        for row in run.results:
+            if row.status == "ok":
+                ms = row.duration_ms if row.duration_ms is not None else 0.0
+                rc = row.row_count if row.row_count is not None else 0
+                typer.echo(
+                    t("PROBE_CATALOG.LINE_OK", locale, query_id=row.query_id, ms=ms, rows=rc),
+                )
+            elif row.status == "structural_warning":
+                detail = row.error_detail or ""
+                typer.secho(
+                    t("PROBE_CATALOG.LINE_WARN", locale, query_id=row.query_id, detail=detail),
+                    fg=typer.colors.YELLOW,
+                )
+            else:
+                parts = []
+                if row.detail:
+                    parts.append(row.detail)
+                if row.error_detail:
+                    parts.append(row.error_detail)
+                detail = " — ".join(parts) if parts else "error"
+                typer.secho(
+                    t("PROBE_CATALOG.LINE_FAIL", locale, query_id=row.query_id, detail=detail),
+                    fg=typer.colors.RED,
+                    err=True,
+                )
+
+    code = 0 if not probe_has_hard_failure(run) else 1
+    raise typer.Exit(code=code)
 
 
 @app.command("test-connection")

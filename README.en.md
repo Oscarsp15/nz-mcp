@@ -70,6 +70,18 @@ Active profile: dev
 
 Exit code: `0` when the setup is OK; `1` on a critical issue (e.g. keyring unavailable).
 
+### Catalog diagnostics
+
+After you configure a profile and store the password in the OS keyring, you can verify that **every catalog query** (including `catalog_overrides` in `profiles.toml`) runs against your Netezza with safe dummy parameters:
+
+```bash
+nz-mcp probe-catalog
+nz-mcp probe-catalog --profile my_profile
+nz-mcp probe-catalog --json
+```
+
+The command reports duration and row counts per query. If a query only fails because a dummy table or object does not exist, it is reported as a warning rather than a hard failure. Exit code: `0` when there are no hard failures, `1` when any query fails definitively or the connection cannot be established.
+
 ## Available tools (24)
 
 Full contract: [`docs/architecture/tools-contract.md`](docs/architecture/tools-contract.md).

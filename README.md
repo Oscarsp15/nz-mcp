@@ -70,6 +70,18 @@ Perfil activo: dev
 
 Código de salida: `0` si el entorno es usable; `1` si hay un problema crítico (p. ej. keyring no disponible).
 
+### Diagnóstico de catálogo
+
+Tras configurar un perfil y guardar la contraseña en el keyring, puedes validar que **todas las consultas del catálogo** (incluidas las de `catalog_overrides` en `profiles.toml`) se ejecutan contra tu Netezza con parámetros dummy seguros:
+
+```bash
+nz-mcp probe-catalog
+nz-mcp probe-catalog --profile mi_perfil
+nz-mcp probe-catalog --json
+```
+
+Mide duración y filas devueltas por query; si una consulta solo falla porque no existe un objeto de prueba (p. ej. tabla ficticia), se marca como advertencia, no como fallo duro. Código de salida: `0` si no hay errores graves, `1` si alguna query falla de forma definitiva o no se puede conectar.
+
 ## Tools disponibles (24)
 
 Ver el contrato completo en [`docs/architecture/tools-contract.md`](docs/architecture/tools-contract.md).

@@ -176,6 +176,27 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "El backend de keyring no está disponible.",
         "en": "The keyring backend is unavailable.",
     },
+    # probe-catalog CLI
+    "PROBE_CATALOG.HEADER": {
+        "es": "Diagnóstico de catálogo — perfil: {profile}",
+        "en": "Catalog probe — profile: {profile}",
+    },
+    "PROBE_CATALOG.CONFIG_ERROR": {
+        "es": "No se pudo ejecutar el probe de catálogo: {detail}",
+        "en": "Cannot run catalog probe: {detail}",
+    },
+    "PROBE_CATALOG.LINE_OK": {
+        "es": "[OK] {query_id} — {ms:.1f} ms, {rows} filas",
+        "en": "[OK] {query_id} — {ms:.1f} ms, {rows} rows",
+    },
+    "PROBE_CATALOG.LINE_FAIL": {
+        "es": "[FAIL] {query_id}: {detail}",
+        "en": "[FAIL] {query_id}: {detail}",
+    },
+    "PROBE_CATALOG.LINE_WARN": {
+        "es": "[WARN] {query_id} — no validado (falta objeto real): {detail}",
+        "en": "[WARN] {query_id} — not validated (needs real object): {detail}",
+    },
 }
 
 
