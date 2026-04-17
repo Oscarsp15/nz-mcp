@@ -42,3 +42,4 @@ Ver [tech-lead.md](../roles/tech-lead.md#plantilla-adr-para-copiar-a-docsadrnnnn
 | 0005 | [Sin frontend ni UI propia](0005-sin-frontend.md) | aceptado | 2026-04-16 |
 | 0006 | [Tools con responsabilidad única](0006-tools-responsabilidad-unica.md) | aceptado | 2026-04-16 |
 | 0007 | [Auditoría de PR con autor + auditor IA distintos](0007-auditoria-pr.md) | aceptado | 2026-04-16 |
+| 0008 | [`required_approving_review_count = 0` mientras solo haya un mantenedor humano](0008-required-reviews-cero-solo-dev.md) | aceptado | 2026-04-17 |
