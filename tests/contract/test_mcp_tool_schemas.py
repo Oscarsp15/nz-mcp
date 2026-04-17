@@ -16,6 +16,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_current_profile",
     "nz_list_databases",
     "nz_list_schemas",
+    "nz_list_tables",
     "nz_switch_profile",
 }
 

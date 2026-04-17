@@ -98,11 +98,12 @@ Lista **solo tablas** (no vistas, no procedimientos). Para vistas usar `nz_list_
 | `schema` | string (required) | |
 | `pattern` | string (optional) | Filtro `LIKE` por nombre. |
 
-**Output**:
+**Output** (solo `name` y `kind`; el conteo de filas va en `nz_table_stats`):
+
 ```json
 {
   "tables": [
-    {"name": "CUSTOMERS", "kind": "TABLE", "row_count_estimate": 1200000}
+    {"name": "CUSTOMERS", "kind": "TABLE"}
   ]
 }
 ```

@@ -9,6 +9,7 @@ from nz_mcp.tools import (
     databases,  # noqa: F401  (registers database tools)
     schemas,  # noqa: F401  (registers schema tools)
     session,  # noqa: F401  (registers session tools)
+    tables,  # noqa: F401  (registers table tools)
 )
 from nz_mcp.tools.registry import TOOLS, ToolSpec
 
