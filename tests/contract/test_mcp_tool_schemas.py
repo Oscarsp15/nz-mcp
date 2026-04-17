@@ -15,6 +15,7 @@ from nz_mcp.tools.registry import TOOLS
 
 EXPECTED_V010A0: set[str] = {
     "nz_current_profile",
+    "nz_delete",
     "nz_describe_procedure",
     "nz_describe_table",
     "nz_explain",
@@ -22,6 +23,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_get_procedure_section",
     "nz_get_table_ddl",
     "nz_get_view_ddl",
+    "nz_insert",
     "nz_list_databases",
     "nz_list_procedures",
     "nz_list_schemas",
@@ -31,6 +33,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_switch_profile",
     "nz_table_sample",
     "nz_table_stats",
+    "nz_update",
 }
 
 
