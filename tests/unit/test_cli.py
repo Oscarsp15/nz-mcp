@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from nz_mcp import __version__
@@ -35,3 +36,27 @@ def test_serve_is_stub() -> None:
     result = runner.invoke(app, ["serve"])
     assert result.exit_code == 0
     assert "stub" in result.output
+
+
+def test_doctor_smoke_ok(two_profiles: Path) -> None:
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0
+    out = result.stdout.lower()
+    assert "nz-mcp" in out
+    assert "python" in out
+
+
+def _fail_keyring_backend() -> object:
+    from keyring.backends.fail import Keyring as FailKeyring
+
+    return FailKeyring()  # type: ignore[no-untyped-call]
+
+
+def test_doctor_exit_1_when_keyring_unavailable(
+    monkeypatch: pytest.MonkeyPatch, tmp_profiles: Path
+) -> None:
+    import keyring as kr
+
+    monkeypatch.setattr(kr, "get_keyring", _fail_keyring_backend)
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 1
