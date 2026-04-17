@@ -23,6 +23,8 @@ Cada entrada se documenta en **español** y **english**.
 - EN: `nz_truncate` tool — `TRUNCATE TABLE` with `admin` profile and mandatory `confirm=true`.
 - ES: tool `nz_drop_table` — `DROP TABLE` con `IF EXISTS` opcional y `confirm=true` obligatorio.
 - EN: `nz_drop_table` tool — `DROP TABLE` with optional `IF EXISTS` and mandatory `confirm=true`.
+- ES: tool `nz_clone_procedure` — clona un SP entre bases/schemas (`mode=admin`), transformaciones solo sobre el body, `dry_run`/`confirm`, warnings por refs `DB..`, `PROCEDURE_ALREADY_EXISTS` si el destino existe sin `replace_if_exists`, auditoría structlog con `ddl_hash` (SHA-256).
+- EN: `nz_clone_procedure` tool — clones an SP across databases/schemas (`mode=admin`), body-only transformations, `dry_run`/`confirm`, warnings for `DB..` refs, `PROCEDURE_ALREADY_EXISTS` when the target exists without `replace_if_exists`, structlog audit with SHA-256 `ddl_hash`.
 - ES: paquete write — `nz_insert`, `nz_update`, `nz_delete` con SQL parametrizado, `sql_guard` en modo `write`, dry-run con `COUNT` y `confirm` para mutaciones reales.
 - EN: write package — `nz_insert`, `nz_update`, `nz_delete` with parameterized SQL, `sql_guard` in `write` mode, dry-run via `COUNT` and `confirm` for real mutations.
 - ES: paquete de procedures — `nz_list_procedures`, `nz_describe_procedure`, `nz_get_procedure_ddl`, `nz_get_procedure_section` (parser NZPLSQL por marcadores, rangos de líneas acotados).

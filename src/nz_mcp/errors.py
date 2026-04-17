@@ -99,6 +99,10 @@ class OverloadAmbiguousError(NzMcpError):
     code = "OVERLOAD_AMBIGUOUS"
 
 
+class ProcedureAlreadyExistsError(NzMcpError):
+    code = "PROCEDURE_ALREADY_EXISTS"
+
+
 # --- Tool input validation ----------------------------------------------------
 
 

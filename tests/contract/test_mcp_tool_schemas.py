@@ -14,6 +14,7 @@ from nz_mcp.server import call_tool, list_tools
 from nz_mcp.tools.registry import TOOLS
 
 EXPECTED_V010A0: set[str] = {
+    "nz_clone_procedure",
     "nz_create_table",
     "nz_current_profile",
     "nz_delete",

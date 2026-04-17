@@ -90,6 +90,12 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Hay varias sobrecargas para el procedimiento '{procedure}'; indica proceduresignature.",
         "en": "Multiple overloads exist for procedure '{procedure}'; specify proceduresignature.",
     },
+    "PROCEDURE_ALREADY_EXISTS": {
+        "es": "El procedimiento ya existe en el destino (database={database}, schema={schema}, "
+        "procedure={procedure}).",
+        "en": "The procedure already exists on the target (database={database}, schema={schema}, "
+        "procedure={procedure}).",
+    },
     "CONFIRM_REQUIRED": {
         "es": "Se requiere confirm=true para ejecutar la mutación con dry_run=false.",
         "en": "confirm=true is required to run the mutation with dry_run=false.",
