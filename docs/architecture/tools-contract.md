@@ -137,22 +137,22 @@ Lista **solo tablas** (no vistas, no procedimientos). Para vistas usar `nz_list_
 
 #### 7. `nz_table_sample`
 
-Devuelve una muestra pequeña (10 filas) para entender el shape.
+Devuelve una muestra pequeña (10 filas) para entender el shape. El `database` del input **debe coincidir** con el de la conexión del perfil activo (muestreo vía `SELECT` en la sesión).
 
 | Input | Tipo | Descripción |
 |---|---|---|
-| `database` | string (required) | |
+| `database` | string (required) | Debe ser el de la conexión del perfil. |
 | `schema` | string (required) | |
 | `table` | string (required) | |
 | `rows` | int (default 10, cap 50) | |
 
-**Output**: mismo formato que `nz_query_select`.
+**Output**: mismo formato que `nz_query_select` (incl. `columns`, `rows`, `row_count`, `truncated`, `duration_ms`, `hint`).
 
 ---
 
 #### 8. `nz_table_stats`
 
-Estadísticas agregadas desde `_v_statistic` y `_v_table_storage_stat`.
+Estadísticas agregadas desde `_V_TABLE` y `_V_TABLE_STORAGE_STAT` (reltuples, bytes almacenados, skew, creación).
 
 | Input | Tipo | Descripción |
 |---|---|---|
@@ -164,9 +164,12 @@ Estadísticas agregadas desde `_v_statistic` y `_v_table_storage_stat`.
 ```json
 {
   "row_count": 1200000,
-  "size_bytes_uncompressed": 2400000000,
-  "size_bytes_compressed": 600000000,
-  "last_statistic_update": "2026-04-10T12:00:00Z"
+  "size_bytes_used": 600000000,
+  "size_used_human": "572.2 MiB",
+  "size_bytes_allocated": 800000000,
+  "size_allocated_human": "762.9 MiB",
+  "skew": 1.02,
+  "table_created": "2025-01-10T00:00:00+00:00"
 }
 ```
 
@@ -174,23 +177,25 @@ Estadísticas agregadas desde `_v_statistic` y `_v_table_storage_stat`.
 
 #### 9. `nz_get_table_ddl`
 
-Devuelve el DDL `CREATE TABLE` reconstruido (columnas, tipos, distribución, organized-on, constraints).
+Devuelve el DDL `CREATE TABLE` reconstruido (columnas, tipos, distribución, constraints opcionales). **No** usa `SHOW TABLE` en el servidor: se arman claves y metadatos desde catálogos.
 
 | Input | Tipo | Descripción |
 |---|---|---|
 | `database` | string (required) | |
 | `schema` | string (required) | |
 | `table` | string (required) | |
-| `include_constraints` | bool (default: true) | Incluir PK/FK/CHECK. |
+| `include_constraints` | bool (default: true) | Incluir PK/FK. |
 
 **Output**:
 ```json
 {
-  "ddl": "CREATE TABLE PUBLIC.CUSTOMERS (\n  ID INTEGER NOT NULL,\n  ...\n) DISTRIBUTE ON (ID);"
+  "ddl": "CREATE TABLE PUBLIC.CUSTOMERS (\n  ID INTEGER NOT NULL,\n  ...\n)\nDISTRIBUTE ON HASH (ID);",
+  "reconstructed": true,
+  "notes": ["DDL reconstruido desde catálogo …"]
 }
 ```
 
-Implementación: `SHOW TABLE schema.table;` si está disponible, o reconstruir desde `_v_relation_column` + `_v_table_dist_map` + `_v_table_constraint`.
+Implementación: reconstruir desde `_v_relation_column` + `_v_table_dist_map` + `_v_relation_keydata` (misma base que `nz_describe_table`).
 
 ---
 

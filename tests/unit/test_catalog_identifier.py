@@ -8,7 +8,11 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from nz_mcp.catalog.identifier import render_cross_db, validate_database_identifier
+from nz_mcp.catalog.identifier import (
+    render_cross_db,
+    validate_catalog_identifier,
+    validate_database_identifier,
+)
 from nz_mcp.errors import InvalidInputError
 
 _VALIDATED_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
@@ -47,6 +51,16 @@ def test_validate_database_identifier_rejects_adversarial_values(name: str) -> N
     with pytest.raises(InvalidInputError) as exc:
         validate_database_identifier(name)
     assert exc.value.code == "INVALID_DATABASE_NAME"
+
+
+def test_validate_catalog_identifier_rejects_injection() -> None:
+    with pytest.raises(InvalidInputError) as exc:
+        validate_catalog_identifier("X; DROP TABLE")
+    assert exc.value.code == "INVALID_INPUT"
+
+
+def test_validate_catalog_identifier_normalizes_case() -> None:
+    assert validate_catalog_identifier("mytab") == "MYTAB"
 
 
 def test_render_cross_db_replaces_all_markers() -> None:

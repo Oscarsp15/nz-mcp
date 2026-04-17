@@ -13,6 +13,10 @@ Cada entrada se documenta en **español** y **english**.
 - EN: driver error messages in `open_connection`, `list_databases`, and `probe-catalog` are passed through `sanitize()` with `known_secrets` so passwords are not leaked in MCP-exposed `detail` fields.
 
 ### Added
+- ES: tools `nz_table_sample`, `nz_table_stats` y `nz_get_table_ddl` — muestra de filas (`execute_select`), estadísticas de almacenamiento/datasets humanos IEC, y DDL `CREATE TABLE` reconstruido desde catálogo.
+- EN: `nz_table_sample`, `nz_table_stats`, and `nz_get_table_ddl` tools — row sampling via `execute_select`, storage/IEC-formatted stats, and catalog-reconstructed `CREATE TABLE` DDL.
+- ES: módulos `catalog/formatters.py` (`format_bytes_iec`) y `catalog/ddl_builder.py` (`build_create_table_ddl`).
+- EN: `catalog/formatters.py` (`format_bytes_iec`) and `catalog/ddl_builder.py` (`build_create_table_ddl`) modules.
 - ES: tools `nz_query_select` y `nz_explain` — ejecución de `SELECT` validado con `sql_guard`, `LIMIT` automático/streaming, y planes `EXPLAIN`/`EXPLAIN VERBOSE` sin ejecutar la query.
 - EN: `nz_query_select` and `nz_explain` tools — `sql_guard`-validated `SELECT` execution with automatic `LIMIT`/streaming, and `EXPLAIN`/`EXPLAIN VERBOSE` plans without executing the query.
 - ES: tool `nz_describe_table` para metadata de tabla (columnas, distribución, PK, FK) vía catálogo `_v_*`.
