@@ -32,10 +32,17 @@ def test_list_profiles_with_two(two_profiles: Path) -> None:
     assert "prod" in result.stdout
 
 
-def test_serve_is_stub() -> None:
+def test_serve_runs_stdio_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = False
+
+    def _fake_run_stdio_server() -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr("nz_mcp.cli.run_stdio_server", _fake_run_stdio_server)
     result = runner.invoke(app, ["serve"])
     assert result.exit_code == 0
-    assert "stub" in result.output
+    assert called is True
 
 
 def test_doctor_smoke_ok(two_profiles: Path) -> None:

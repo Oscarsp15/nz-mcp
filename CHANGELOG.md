@@ -15,6 +15,10 @@ Cada entrada se documenta en **español** y **english**.
 - EN: real `nzpy` connection layer (`open_connection`) with `timeout`, `application_name="nz-mcp"`, and typed errors.
 - ES: tests unitarios para conexión, catálogo y tool; además de test de integración local para `nz_list_databases`.
 - EN: unit tests for connection, catalog, and tool; plus local integration test for `nz_list_databases`.
+- ES: integración MCP real por stdio en `nz-mcp serve`, conectando `initialize`, `tools/list` y `tools/call` al dispatcher interno.
+- EN: real MCP stdio integration in `nz-mcp serve`, wiring `initialize`, `tools/list`, and `tools/call` to the internal dispatcher.
+- ES: test de contrato wire-level in-process para validar handshake, listado de tools y llamada con error estructurado.
+- EN: in-process wire-level contract test to validate handshake, tools listing, and structured-error tool calls.
 - ES: comando CLI `nz-mcp doctor` con diagnóstico local (sin red/Netezza) e informe i18n ES/EN.
 - EN: `nz-mcp doctor` CLI for local diagnostics (no network/Netezza) with ES/EN i18n report.
 - ES: estructura inicial del repositorio con `AGENTS.md` como router de despacho para agentes IA.
