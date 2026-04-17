@@ -108,3 +108,22 @@
 - Modelo de seguridad: [security-model.md](security-model.md)
 - Estándares: `../standards/`
 - Roles: `../roles/`
+
+## Configuración de catalog_overrides
+
+Cada perfil puede declarar `catalog_overrides` en `profiles.toml` para reemplazar SQL
+de queries de catálogo por `query_id`, sin tocar código fuente.
+
+Ejemplo:
+
+```toml
+[profiles.prod.catalog_overrides]
+list_databases = "SELECT DATABASE, OWNER FROM CUSTOM_DB_VIEW ORDER BY DATABASE"
+```
+
+Contrato:
+
+- Clave = `CatalogQuery.id` (ej. `list_databases`).
+- Valor = SQL alternativo.
+- Si el `query_id` no existe en `CATALOG_QUERY_MAP`, el perfil es inválido.
+- El SQL override se ejecuta como configuración local del usuario.

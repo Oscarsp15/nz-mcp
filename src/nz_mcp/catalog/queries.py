@@ -195,3 +195,5 @@ ALL_QUERIES: Final[tuple[CatalogQuery, ...]] = (
     GET_PROCEDURE_DDL,
     GET_PROCEDURE_SECTION,
 )
+
+CATALOG_QUERY_MAP: Final[dict[str, CatalogQuery]] = {query.id: query for query in ALL_QUERIES}

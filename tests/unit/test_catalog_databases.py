@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import pytest
 
 from nz_mcp.catalog.databases import list_databases
@@ -10,7 +12,7 @@ from nz_mcp.errors import NetezzaError
 
 
 class _FakeCursor:
-    def __init__(self, rows: list[tuple[str, ...]]) -> None:
+    def __init__(self, rows: list[object]) -> None:
         self.rows = rows
         self.closed = False
         self.executed_sql: str | None = None
@@ -20,7 +22,7 @@ class _FakeCursor:
         self.executed_sql = sql
         self.executed_params = params
 
-    def fetchall(self) -> list[tuple[str, ...]]:
+    def fetchall(self) -> Sequence[object]:
         return self.rows
 
     def close(self) -> None:
@@ -59,11 +61,15 @@ def test_list_databases_queries_catalog_with_optional_like(monkeypatch: pytest.M
         "nz_mcp.catalog.databases.open_connection",
         lambda *_args, **_kwargs: connection,
     )
+    monkeypatch.setattr(
+        "nz_mcp.catalog.databases.resolve_query",
+        lambda _query_id, _profile: "SELECT DATABASE, OWNER FROM _V_DATABASE",
+    )
 
     out = list_databases(_profile(), pattern="D%")
 
     assert out == [{"name": "DEV", "owner": "ADMIN"}, {"name": "DATA", "owner": "DBA"}]
-    assert cursor.executed_sql is not None and "_v_database" in cursor.executed_sql
+    assert cursor.executed_sql is not None and "_v_database" in cursor.executed_sql.lower()
     assert cursor.executed_params == ("D%", "D%")
     assert cursor.closed is True
     assert connection.closed is True
@@ -84,6 +90,10 @@ def test_list_databases_wraps_driver_errors_and_closes_connection(
         "nz_mcp.catalog.databases.open_connection",
         lambda *_args, **_kwargs: connection,
     )
+    monkeypatch.setattr(
+        "nz_mcp.catalog.databases.resolve_query",
+        lambda _query_id, _profile: "SELECT DATABASE, OWNER FROM _V_DATABASE",
+    )
 
     with pytest.raises(NetezzaError) as exc:
         list_databases(_profile(), pattern=None)
@@ -95,7 +105,7 @@ def test_list_databases_wraps_driver_errors_and_closes_connection(
 
 
 def test_list_databases_rejects_unexpected_row_shape(monkeypatch: pytest.MonkeyPatch) -> None:
-    bad_rows: list[tuple[str, ...]] = [("DEV",)]
+    bad_rows: list[object] = [("DEV",)]
 
     class _BadCursor(_FakeCursor):
         def __init__(self) -> None:
@@ -104,7 +114,7 @@ def test_list_databases_rejects_unexpected_row_shape(monkeypatch: pytest.MonkeyP
             self.executed_sql = None
             self.executed_params = None
 
-        def fetchall(self) -> list[tuple[str, ...]]:
+        def fetchall(self) -> Sequence[object]:
             return self.rows
 
     cursor = _BadCursor()
@@ -114,8 +124,41 @@ def test_list_databases_rejects_unexpected_row_shape(monkeypatch: pytest.MonkeyP
         "nz_mcp.catalog.databases.open_connection",
         lambda *_args, **_kwargs: connection,
     )
+    monkeypatch.setattr(
+        "nz_mcp.catalog.databases.resolve_query",
+        lambda _query_id, _profile: "SELECT DATABASE, OWNER FROM _V_DATABASE",
+    )
 
     with pytest.raises(NetezzaError) as exc:
         list_databases(_profile())
 
     assert exc.value.code == "NETEZZA_ERROR"
+
+
+def test_list_databases_fails_with_clear_error_on_override_semantic_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _DictCursor(_FakeCursor):
+        def __init__(self) -> None:
+            super().__init__(rows=[])
+
+        def fetchall(self) -> Sequence[object]:
+            return [{"DBNAME": "DEV", "DBOWNER": "ADMIN"}]
+
+    cursor = _DictCursor()
+    connection = _FakeConnection(cursor)
+    monkeypatch.setattr("nz_mcp.catalog.databases.get_password", lambda _name: "pw")
+    monkeypatch.setattr(
+        "nz_mcp.catalog.databases.open_connection",
+        lambda *_args, **_kwargs: connection,
+    )
+    monkeypatch.setattr(
+        "nz_mcp.catalog.databases.resolve_query",
+        lambda _query_id, _profile: "SELECT DBNAME, DBOWNER FROM _V_DATABASE",
+    )
+
+    with pytest.raises(NetezzaError) as exc:
+        list_databases(_profile())
+
+    assert exc.value.code == "NETEZZA_ERROR"
+    assert "DATABASE and OWNER columns" in exc.value.context["detail"]

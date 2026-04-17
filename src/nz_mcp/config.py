@@ -46,6 +46,8 @@ class Profile(BaseModel):
     mode: PermissionMode
     max_rows_default: int = Field(default=DEFAULT_MAX_ROWS, ge=1, le=MAX_ROWS_CAP)
     timeout_s_default: int = Field(default=DEFAULT_TIMEOUT_S, ge=1, le=TIMEOUT_S_CAP)
+    # Catalog overrides run as-is and do not go through sql_guard.
+    catalog_overrides: dict[str, str] = Field(default_factory=dict)
 
 
 class ProfilesFile(BaseModel):

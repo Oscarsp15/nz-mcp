@@ -9,6 +9,10 @@ Cada entrada se documenta en **español** y **english**.
 ## [Unreleased]
 
 ### Added
+- ES: soporte `catalog_overrides` por perfil para resolver SQL de catálogo por `query_id` desde `profiles.toml`.
+- EN: added per-profile `catalog_overrides` to resolve catalog SQL by `query_id` from `profiles.toml`.
+- ES: módulo `catalog/resolver.py` con validación de `query_id` desconocido y warning para uso de `<BD>..` en queries no cross-db.
+- EN: added `catalog/resolver.py` with unknown `query_id` validation and warning when `<BD>..` is used on non cross-db queries.
 - ES: validador de identificador de base de datos (`validate_database_identifier`) y render seguro `render_cross_db` para notación `<BD>.._V_*`.
 - EN: added database identifier validator (`validate_database_identifier`) and safe `render_cross_db` support for `<BD>.._V_*` notation.
 - ES: sección de seguridad para interpolación cross-database en `security-model.md` y pruebas adversariales/property-based del módulo.
