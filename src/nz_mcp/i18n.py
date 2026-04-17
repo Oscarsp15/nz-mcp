@@ -61,6 +61,10 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "El archivo de configuración es inválido: {detail}",
         "en": "The configuration file is invalid: {detail}",
     },
+    "INVALID_DATABASE_NAME": {
+        "es": "Nombre de base de datos inválido para interpolación de catálogo: {detail}",
+        "en": "Invalid database name for catalog interpolation: {detail}",
+    },
     "CONNECTION_FAILED": {
         "es": "No se pudo abrir conexión a Netezza ({host}:{port}/{database}): {detail}",
         "en": "Could not open Netezza connection ({host}:{port}/{database}): {detail}",

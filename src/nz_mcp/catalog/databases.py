@@ -6,6 +6,7 @@ from contextlib import closing
 from typing import Any, Final, Protocol, cast
 
 from nz_mcp.auth import get_password
+from nz_mcp.catalog.identifier import render_cross_db
 from nz_mcp.catalog.queries import LIST_DATABASES
 from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
@@ -30,11 +31,12 @@ def list_databases(profile: Profile, pattern: str | None = None) -> list[dict[st
     like_pattern = pattern if pattern else None
     params: tuple[str | None, str | None] = (like_pattern, like_pattern)
     password = get_password(profile.name)
+    sql = render_cross_db(LIST_DATABASES.sql, database=profile.database)
 
     connection = cast(_ConnectionLike, open_connection(profile, password))
     try:
         with closing(connection.cursor()) as cursor:
-            cursor.execute(LIST_DATABASES.sql, params)
+            cursor.execute(sql, params)
             rows = cursor.fetchall()
     except Exception as exc:
         raise NetezzaError(

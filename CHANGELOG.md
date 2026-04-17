@@ -9,6 +9,10 @@ Cada entrada se documenta en **español** y **english**.
 ## [Unreleased]
 
 ### Added
+- ES: validador de identificador de base de datos (`validate_database_identifier`) y render seguro `render_cross_db` para notación `<BD>.._V_*`.
+- EN: added database identifier validator (`validate_database_identifier`) and safe `render_cross_db` support for `<BD>.._V_*` notation.
+- ES: sección de seguridad para interpolación cross-database en `security-model.md` y pruebas adversariales/property-based del módulo.
+- EN: added security guidance for cross-database interpolation in `security-model.md` plus adversarial/property-based tests.
 - ES: tool `nz_list_databases` implementada con query a `_v_database` y filtro `LIKE` opcional.
 - EN: implemented `nz_list_databases` tool using `_v_database` with optional `LIKE` filter.
 - ES: capa de conexión real con `nzpy` (`open_connection`) con `timeout`, `application_name="nz-mcp"` y errores tipados.
