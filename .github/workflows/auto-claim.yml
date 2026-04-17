@@ -1,0 +1,111 @@
+name: Auto-claim issue
+
+# Aplica/quita `claimed` y assignee al issue referenciado por un PR.
+#
+# Uso `pull_request_target` (no `pull_request`) para que el token tenga
+# `issues: write` en el repo base aun cuando el PR viene de un fork.
+#
+# SEGURIDAD: **no hacer checkout del código del PR**. El workflow solo usa
+# `actions/github-script` con la API REST de GitHub. Cualquier cambio que
+# añada ejecución de código del fork es bloqueante y requiere ADR.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, edited, closed]
+
+permissions:
+  issues: write
+  pull-requests: read
+
+jobs:
+  claim:
+    name: Apply or revoke claim
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update claim label and assignee
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const body = pr.body || "";
+            const actor = pr.user.login;
+            const isClosed = pr.state === "closed";
+            const wasMerged = pr.merged === true;
+
+            // Match `Closes|Fixes|Resolves #N` variants (case-insensitive).
+            const regex = /\b(?:closes|closed|close|fixes|fixed|fix|resolves|resolved|resolve)\s+#(\d+)\b/gi;
+            const issueNumbers = [
+              ...new Set([...body.matchAll(regex)].map((m) => parseInt(m[1], 10))),
+            ];
+
+            if (issueNumbers.length === 0) {
+              core.info("No issue references found in PR body. Nothing to do.");
+              return;
+            }
+
+            const { owner, repo } = context.repo;
+            core.info(
+              `PR #${pr.number} state=${pr.state} merged=${wasMerged} actor=${actor} ` +
+                `issues=[${issueNumbers.join(", ")}]`,
+            );
+
+            for (const issueNumber of issueNumbers) {
+              if (isClosed && !wasMerged) {
+                // Revoke claim: remove label + unassign (best-effort).
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner,
+                    repo,
+                    issue_number: issueNumber,
+                    name: "claimed",
+                  });
+                  core.info(`Removed 'claimed' from #${issueNumber}`);
+                } catch (e) {
+                  core.info(
+                    `Could not remove 'claimed' from #${issueNumber} (benign): ${e.message}`,
+                  );
+                }
+                try {
+                  await github.rest.issues.removeAssignees({
+                    owner,
+                    repo,
+                    issue_number: issueNumber,
+                    assignees: [actor],
+                  });
+                  core.info(`Unassigned ${actor} from #${issueNumber}`);
+                } catch (e) {
+                  core.info(
+                    `Could not unassign ${actor} from #${issueNumber} (benign): ${e.message}`,
+                  );
+                }
+              } else if (!isClosed) {
+                // Apply claim: add label + assign (best-effort).
+                try {
+                  await github.rest.issues.addLabels({
+                    owner,
+                    repo,
+                    issue_number: issueNumber,
+                    labels: ["claimed"],
+                  });
+                  core.info(`Applied 'claimed' to #${issueNumber}`);
+                } catch (e) {
+                  core.info(
+                    `Could not apply 'claimed' to #${issueNumber} (benign): ${e.message}`,
+                  );
+                }
+                try {
+                  await github.rest.issues.addAssignees({
+                    owner,
+                    repo,
+                    issue_number: issueNumber,
+                    assignees: [actor],
+                  });
+                  core.info(`Assigned ${actor} to #${issueNumber}`);
+                } catch (e) {
+                  core.info(
+                    `Could not assign ${actor} to #${issueNumber} (benign): ${e.message}`,
+                  );
+                }
+              }
+              // If merged, GitHub auto-closes the issue; no label action needed.
+            }
