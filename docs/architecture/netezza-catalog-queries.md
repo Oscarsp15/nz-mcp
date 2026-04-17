@@ -4,6 +4,9 @@ Este documento es la fuente de verdad única para el SQL de catálogo usado por
 `nz-mcp`. Resume el comportamiento validado contra IBM Netezza Performance
 Server y reemplaza supuestos de borradores iniciales.
 
+Nota: las queries ahora viven en `src/nz_mcp/catalog/queries.py`. Este documento
+es la fuente de verdad humana; el módulo es la fuente de verdad de código.
+
 ## Alcance
 
 - Vistas de catálogo y SQL usados por las tools MCP.
