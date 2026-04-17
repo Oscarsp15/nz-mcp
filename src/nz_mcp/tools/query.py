@@ -121,8 +121,8 @@ def nz_query_select(
 @tool(
     name="nz_explain",
     description=(
-        "Return the Netezza EXPLAIN plan text for a SELECT (no execution). "
-        "Use after drafting a SELECT. "
+        "Return the Netezza EXPLAIN plan text for a read-only statement (e.g. SELECT, WITH...SELECT, or SHOW). "
+        "The plan is returned as text; the original statement is not executed for data. "
         "Do not use for mutations or DDL."
     ),
     mode="read",

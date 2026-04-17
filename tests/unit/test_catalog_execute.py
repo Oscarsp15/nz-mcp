@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from itertools import chain, repeat
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -208,7 +209,7 @@ def test_execute_select_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
     def _mono() -> float:
         return next(_seq)
 
-    monkeypatch.setattr(execute_mod.time, "monotonic", _mono)
+    monkeypatch.setattr(execute_mod, "time", SimpleNamespace(monotonic=_mono))
 
     out = execute_select(profile, "SELECT 1", max_rows=10, timeout_s=1)
     assert out["truncated"] is True
