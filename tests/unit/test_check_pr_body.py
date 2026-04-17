@@ -64,9 +64,7 @@ def test_heading_must_appear_verbatim() -> None:
 
 def test_case_sensitive_accents() -> None:
     """Accents count. `Que cambia` (sin acento) NO debe pasar por `¿Qué cambia?`."""
-    body = "## Que cambia?\ncontenido\n\n" + "\n\n".join(
-        f"{h}\ncontenido\n" for h in _REQUIRED[1:]
-    )
+    body = "## Que cambia?\ncontenido\n\n" + "\n\n".join(f"{h}\ncontenido\n" for h in _REQUIRED[1:])
     missing = _mod.missing_headings(body)
     assert "## ¿Qué cambia?" in missing
 
