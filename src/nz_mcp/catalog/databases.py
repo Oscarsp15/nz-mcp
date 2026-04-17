@@ -6,13 +6,11 @@ from contextlib import closing
 from typing import Any, Final, Protocol, cast
 
 from nz_mcp.auth import get_password
+from nz_mcp.catalog.queries import LIST_DATABASES
 from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
 from nz_mcp.errors import NetezzaError
 
-_LIST_DATABASES_SQL = (
-    "SELECT DATABASE, OWNER FROM _v_database WHERE (? IS NULL OR DATABASE LIKE ?) ORDER BY DATABASE"
-)
 _DATABASE_ROW_MIN_ITEMS: Final[int] = 2
 
 
@@ -36,7 +34,7 @@ def list_databases(profile: Profile, pattern: str | None = None) -> list[dict[st
     connection = cast(_ConnectionLike, open_connection(profile, password))
     try:
         with closing(connection.cursor()) as cursor:
-            cursor.execute(_LIST_DATABASES_SQL, params)
+            cursor.execute(LIST_DATABASES.sql, params)
             rows = cursor.fetchall()
     except Exception as exc:
         raise NetezzaError(
