@@ -72,7 +72,7 @@ def _probe_keyring() -> tuple[str, bool]:
     """Return ``(backend_class_name, available)`` using a non-destructive probe."""
     try:
         backend = keyring.get_keyring()
-    except Exception:
+    except Exception:  # noqa: BLE001, RUF100
         # Keyring backends may raise vendor/runtime-specific errors while being resolved.
         # The diagnostic command must degrade gracefully and never crash on local probing.
         return ("<unavailable>", False)
