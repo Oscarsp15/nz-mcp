@@ -1,0 +1,38 @@
+name: Stale claim watcher
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: read
+
+jobs:
+  warn:
+    name: Comentar issues claimed sin actividad
+    runs-on: ubuntu-latest
+    steps:
+      - name: Listar y comentar
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const days = 7;
+            const cutoff = new Date(Date.now() - days * 86400_000);
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: "open", labels: "claimed", per_page: 100,
+            });
+            for (const issue of issues) {
+              if (issue.pull_request) continue;
+              const updated = new Date(issue.updated_at);
+              if (updated < cutoff) {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: issue.number,
+                  body: `🤖 Este issue lleva ${days}+ días con label \`claimed\` sin actividad reciente. ` +
+                        `Si sigues trabajando, deja un comentario. Si abandonaste, otra IA puede reclamarlo ` +
+                        `según docs/standards/issue-workflow.md.`,
+                });
+              }
+            }

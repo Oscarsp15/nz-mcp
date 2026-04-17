@@ -1,0 +1,94 @@
+name: ✨ Feature
+description: Una capacidad nueva (no una tool — para tools usa "New tool")
+title: "feat(<area>): <descripción breve>"
+labels: ["triage", "type/feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Lee primero [docs/standards/issue-workflow.md](../../blob/main/docs/standards/issue-workflow.md).
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexto / motivación *
+      description: ¿Qué problema resuelve? ¿Para quién?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Propuesta *
+      description: Cómo debería funcionar — lo más concreto posible.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria *
+      value: |
+        - [ ] <criterio verificable 1>
+        - [ ] <criterio verificable 2>
+        - [ ] CHANGELOG entrada bilingüe en `Added`
+    validations:
+      required: true
+
+  - type: input
+    id: keywords
+    attributes:
+      label: Keywords AGENTS.md *
+    validations:
+      required: true
+
+  - type: textarea
+    id: docs
+    attributes:
+      label: Docs obligatorios *
+    validations:
+      required: true
+
+  - type: dropdown
+    id: role
+    attributes:
+      label: Rol esperado *
+      options:
+        - Backend Developer
+        - Data Engineer
+        - Security Engineer
+        - QA Engineer
+        - Tech Lead
+        - Release Engineer
+        - Technical Writer
+        - DX Engineer
+    validations:
+      required: true
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: Qué explícitamente NO hacer en este PR
+
+  - type: dropdown
+    id: complexity
+    attributes:
+      label: Complejidad estimada *
+      options: ["S", "M", "L", "XL"]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Prioridad *
+      options: ["P0", "P1", "P2", "P3"]
+    validations:
+      required: true
+
+  - type: input
+    id: blocked_by
+    attributes:
+      label: Bloqueado por
+      description: IDs de issues que deben cerrarse antes (#N)

@@ -1,0 +1,55 @@
+name: 🔐 Issue de seguridad (NO confidencial)
+description: Para temas de seguridad NO sensibles. Para vulnerabilidades, usa Security Advisories.
+title: "security: <descripción breve>"
+labels: ["triage", "type/security", "area/security"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ⚠️ **Si es una vulnerabilidad explotable, NO abras issue público.**
+        Usa [Security Advisories](https://github.com/Oscarsp15/nz-mcp/security/advisories/new).
+
+        Esta plantilla es para mejoras genéricas de seguridad: hardening, refactor de `sql_guard`,
+        nuevos casos adversariales, etc.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexto *
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Propuesta *
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria *
+      value: |
+        - [ ] Tests adversariales nuevos (≥ 3)
+        - [ ] Cobertura `sql_guard.py` y `auth.py` sigue 100 %
+        - [ ] `docs/architecture/security-model.md` actualizado si cambia el modelo
+        - [ ] Si reduce estrictez: ADR + aprobación humana
+    validations:
+      required: true
+
+  - type: dropdown
+    id: complexity
+    attributes:
+      label: Complejidad estimada *
+      options: ["S", "M", "L", "XL"]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Prioridad *
+      options: ["P0", "P1", "P2", "P3"]
+    validations:
+      required: true

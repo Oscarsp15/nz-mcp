@@ -1,0 +1,131 @@
+# Labels canónicos del repo. Sincronizados por .github/workflows/sync-labels.yml.
+# No crear labels ad-hoc en GitHub UI — añadir aquí y abrir PR.
+
+# === Estado del issue / PR ===
+- name: triage
+  color: "d4c5f9"
+  description: "Recién creado, sin clasificar"
+- name: ai-ready
+  color: "0e8a16"
+  description: "Bien definido, una IA puede tomarlo"
+- name: needs-spec
+  color: "fbca04"
+  description: "Falta definición; humano debe afinar"
+- name: human-only
+  color: "b60205"
+  description: "Requiere humano (decisión arquitectónica, validación de seguridad)"
+- name: claimed
+  color: "5319e7"
+  description: "Una IA está trabajando en este issue"
+- name: blocked
+  color: "e99695"
+  description: "Depende de otro issue/PR sin resolver"
+- name: wontfix
+  color: "ffffff"
+  description: "Decidido no implementar"
+- name: stale-branch
+  color: "c2e0c6"
+  description: "Branch sin actividad > 5 días"
+
+# === Tipo ===
+- name: type/bug
+  color: "d73a4a"
+  description: "Algo no funciona"
+- name: type/feature
+  color: "a2eeef"
+  description: "Capacidad nueva"
+- name: type/tool
+  color: "1d76db"
+  description: "Tool MCP nueva o cambio en una existente"
+- name: type/security
+  color: "b60205"
+  description: "Seguridad"
+- name: type/refactor
+  color: "fbca04"
+  description: "Refactor sin cambio de comportamiento"
+- name: type/docs
+  color: "0075ca"
+  description: "Documentación"
+- name: type/adr
+  color: "5319e7"
+  description: "Decisión arquitectónica"
+- name: type/chore
+  color: "c5def5"
+  description: "Mantenimiento"
+- name: type/test
+  color: "bfd4f2"
+  description: "Tests"
+
+# === Área ===
+- name: area/security
+  color: "b60205"
+  description: "sql_guard, auth, sanitización"
+- name: area/tools
+  color: "1d76db"
+  description: "tools/, registro, contrato"
+- name: area/catalog
+  color: "1d76db"
+  description: "catalog/, queries _v_*"
+- name: area/connection
+  color: "1d76db"
+  description: "Driver, pool, streaming"
+- name: area/cli
+  color: "c5def5"
+  description: "CLI typer wizard"
+- name: area/server
+  color: "c5def5"
+  description: "MCP server, handshake"
+- name: area/i18n
+  color: "c2e0c6"
+  description: "Mensajes ES/EN"
+- name: area/ci
+  color: "c5def5"
+  description: "GitHub Actions, releases"
+- name: area/docs
+  color: "0075ca"
+  description: "Documentación"
+
+# === Prioridad ===
+- name: "priority/P0"
+  color: "b60205"
+  description: "Bloqueante"
+- name: "priority/P1"
+  color: "d93f0b"
+  description: "Siguiente release"
+- name: "priority/P2"
+  color: "fbca04"
+  description: "Cuando se pueda"
+- name: "priority/P3"
+  color: "c2e0c6"
+  description: "Nice-to-have"
+
+# === Complejidad ===
+- name: "complexity/S"
+  color: "c2e0c6"
+  description: "< 100 LoC"
+- name: "complexity/M"
+  color: "fbca04"
+  description: "100-400 LoC"
+- name: "complexity/L"
+  color: "d93f0b"
+  description: "400-1000 LoC"
+- name: "complexity/XL"
+  color: "b60205"
+  description: "> 1000 LoC — partir"
+
+# === Otros ===
+- name: good-first-issue
+  color: "7057ff"
+  description: "Onboarding fácil"
+- name: help-wanted
+  color: "008672"
+  description: "Owner pide contribuciones"
+- name: breaking-change
+  color: "b60205"
+  description: "Afecta contrato público"
+- name: regression
+  color: "d73a4a"
+  description: "Algo que funcionaba dejó de funcionar"
+- name: dependencies
+  color: "0366d6"
+  description: "Dependabot u otras actualizaciones de deps"

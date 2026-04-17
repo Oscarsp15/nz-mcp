@@ -1,0 +1,132 @@
+name: 🐛 Bug
+description: Algo no funciona como debería
+title: "fix(<area>): <descripción breve>"
+labels: ["triage", "type/bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Lee primero [docs/standards/issue-workflow.md](../../blob/main/docs/standards/issue-workflow.md).
+        Todos los campos marcados con * son obligatorios.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexto *
+      description: ¿Qué intentabas hacer y qué pasó?
+      placeholder: |
+        Al ejecutar `nz_query_select` con SQL "SELECT * FROM X" obtengo ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Comportamiento esperado *
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Comportamiento real *
+      description: Pega traceback completo si aplica. NO incluyas credenciales.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Pasos para reproducir *
+      placeholder: |
+        1. nz-mcp init con perfil X
+        2. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria *
+      description: Lista verificable de qué debe estar arreglado.
+      value: |
+        - [ ] Test de regresión `test_X` añadido y verde
+        - [ ] CHANGELOG entrada bilingüe en `Fixed`
+        - [ ] Comportamiento correcto verificado en local
+    validations:
+      required: true
+
+  - type: input
+    id: keywords
+    attributes:
+      label: Keywords AGENTS.md *
+      description: Keywords de la tabla de enrutamiento que aplican
+      placeholder: "sql_guard, parser SQL"
+    validations:
+      required: true
+
+  - type: textarea
+    id: docs
+    attributes:
+      label: Docs obligatorios *
+      value: |
+        - docs/standards/pr-audit.md
+        - <añade los que apliquen>
+    validations:
+      required: true
+
+  - type: dropdown
+    id: role
+    attributes:
+      label: Rol esperado *
+      options:
+        - Backend Developer
+        - Data Engineer
+        - Security Engineer
+        - QA Engineer
+        - Tech Lead
+        - Release Engineer
+        - Technical Writer
+        - DX Engineer
+    validations:
+      required: true
+
+  - type: dropdown
+    id: complexity
+    attributes:
+      label: Complejidad estimada *
+      options:
+        - "S — < 100 LoC"
+        - "M — 100-400 LoC"
+        - "L — 400-1000 LoC"
+        - "XL — > 1000 LoC (partir)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Prioridad *
+      options:
+        - "P0 — bloqueante"
+        - "P1 — siguiente release"
+        - "P2 — cuando se pueda"
+        - "P3 — nice-to-have"
+    validations:
+      required: true
+
+  - type: input
+    id: env
+    attributes:
+      label: Entorno
+      placeholder: "nz-mcp X.Y.Z, Python 3.11, Windows 11, Netezza NPS 11.2.x"
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Verificaciones
+      options:
+        - label: No incluí credenciales, hostnames productivos, ni datos sensibles.
+          required: true
+        - label: Busqué issues abiertos similares antes de crear este.
+          required: true

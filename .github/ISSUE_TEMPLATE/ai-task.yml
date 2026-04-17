@@ -1,0 +1,101 @@
+name: 🤖 Tarea AI-pickup (genérica)
+description: Una tarea bien definida lista para que cualquier agente IA la tome
+title: "<tipo>(<area>): <descripción breve>"
+labels: ["ai-ready"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Usa esta plantilla **solo** para tareas ya bien especificadas y triajeadas.
+        Lee primero [docs/standards/issue-workflow.md](../../blob/main/docs/standards/issue-workflow.md).
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexto *
+      description: Suficiente para que una IA con cero conocimiento previo entienda
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria *
+      description: Lista verificable
+    validations:
+      required: true
+
+  - type: input
+    id: keywords
+    attributes:
+      label: Keywords AGENTS.md *
+      placeholder: "ej: nueva tool, sql_guard, tests"
+    validations:
+      required: true
+
+  - type: textarea
+    id: docs
+    attributes:
+      label: Docs obligatorios *
+      description: Lista exacta de archivos a leer antes de empezar
+    validations:
+      required: true
+
+  - type: dropdown
+    id: role
+    attributes:
+      label: Rol esperado *
+      options:
+        - Backend Developer
+        - Data Engineer
+        - Security Engineer
+        - QA Engineer
+        - Tech Lead
+        - Release Engineer
+        - Technical Writer
+        - DX Engineer
+    validations:
+      required: true
+
+  - type: textarea
+    id: files
+    attributes:
+      label: Archivos esperados (hint)
+      description: Lista no exhaustiva. Tocar archivos no listados se cuestiona en auditoría.
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+
+  - type: dropdown
+    id: complexity
+    attributes:
+      label: Complejidad estimada *
+      options: ["S", "M", "L", "XL"]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Prioridad *
+      options: ["P0", "P1", "P2", "P3"]
+    validations:
+      required: true
+
+  - type: input
+    id: blocked_by
+    attributes:
+      label: Bloqueado por
+      description: "#N de issues prerequisito"
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ### 🤖 Para la IA que tome este issue
+        1. Comenta: `🤖 Tomando este issue. Sesión: <id>.`
+        2. Auto-asígnate y añade label `claimed`.
+        3. Crea draft PR con `Closes #<n>` en el cuerpo.
+        4. Sigue [docs/standards/pr-audit.md](../../blob/main/docs/standards/pr-audit.md) antes de pedir review.

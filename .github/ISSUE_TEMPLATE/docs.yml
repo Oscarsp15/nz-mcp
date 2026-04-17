@@ -1,0 +1,60 @@
+name: 📝 Documentación
+description: Mejorar README, AGENTS.md, docs/ o tool descriptions
+title: "docs(<area>): <descripción breve>"
+labels: ["triage", "type/docs", "area/docs"]
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Qué falta o está mal *
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Propuesta *
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Alcance *
+      options:
+        - label: README.md (español)
+        - label: README.en.md (inglés)
+        - label: AGENTS.md
+        - label: docs/architecture/
+        - label: docs/roles/
+        - label: docs/standards/
+        - label: docs/actions/
+        - label: docs/adr/
+        - label: Tool descriptions (en código)
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria *
+      value: |
+        - [ ] Cambios reflejados en ES y EN si afecta a docs públicas.
+        - [ ] Sin links rotos.
+        - [ ] Terminología coherente con `docs/roles/technical-writer.md`.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: complexity
+    attributes:
+      label: Complejidad estimada *
+      options: ["S", "M", "L", "XL"]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Prioridad *
+      options: ["P0", "P1", "P2", "P3"]
+    validations:
+      required: true

@@ -1,0 +1,109 @@
+name: Validate conventions
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  branch-name:
+    name: Branch name
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate branch name
+        run: |
+          BRANCH="${{ github.head_ref }}"
+          echo "Branch: $BRANCH"
+          python - <<'PY'
+          import os, re, sys
+          branch = os.environ["BRANCH"]
+          regex = re.compile(
+              r"^(feat|fix|chore|refactor|docs|test|security|perf|build|ci)/"
+              r"(\d+-)?[a-z0-9]+(-[a-z0-9]+){0,8}$"
+          )
+          release = re.compile(r"^release/v\d+\.\d+\.\d+(-(alpha|beta|rc)\.\d+)?$")
+          if release.match(branch):
+              sys.exit(0)
+          if not regex.match(branch):
+              print(f"::error::Branch '{branch}' no cumple regex. Ver docs/standards/git-workflow.md sección 1.")
+              sys.exit(1)
+          if len(branch) > 50:
+              print(f"::error::Branch '{branch}' excede 50 caracteres ({len(branch)}).")
+              sys.exit(1)
+          PY
+        env:
+          BRANCH: ${{ github.head_ref }}
+
+  pr-title:
+    name: PR title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: python scripts/check_pr_title.py
+
+  pr-body:
+    name: PR body has Closes/Refs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify Closes #N or Refs #N
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          python - <<'PY'
+          import os, re, sys
+          body = os.environ.get("PR_BODY", "") or ""
+          if not re.search(r"\b(Closes|Closed|Close|Fixes|Fixed|Fix|Resolves|Resolved|Resolve|Refs|Ref)\s+#\d+\b", body, re.I):
+              print("::error::El cuerpo del PR debe contener 'Closes #N' o 'Refs #N'. Ver docs/standards/git-workflow.md sección 3.")
+              sys.exit(1)
+          PY
+
+  commits:
+    name: Commit subjects
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate every commit subject in PR
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python - <<'PY'
+          import os, re, subprocess, sys
+          base = os.environ["BASE_SHA"]
+          head = os.environ["HEAD_SHA"]
+          out = subprocess.check_output(["git", "log", "--format=%H%x09%s", f"{base}..{head}"], text=True)
+          regex = re.compile(
+              r"^(feat|fix|chore|refactor|docs|test|security|perf|build|ci)"
+              r"(\([a-z0-9-]+\))?(!)?: [^\s].{0,71}$"
+          )
+          failed = []
+          for line in out.strip().splitlines():
+              sha, _, subj = line.partition("\t")
+              if subj.startswith(("Merge ", "Revert ", "fixup!", "squash!")):
+                  continue
+              if not regex.match(subj):
+                  failed.append((sha[:8], subj))
+          if failed:
+              for sha, subj in failed:
+                  print(f"::error::commit {sha}: subject '{subj}' no cumple regex.")
+              sys.exit(1)
+          PY

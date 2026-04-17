@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+pip-wheel-metadata/
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+.env
+
+# Test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.cache/
+.hypothesis/
+
+# Mypy / linters
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Secretos / config local
+~/.nz-mcp/
+*.pem
+*.key
+
+# Build / lock
+poetry.lock
+uv.lock
+
+# Logs
+*.log
+logs/

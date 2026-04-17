@@ -1,0 +1,127 @@
+name: 🛠️ Nueva tool MCP
+description: Proponer o implementar una tool nueva
+title: "feat(tools): añade nz_<verbo>_<objeto>"
+labels: ["triage", "type/tool", "area/tools"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Pre-requisito: leer [docs/actions/add-tool.md](../../blob/main/docs/actions/add-tool.md) y [docs/architecture/tools-contract.md](../../blob/main/docs/architecture/tools-contract.md).
+
+  - type: input
+    id: tool_name
+    attributes:
+      label: Nombre propuesto *
+      placeholder: "nz_<verbo>_<objeto>"
+    validations:
+      required: true
+
+  - type: textarea
+    id: purpose
+    attributes:
+      label: Propósito en una frase *
+      description: "Qué hace, para qué se usa. Imperativo, en español."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Modo requerido *
+      options: ["read", "write", "admin"]
+    validations:
+      required: true
+
+  - type: textarea
+    id: input_schema
+    attributes:
+      label: Input schema (preliminar) *
+      description: Tabla con `nombre | tipo | required | descripción`
+      value: |
+        | Input | Tipo | Required | Descripción |
+        |---|---|---|---|
+        |  |  |  |  |
+    validations:
+      required: true
+
+  - type: textarea
+    id: output_schema
+    attributes:
+      label: Output schema (preliminar) *
+      description: Ejemplo JSON de la respuesta
+      placeholder: |
+        ```json
+        {
+          "...": "..."
+        }
+        ```
+    validations:
+      required: true
+
+  - type: textarea
+    id: errors
+    attributes:
+      label: Errores posibles *
+      description: Códigos estables que esta tool puede devolver
+      value: |
+        - `GUARD_REJECTED`
+        - `PERMISSION_DENIED`
+        - <otros aplicables>
+    validations:
+      required: true
+
+  - type: input
+    id: description_en
+    attributes:
+      label: Tool description (inglés, < 200 chars) *
+      placeholder: "Execute X. Use for Y. Do not use for Z."
+    validations:
+      required: true
+
+  - type: textarea
+    id: annotations
+    attributes:
+      label: Annotations MCP *
+      value: |
+        - `readOnlyHint`: <true|false>
+        - `destructiveHint`: <true|false>
+        - `idempotentHint`: <true|false>
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria *
+      value: |
+        - [ ] Entrada en `docs/architecture/tools-contract.md`
+        - [ ] Implementación en `src/nz_mcp/tools/<modulo>.py`
+        - [ ] Queries en `src/nz_mcp/catalog/<dominio>.py` (si aplica)
+        - [ ] Mensajes ES/EN en `i18n.py`
+        - [ ] Tests unit con mocks (≥ 1 happy + ≥ 1 error tipado)
+        - [ ] Test de contrato MCP cubre la tool
+        - [ ] Test de integration local opcional
+        - [ ] CHANGELOG entrada bilingüe en `Added`
+    validations:
+      required: true
+
+  - type: dropdown
+    id: complexity
+    attributes:
+      label: Complejidad estimada *
+      options: ["S", "M", "L", "XL"]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Prioridad *
+      options: ["P0", "P1", "P2", "P3"]
+    validations:
+      required: true
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope

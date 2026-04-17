@@ -1,0 +1,59 @@
+name: ♻️ Refactor / deuda técnica
+description: Cambiar la forma del código sin cambiar el comportamiento
+title: "refactor(<area>): <descripción breve>"
+labels: ["triage", "type/refactor"]
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexto *
+      description: ¿Qué huele mal? ¿Qué cuesta mantener / extender?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Propuesta de refactor *
+    validations:
+      required: true
+
+  - type: textarea
+    id: invariants
+    attributes:
+      label: Invariantes a preservar *
+      description: "Tests que deben seguir verdes, comportamiento observable que no cambia"
+      value: |
+        - Tests existentes verdes sin cambios.
+        - Cobertura no baja.
+        - Sin cambios en `tools-contract.md`.
+        - Sin cambios en CHANGELOG (refactor no observable por usuario).
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria *
+      value: |
+        - [ ] Diff es solo refactor (no funcional).
+        - [ ] Tests existentes pasan sin modificación.
+        - [ ] Si > 5 archivos: ADR creado.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: complexity
+    attributes:
+      label: Complejidad estimada *
+      options: ["S", "M", "L", "XL"]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Prioridad *
+      options: ["P0", "P1", "P2", "P3"]
+    validations:
+      required: true

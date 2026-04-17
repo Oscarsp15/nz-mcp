@@ -1,0 +1,22 @@
+# CODEOWNERS — review obligatoria del owner en archivos sensibles.
+# Sintaxis: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default
+*                                       @Oscarsp15
+
+# Alta sensibilidad — ver AGENTS.md
+/src/nz_mcp/sql_guard.py                @Oscarsp15
+/src/nz_mcp/auth.py                     @Oscarsp15
+/src/nz_mcp/connection.py               @Oscarsp15
+
+# CI / release / convenciones
+/.github/                               @Oscarsp15
+/scripts/                               @Oscarsp15
+
+# Spec y arquitectura
+/AGENTS.md                              @Oscarsp15
+/docs/architecture/                     @Oscarsp15
+/docs/adr/                              @Oscarsp15
+/docs/standards/pr-audit.md             @Oscarsp15
+/docs/standards/issue-workflow.md       @Oscarsp15
+/docs/standards/git-workflow.md         @Oscarsp15

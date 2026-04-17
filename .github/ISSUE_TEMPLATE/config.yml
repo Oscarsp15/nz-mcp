@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Reporte de seguridad
+    url: https://github.com/Oscarsp15/nz-mcp/security/advisories/new
+    about: Reporta una vulnerabilidad de forma privada (NO abras issue público).
+  - name: Discusión / pregunta
+    url: https://github.com/Oscarsp15/nz-mcp/discussions
+    about: Para preguntas abiertas, ideas o ayuda con configuración.

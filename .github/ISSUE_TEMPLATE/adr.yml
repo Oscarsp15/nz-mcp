@@ -1,0 +1,55 @@
+name: 🏛️ Decisión arquitectónica (ADR)
+description: Proponer una decisión que requiere ADR
+title: "adr: <decisión en imperativo>"
+labels: ["triage", "type/adr", "human-only"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Las decisiones arquitectónicas son `human-only` por defecto: requieren validación del owner.
+        Si propones algo que reduce estrictez de seguridad, marca también `area/security`.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexto / tensión *
+      description: ¿Qué situación lo motiva? ¿Qué trade-off existe?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Decisión propuesta *
+      description: Una frase. Sin condicionales.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativas consideradas *
+      value: |
+        1. <alternativa> — por qué no.
+        2. <alternativa> — por qué no.
+    validations:
+      required: true
+
+  - type: textarea
+    id: consequences
+    attributes:
+      label: Consecuencias *
+      value: |
+        - Positivas:
+        - Negativas / costes:
+        - Qué monitorizar para saber si fue buena idea:
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Prioridad *
+      options: ["P0", "P1", "P2", "P3"]
+    validations:
+      required: true

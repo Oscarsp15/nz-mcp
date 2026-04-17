@@ -1,0 +1,141 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nz-mcp"
+version = "0.1.0a0"
+description = "MCP server for IBM Netezza Performance Server"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Oscar Sirlopú", email = "oscar.sirlopu@gmail.com" },
+]
+keywords = ["mcp", "netezza", "ibm", "sql", "claude", "anthropic", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
+dependencies = [
+    "mcp>=1.2.0",
+    "nzpy>=1.16",
+    "pydantic>=2.6",
+    "sqlglot>=25.0",
+    "keyring>=25.0",
+    "structlog>=24.1",
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "pytest-mock>=3.12",
+    "pytest-asyncio>=0.23",
+    "pytest-xdist>=3.5",
+    "hypothesis>=6.100",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "pre-commit>=3.7",
+    "types-toml",
+]
+
+[project.urls]
+Homepage = "https://github.com/Oscarsp15/nz-mcp"
+Repository = "https://github.com/Oscarsp15/nz-mcp"
+Issues = "https://github.com/Oscarsp15/nz-mcp/issues"
+Changelog = "https://github.com/Oscarsp15/nz-mcp/blob/main/CHANGELOG.md"
+
+[project.scripts]
+nz-mcp = "nz_mcp.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nz_mcp"]
+
+# ----- ruff -----
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",   # pycodestyle / pyflakes
+    "I",             # isort
+    "N",             # pep8-naming
+    "UP",            # pyupgrade
+    "B",             # bugbear
+    "S",             # bandit
+    "C4",            # comprehensions
+    "SIM",           # simplify
+    "RUF",           # ruff-specific
+    "PL",            # pylint subset
+    "TID",           # tidy imports
+    "ARG",           # unused-arguments
+    "PTH",           # pathlib
+]
+ignore = [
+    "PLR0913",       # too many arguments — covered by maintainability.md threshold
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "PLR2004", "ARG", "PLC0415"]   # assert / magic numbers / unused fixture args / nested imports for fixture isolation
+"src/nz_mcp/i18n.py" = ["E501"]                       # message strings may exceed line length
+"scripts/**" = ["S607", "PLR0911", "PLR2004", "T201"] # CLI utility scripts
+
+# ----- mypy -----
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["nzpy.*", "keyring.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_decorators = false
+disable_error_code = ["explicit-any"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+# ----- pytest -----
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers --strict-config"
+testpaths = ["tests"]
+markers = [
+    "contract: MCP conformance tests",
+    "adversarial: SQL guard bypass attempts",
+    "integration: requires real Netezza (run locally with VPN)",
+    "slow: > 5s",
+]
+
+# ----- coverage -----
+[tool.coverage.run]
+branch = true
+source = ["src/nz_mcp"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
+fail_under = 85
+show_missing = true
