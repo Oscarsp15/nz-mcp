@@ -16,11 +16,13 @@ from nz_mcp.tools.registry import TOOLS
 EXPECTED_V010A0: set[str] = {
     "nz_current_profile",
     "nz_describe_table",
+    "nz_explain",
     "nz_get_view_ddl",
     "nz_list_databases",
     "nz_list_schemas",
     "nz_list_tables",
     "nz_list_views",
+    "nz_query_select",
     "nz_switch_profile",
 }
 

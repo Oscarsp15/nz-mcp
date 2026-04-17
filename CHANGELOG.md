@@ -13,6 +13,8 @@ Cada entrada se documenta en **español** y **english**.
 - EN: driver error messages in `open_connection`, `list_databases`, and `probe-catalog` are passed through `sanitize()` with `known_secrets` so passwords are not leaked in MCP-exposed `detail` fields.
 
 ### Added
+- ES: tools `nz_query_select` y `nz_explain` — ejecución de `SELECT` validado con `sql_guard`, `LIMIT` automático/streaming, y planes `EXPLAIN`/`EXPLAIN VERBOSE` sin ejecutar la query.
+- EN: `nz_query_select` and `nz_explain` tools — `sql_guard`-validated `SELECT` execution with automatic `LIMIT`/streaming, and `EXPLAIN`/`EXPLAIN VERBOSE` plans without executing the query.
 - ES: tool `nz_describe_table` para metadata de tabla (columnas, distribución, PK, FK) vía catálogo `_v_*`.
 - EN: `nz_describe_table` tool for table metadata (columns, distribution, PK, FK) via `_v_*` catalog views.
 - ES: tool `nz_get_view_ddl` para obtener el DDL `CREATE VIEW` desde `_v_view` (cross-database).

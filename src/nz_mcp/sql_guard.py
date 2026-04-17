@@ -108,8 +108,12 @@ def _classify(expr: exp.Expr) -> StatementKind:
     for cls, kind in _SIMPLE_KIND_MAP:
         if isinstance(expr, cls):
             return kind
-    if isinstance(expr, exp.Command) and expr.name.upper() == "EXPLAIN":
-        return StatementKind.EXPLAIN
+    if isinstance(expr, exp.Command):
+        cmd = str(expr.name).upper()
+        if cmd == "EXPLAIN":
+            return StatementKind.EXPLAIN
+        if cmd == "SHOW":
+            return StatementKind.SHOW
     return StatementKind.UNKNOWN
 
 

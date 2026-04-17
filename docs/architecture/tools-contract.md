@@ -55,7 +55,7 @@ Devuelve el plan de ejecución de una query sin ejecutarla.
 
 | Input | Tipo | Descripción |
 |---|---|---|
-| `sql` | string (required) | Query a analizar (SELECT). |
+| `sql` | string (required) | Sentencia a analizar (`SELECT` / `WITH … SELECT`, o `SHOW …` cuando el dialecto la parsea como comando de solo lectura). |
 | `verbose` | bool (default: false) | `EXPLAIN VERBOSE` vs `EXPLAIN`. |
 
 **Output**: `{ "plan": "...texto del plan..." }`
