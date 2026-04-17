@@ -154,6 +154,20 @@ mode = "write"
 
 El sanitizer vive en `i18n.py`-adjacent o en un helper `logging_utils.py`; debe tener test que meta un password conocido en un dict y verifique que el log output no lo contiene.
 
+## Cross-database identifier interpolation
+
+Las queries de catálogo cross-database usan el sentinel interno `<BD>..` y se renderizan
+en runtime antes del `cursor.execute()`. Como `nzpy` no parametriza identificadores
+(solo valores), el nombre de base de datos se valida con regex estricta:
+
+- Patrón obligatorio: `^[A-Z][A-Z0-9_]{0,127}$`
+- Normalización previa permitida: `database.strip().upper()`
+- Si falla, lanzar `InvalidInputError(code="INVALID_DATABASE_NAME")`
+- El helper debe fallar si queda cualquier `<BD>` sin reemplazar en el SQL final
+
+Invariante de seguridad: no concatenar identifiers sin pasar por este validador.
+Relajar este patrón requiere ADR y aprobación humana explícita.
+
 ## Checklist para Security Engineer antes de commit
 
 - [ ] Todo SQL ejecutable pasa por `sql_guard.validate()` en el camino.
