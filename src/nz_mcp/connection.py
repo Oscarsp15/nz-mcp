@@ -28,7 +28,8 @@ def open_connection(profile: Profile, password: str) -> object:
             application_name=APPLICATION_NAME,
             securityLevel=1,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001, RUF100
+        # nzpy may raise unchecked driver errors; we surface them as typed ConnectionError for MCP.
         raise NzConnectionError(
             host=profile.host,
             port=profile.port,
