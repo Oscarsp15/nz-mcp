@@ -1,4 +1,5 @@
 """connection.py — stub raises NOT_IMPLEMENTED in v0.1.0a0."""
+
 from __future__ import annotations
 
 import pytest

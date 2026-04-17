@@ -78,7 +78,7 @@ def test_connection_cmd(
     """Verify connectivity to Netezza (stubbed in v0.1.0a0)."""
     target = profile or "<active>"
     typer.secho(
-        f"[stub] test-connection({target}) — no implementado aún. Issue #1.",
+        f"[stub] test-connection({target}) — no implementado aún. Issue #4.",
         fg=typer.colors.YELLOW,
     )
     raise typer.Exit(code=0)
@@ -88,7 +88,7 @@ def test_connection_cmd(
 def serve_cmd() -> None:
     """Run the MCP server over stdio (stubbed in v0.1.0a0)."""
     typer.secho(
-        "[stub] serve — la integración con el SDK 'mcp' llega en issue #2.\n"
+        "[stub] serve — la integración con el SDK 'mcp' llega en issue #5.\n"
         "Mientras tanto el registro de tools es funcional y testeado.",
         fg=typer.colors.YELLOW,
         err=True,
