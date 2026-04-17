@@ -81,6 +81,25 @@ jobs:
               sys.exit(1)
           PY
 
+  pr-body-structure:
+    name: PR body structure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip for bots
+        if: github.actor == 'dependabot[bot]'
+        run: echo "Skipping for ${{ github.actor }} — bots have their own PR body format."
+      - uses: actions/checkout@v6
+        if: github.actor != 'dependabot[bot]'
+      - uses: actions/setup-python@v6
+        if: github.actor != 'dependabot[bot]'
+        with:
+          python-version: "3.11"
+      - name: Validate required template headings
+        if: github.actor != 'dependabot[bot]'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: python scripts/check_pr_body.py
+
   commits:
     name: Commit subjects
     runs-on: ubuntu-latest
