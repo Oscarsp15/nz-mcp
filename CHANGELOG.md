@@ -13,6 +13,8 @@ Cada entrada se documenta en **español** y **english**.
 - EN: driver error messages in `open_connection`, `list_databases`, and `probe-catalog` are passed through `sanitize()` with `known_secrets` so passwords are not leaked in MCP-exposed `detail` fields.
 
 ### Added
+- ES: paquete de procedures — `nz_list_procedures`, `nz_describe_procedure`, `nz_get_procedure_ddl`, `nz_get_procedure_section` (parser NZPLSQL por marcadores, rangos de líneas acotados).
+- EN: procedures package — `nz_list_procedures`, `nz_describe_procedure`, `nz_get_procedure_ddl`, `nz_get_procedure_section` (marker-based NZPLSQL parser, capped line ranges).
 - ES: tools `nz_table_sample`, `nz_table_stats` y `nz_get_table_ddl` — muestra de filas (`execute_select`), estadísticas de almacenamiento/datasets humanos IEC, y DDL `CREATE TABLE` reconstruido desde catálogo.
 - EN: `nz_table_sample`, `nz_table_stats`, and `nz_get_table_ddl` tools — row sampling via `execute_select`, storage/IEC-formatted stats, and catalog-reconstructed `CREATE TABLE` DDL.
 - ES: módulos `catalog/formatters.py` (`format_bytes_iec`) y `catalog/ddl_builder.py` (`build_create_table_ddl`).

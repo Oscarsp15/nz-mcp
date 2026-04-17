@@ -91,6 +91,14 @@ class ObjectNotFoundError(NzMcpError):
     code = "OBJECT_NOT_FOUND"
 
 
+class SectionNotFoundError(NzMcpError):
+    code = "SECTION_NOT_FOUND"
+
+
+class OverloadAmbiguousError(NzMcpError):
+    code = "OVERLOAD_AMBIGUOUS"
+
+
 # --- Tool input validation ----------------------------------------------------
 
 

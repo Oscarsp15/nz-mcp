@@ -159,7 +159,7 @@ LIST_PROCEDURES: Final[CatalogQuery] = CatalogQuery(
 GET_PROCEDURE_DDL: Final[CatalogQuery] = CatalogQuery(
     id="get_procedure_ddl",
     sql=(
-        "SELECT PROCEDURE, ARGUMENTS, RETURNS, PROCEDURESOURCE, PROCEDURESIGNATURE "
+        "SELECT PROCEDURE, OWNER, ARGUMENTS, RETURNS, PROCEDURESOURCE, PROCEDURESIGNATURE "
         "FROM <BD>.._V_PROCEDURE WHERE SCHEMA = UPPER(?) AND PROCEDURE = UPPER(?)"
     ),
     catalog_views=("_V_PROCEDURE",),
@@ -171,7 +171,7 @@ GET_PROCEDURE_DDL: Final[CatalogQuery] = CatalogQuery(
 GET_PROCEDURE_SECTION: Final[CatalogQuery] = CatalogQuery(
     id="get_procedure_section",
     sql=(
-        "SELECT PROCEDURE, ARGUMENTS, RETURNS, PROCEDURESOURCE, PROCEDURESIGNATURE "
+        "SELECT PROCEDURE, OWNER, ARGUMENTS, RETURNS, PROCEDURESOURCE, PROCEDURESIGNATURE "
         "FROM <BD>.._V_PROCEDURE WHERE SCHEMA = UPPER(?) AND PROCEDURE = UPPER(?)"
     ),
     catalog_views=("_V_PROCEDURE",),
