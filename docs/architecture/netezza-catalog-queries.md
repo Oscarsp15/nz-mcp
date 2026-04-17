@@ -1,70 +1,70 @@
-# Netezza Catalog Queries (Validated)
+# Queries del catálogo Netezza (validadas)
 
-This document is the single source of truth for catalog SQL used by `nz-mcp`.
-It captures validated behavior for IBM Netezza Performance Server and replaces
-assumptions from early drafts.
+Este documento es la fuente de verdad única para el SQL de catálogo usado por
+`nz-mcp`. Resume el comportamiento validado contra IBM Netezza Performance
+Server y reemplaza supuestos de borradores iniciales.
 
-## Scope
+## Alcance
 
-- Catalog views and SQL used by MCP tools.
-- Version-specific column availability.
-- Cross-database notation `<BD>.._V_*`.
-- Fallbacks when expected columns/commands are unavailable.
+- Vistas de catálogo y SQL usados por las tools MCP.
+- Disponibilidad de columnas específica por versión.
+- Notación cross-database `<BD>.._V_*`.
+- Fallbacks cuando columnas o comandos esperados no están disponibles.
 
-Out of scope:
+Fuera de alcance:
 
-- Application code changes.
-- Query centralization refactor (`queries.py`).
+- Cambios de código de aplicación.
+- Refactor de centralización de queries (`queries.py`).
 
-## Validated NPS Versions Matrix
+## Matriz de versiones NPS validadas
 
-Current validation baseline:
+Baseline actual de validación:
 
 - NPS `11.2.1.11-IF1 [Build 4]`
 
 | Query / tool | NPS 11.2.1.11-IF1 |
 |---|---|
-| `nz_list_databases` | ✅ validated |
-| `nz_list_schemas` | ✅ validated |
-| `nz_list_tables` | ✅ validated |
-| `nz_list_views` | ✅ validated |
-| `nz_get_view_ddl` | ✅ validated |
-| `nz_describe_table` (columns) | ✅ validated |
-| `nz_describe_table` (distribution) | ✅ validated |
-| `nz_describe_table` (primary key) | ✅ validated |
-| `nz_describe_table` (foreign keys) | ✅ validated |
-| `nz_table_stats` | ✅ validated |
-| `nz_list_procedures` | ✅ validated |
-| `nz_get_procedure_ddl` | ✅ validated |
-| `nz_get_procedure_section` | ✅ validated |
+| `nz_list_databases` | ✅ validada |
+| `nz_list_schemas` | ✅ validada |
+| `nz_list_tables` | ✅ validada |
+| `nz_list_views` | ✅ validada |
+| `nz_get_view_ddl` | ✅ validada |
+| `nz_describe_table` (columns) | ✅ validada |
+| `nz_describe_table` (distribution) | ✅ validada |
+| `nz_describe_table` (primary key) | ✅ validada |
+| `nz_describe_table` (foreign keys) | ✅ validada |
+| `nz_table_stats` | ✅ validada |
+| `nz_list_procedures` | ✅ validada |
+| `nz_get_procedure_ddl` | ✅ validada |
+| `nz_get_procedure_section` | ✅ validada |
 
-## Cross-database Rule
+## Regla cross-database
 
-Some catalog views must be queried from an explicit database context:
+Algunas vistas de catálogo deben consultarse desde un contexto de base de datos explícito:
 
-- Pattern: `<BD>.._V_*`
-- Example: `DEV.._V_SCHEMA`
+- Patrón: `<BD>.._V_*`
+- Ejemplo: `DEV.._V_SCHEMA`
 
-`<BD>` interpolation must be restricted to validated identifiers only:
+La interpolación de `<BD>` debe restringirse solo a identifiers validados:
 
 ```regex
 ^[A-Z][A-Z0-9_]{0,127}$
 ```
 
-Rules:
+Reglas:
 
-1. Uppercase before validation.
-2. Reject any value that does not match the regex.
-3. Never pass `<BD>` as a string literal parameter (`?`); identifiers are not SQL values.
-4. Keep value placeholders (`?`) for all data values (`schema`, `table`, `pattern`, etc.).
+1. Convertir a mayúsculas antes de validar.
+2. Rechazar cualquier valor que no cumpla el regex.
+3. Nunca pasar `<BD>` como parámetro string (`?`); los identifiers no son valores SQL.
+4. Mantener placeholders (`?`) para todos los valores de datos (`schema`, `table`, `pattern`, etc.).
 
-## Query Catalog by Tool
+## Catálogo de queries por tool
 
-All SQL below is the validated form and uses `?` placeholders for values.
+Todo el SQL siguiente está validado y usa placeholders `?` para valores.
 
 ### `nz_list_databases`
 
-Views: `_V_DATABASE`
+Vistas: `_V_DATABASE`
 
 ```sql
 SELECT DATABASE, OWNER
@@ -75,7 +75,7 @@ ORDER BY DATABASE;
 
 ### `nz_list_schemas`
 
-Views: `<BD>.._V_SCHEMA`
+Vistas: `<BD>.._V_SCHEMA`
 
 ```sql
 SELECT SCHEMA, OWNER
@@ -86,7 +86,7 @@ ORDER BY SCHEMA;
 
 ### `nz_list_tables`
 
-Views: `<BD>.._V_TABLE`
+Vistas: `<BD>.._V_TABLE`
 
 ```sql
 SELECT TABLENAME AS NAME, OWNER
@@ -98,7 +98,7 @@ ORDER BY TABLENAME;
 
 ### `nz_list_views`
 
-Views: `<BD>.._V_VIEW`
+Vistas: `<BD>.._V_VIEW`
 
 ```sql
 SELECT VIEWNAME AS NAME, OWNER, CREATEDATE
@@ -110,7 +110,7 @@ ORDER BY VIEWNAME;
 
 ### `nz_get_view_ddl`
 
-Views: `<BD>.._V_VIEW`
+Vistas: `<BD>.._V_VIEW`
 
 ```sql
 SELECT DEFINITION
@@ -118,9 +118,9 @@ FROM <BD>.._V_VIEW
 WHERE SCHEMA = UPPER(?) AND VIEWNAME = UPPER(?);
 ```
 
-### `nz_describe_table` (columns)
+### `nz_describe_table` (columnas)
 
-Views: `<BD>.._V_RELATION_COLUMN`
+Vistas: `<BD>.._V_RELATION_COLUMN`
 
 ```sql
 SELECT ATTNAME AS COLUMN_NAME, FORMAT_TYPE AS DATA_TYPE,
@@ -130,9 +130,9 @@ WHERE SCHEMA = UPPER(?) AND NAME = UPPER(?)
 ORDER BY ATTNUM;
 ```
 
-### `nz_describe_table` (distribution)
+### `nz_describe_table` (distribución)
 
-Views: `<BD>.._V_TABLE_DIST_MAP`
+Vistas: `<BD>.._V_TABLE_DIST_MAP`
 
 ```sql
 SELECT ATTNAME, DISTSEQNO
@@ -141,14 +141,14 @@ WHERE SCHEMA = UPPER(?) AND TABLENAME = UPPER(?)
 ORDER BY DISTSEQNO;
 ```
 
-Behavior:
+Comportamiento:
 
-- `0` rows: distribution is `RANDOM`.
-- `>=1` rows: distribution is `HASH`, using ordered `ATTNAME` by `DISTSEQNO`.
+- `0` filas: la distribución es `RANDOM`.
+- `>=1` filas: la distribución es `HASH`, usando `ATTNAME` ordenado por `DISTSEQNO`.
 
 ### `nz_describe_table` (primary key)
 
-Views: `<BD>.._V_RELATION_KEYDATA`
+Vistas: `<BD>.._V_RELATION_KEYDATA`
 
 ```sql
 SELECT CONSTRAINTNAME, ATTNAME, CONSEQ
@@ -159,7 +159,7 @@ ORDER BY CONSEQ;
 
 ### `nz_describe_table` (foreign keys)
 
-Views: `<BD>.._V_RELATION_KEYDATA`
+Vistas: `<BD>.._V_RELATION_KEYDATA`
 
 ```sql
 SELECT CONSTRAINTNAME, ATTNAME, CONSEQ,
@@ -171,7 +171,7 @@ ORDER BY CONSTRAINTNAME, CONSEQ;
 
 ### `nz_table_stats`
 
-Views: `<BD>.._V_TABLE`, `<BD>.._V_TABLE_STORAGE_STAT`
+Vistas: `<BD>.._V_TABLE`, `<BD>.._V_TABLE_STORAGE_STAT`
 
 ```sql
 SELECT t.RELTUPLES AS ROW_COUNT,
@@ -185,7 +185,7 @@ WHERE t.SCHEMA = UPPER(?) AND t.TABLENAME = UPPER(?);
 
 ### `nz_list_procedures`
 
-Views: `<BD>.._V_PROCEDURE`
+Vistas: `<BD>.._V_PROCEDURE`
 
 ```sql
 SELECT PROCEDURE, OWNER, ARGUMENTS, RETURNS, PROCEDURESIGNATURE, NUMARGS
@@ -197,7 +197,7 @@ ORDER BY PROCEDURE;
 
 ### `nz_get_procedure_ddl`
 
-Views: `<BD>.._V_PROCEDURE`
+Vistas: `<BD>.._V_PROCEDURE`
 
 ```sql
 SELECT PROCEDURE, ARGUMENTS, RETURNS, PROCEDURESOURCE, PROCEDURESIGNATURE
@@ -207,7 +207,7 @@ WHERE SCHEMA = UPPER(?) AND PROCEDURE = UPPER(?);
 
 ### `nz_get_procedure_section`
 
-Views: `<BD>.._V_PROCEDURE`
+Vistas: `<BD>.._V_PROCEDURE`
 
 ```sql
 SELECT PROCEDURE, ARGUMENTS, RETURNS, PROCEDURESOURCE, PROCEDURESIGNATURE
@@ -215,9 +215,9 @@ FROM <BD>.._V_PROCEDURE
 WHERE SCHEMA = UPPER(?) AND PROCEDURE = UPPER(?);
 ```
 
-## Catalog Views and Columns Used
+## Vistas del catálogo y columnas consumidas
 
-| View | Columns consumed by MCP |
+| Vista | Columnas consumidas por MCP |
 |---|---|
 | `_V_DATABASE` | `DATABASE`, `OWNER` |
 | `_V_SCHEMA` | `SCHEMA`, `OWNER` |
@@ -228,46 +228,46 @@ WHERE SCHEMA = UPPER(?) AND PROCEDURE = UPPER(?);
 | `_V_RELATION_KEYDATA` | `CONSTRAINTNAME`, `ATTNAME`, `CONSEQ`, `CONTYPE`, `PKDATABASE`, `PKSCHEMA`, `PKRELATION`, `PKATTNAME`, `DEL_TYPE`, `UPDT_TYPE` |
 | `_V_TABLE_STORAGE_STAT` | `OBJID`, `USED_BYTES`, `ALLOCATED_BYTES`, `SKEW` |
 | `_V_PROCEDURE` | `PROCEDURE`, `OWNER`, `ARGUMENTS`, `RETURNS`, `PROCEDURESIGNATURE`, `NUMARGS`, `PROCEDURESOURCE` |
-| `_V_SESSION` | `IPADDR` (when session metadata is queried) |
+| `_V_SESSION` | `IPADDR` (cuando se consulta metadata de sesión) |
 
-## Column Name Mismatches vs. Initial Documentation
+## Columnas con nombre distinto a lo documentado inicialmente
 
-The following assumptions were invalid for NPS `11.2.1.11-IF1`:
+Los siguientes supuestos fueron inválidos para NPS `11.2.1.11-IF1`:
 
-| View | Column not available | Valid alternative |
+| Vista | Columna no disponible | Alternativa válida |
 |---|---|---|
 | `_V_RELATION_COLUMN` | `ADSRC` | `COLDEFAULT` |
-| `_V_TABLE_DIST_MAP` | `DISTRIBTYPE`, `DISTRIBATTNAMES` | Reconstruct from `ATTNAME` + `DISTSEQNO`; `0` rows means `RANDOM` |
-| `_V_STATISTIC` | `RELTUPLES` | Use `_V_TABLE.RELTUPLES` |
-| `_V_PROCEDURE` | `PROCEDURELANGUAGE` | Set `language = "NZPLSQL"` |
+| `_V_TABLE_DIST_MAP` | `DISTRIBTYPE`, `DISTRIBATTNAMES` | Reconstruir desde `ATTNAME` + `DISTSEQNO`; `0` filas implica `RANDOM` |
+| `_V_STATISTIC` | `RELTUPLES` | Usar `_V_TABLE.RELTUPLES` |
+| `_V_PROCEDURE` | `PROCEDURELANGUAGE` | Definir `language = "NZPLSQL"` |
 | `_V_SESSION` | `CLIENT_IP` | `IPADDR` |
-| `_V_TABLE_STORAGE_STAT` | `SIZE_UNCOMPRESSED` | Use `USED_BYTES` and `ALLOCATED_BYTES` only |
+| `_V_TABLE_STORAGE_STAT` | `SIZE_UNCOMPRESSED` | Usar solo `USED_BYTES` y `ALLOCATED_BYTES` |
 
-## Fallback Queries and Behaviors
+## Queries y comportamientos de fallback
 
-### Distribution fallback (`nz_describe_table`)
+### Fallback de distribución (`nz_describe_table`)
 
-Primary source is `<BD>.._V_TABLE_DIST_MAP`.
+La fuente primaria es `<BD>.._V_TABLE_DIST_MAP`.
 
-- If rows exist: build `HASH(column_1, ..., column_n)` from ordered `DISTSEQNO`.
-- If no rows exist: report `RANDOM`.
+- Si hay filas: construir `HASH(column_1, ..., column_n)` desde `DISTSEQNO` ordenado.
+- Si no hay filas: reportar `RANDOM`.
 
-No fallback to undocumented `DISTRIB*` columns.
+No usar fallback a columnas no documentadas `DISTRIB*`.
 
-### Procedure language fallback
+### Fallback de lenguaje de procedimiento
 
-`_V_PROCEDURE` does not expose `PROCEDURELANGUAGE` in validated NPS version.
-`nz-mcp` must emit `"NZPLSQL"` as the language for procedure metadata responses.
+`_V_PROCEDURE` no expone `PROCEDURELANGUAGE` en la versión NPS validada.
+`nz-mcp` debe emitir `"NZPLSQL"` como lenguaje en respuestas de metadata de procedimientos.
 
-## Commands Not Available in NPS 11.2
+## Comandos no disponibles en NPS 11.2
 
 ### `SHOW TABLE`
 
-`SHOW TABLE` is not available in the validated NPS `11.2.1.11-IF1` baseline.
+`SHOW TABLE` no está disponible en el baseline validado NPS `11.2.1.11-IF1`.
 
-Impact:
+Impacto:
 
-- `nz_get_table_ddl` cannot rely on native DDL introspection.
-- DDL must be reconstructed from catalog views (`_V_RELATION_COLUMN`,
-  `_V_TABLE_DIST_MAP`, `_V_RELATION_KEYDATA`, and related metadata).
+- `nz_get_table_ddl` no puede depender de introspección DDL nativa.
+- El DDL debe reconstruirse desde vistas de catálogo (`_V_RELATION_COLUMN`,
+  `_V_TABLE_DIST_MAP`, `_V_RELATION_KEYDATA` y metadata relacionada).
 
