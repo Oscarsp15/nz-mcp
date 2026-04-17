@@ -5,7 +5,10 @@ Importing this package registers every tool side-effect-free.
 
 from __future__ import annotations
 
-from nz_mcp.tools import session  # noqa: F401  (registers session tools)
+from nz_mcp.tools import (
+    databases,  # noqa: F401  (registers database tools)
+    session,  # noqa: F401  (registers session tools)
+)
 from nz_mcp.tools.registry import TOOLS, ToolSpec
 
 __all__ = ["TOOLS", "ToolSpec"]

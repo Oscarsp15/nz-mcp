@@ -61,6 +61,14 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "El archivo de configuración es inválido: {detail}",
         "en": "The configuration file is invalid: {detail}",
     },
+    "CONNECTION_FAILED": {
+        "es": "No se pudo abrir conexión a Netezza ({host}:{port}/{database}): {detail}",
+        "en": "Could not open Netezza connection ({host}:{port}/{database}): {detail}",
+    },
+    "NETEZZA_ERROR": {
+        "es": "Netezza devolvió un error durante '{operation}': {detail}",
+        "en": "Netezza returned an error during '{operation}': {detail}",
+    },
     # Auth
     "KEYRING_UNAVAILABLE": {
         "es": "El backend de keyring no está disponible en este sistema.",

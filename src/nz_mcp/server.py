@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -73,7 +74,7 @@ def call_tool(
 
 
 def _invoke(spec: ToolSpec, params: Any, *, config_path: Path | None) -> Any:
-    if spec.name in ("nz_current_profile", "nz_switch_profile"):
+    if "config_path" in inspect.signature(spec.handler).parameters:
         return spec.handler(params, config_path=config_path)
     return spec.handler(params)
 
@@ -101,6 +102,8 @@ def _i18n_key_for(code: str) -> str | None:
         "PERMISSION_DENIED": "PERMISSION_DENIED.MODE_TOO_LOW",
         "PROFILE_NOT_FOUND": "PROFILE_NOT_FOUND",
         "INVALID_CONFIG": "INVALID_CONFIG",
+        "CONNECTION_FAILED": "CONNECTION_FAILED",
+        "NETEZZA_ERROR": "NETEZZA_ERROR",
     }
     return mapping.get(code)
 
