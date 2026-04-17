@@ -9,6 +9,12 @@ Cada entrada se documenta en **español** y **english**.
 ## [Unreleased]
 
 ### Added
+- ES: tool `nz_list_databases` implementada con query a `_v_database` y filtro `LIKE` opcional.
+- EN: implemented `nz_list_databases` tool using `_v_database` with optional `LIKE` filter.
+- ES: capa de conexión real con `nzpy` (`open_connection`) con `timeout`, `application_name="nz-mcp"` y errores tipados.
+- EN: real `nzpy` connection layer (`open_connection`) with `timeout`, `application_name="nz-mcp"`, and typed errors.
+- ES: tests unitarios para conexión, catálogo y tool; además de test de integración local para `nz_list_databases`.
+- EN: unit tests for connection, catalog, and tool; plus local integration test for `nz_list_databases`.
 - ES: comando CLI `nz-mcp doctor` con diagnóstico local (sin red/Netezza) e informe i18n ES/EN.
 - EN: `nz-mcp doctor` CLI for local diagnostics (no network/Netezza) with ES/EN i18n report.
 - ES: estructura inicial del repositorio con `AGENTS.md` como router de despacho para agentes IA.

@@ -14,6 +14,7 @@ from nz_mcp.tools.registry import TOOLS
 
 EXPECTED_V010A0: set[str] = {
     "nz_current_profile",
+    "nz_list_databases",
     "nz_switch_profile",
 }
 
