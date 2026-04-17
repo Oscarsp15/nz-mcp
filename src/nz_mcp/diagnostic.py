@@ -73,6 +73,8 @@ def _probe_keyring() -> tuple[str, bool]:
     try:
         backend = keyring.get_keyring()
     except Exception:
+        # Keyring backends may raise vendor/runtime-specific errors while being resolved.
+        # The diagnostic command must degrade gracefully and never crash on local probing.
         return ("<unavailable>", False)
     name = backend.__class__.__name__
     if isinstance(backend, FailKeyring):
