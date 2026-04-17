@@ -16,6 +16,16 @@ import pytest
 from nz_mcp import config
 
 
+class _TestKeyringBackend:
+    """Stub backend so ``nz_mcp doctor`` sees keyring as available in tests.
+
+    CI runners are often headless; the real default is often ``FailKeyring``, which would
+    make ``doctor`` exit 1 and break smoke tests unrelated to keyring behavior.
+    """
+
+    __slots__ = ()
+
+
 @pytest.fixture(autouse=True)
 def isolated_keyring(monkeypatch: pytest.MonkeyPatch) -> None:
     """Replace keyring globals with an in-memory store."""
@@ -30,9 +40,13 @@ def isolated_keyring(monkeypatch: pytest.MonkeyPatch) -> None:
     def _delete(service: str, username: str) -> None:
         store.pop((service, username), None)
 
+    def _get_keyring() -> _TestKeyringBackend:
+        return _TestKeyringBackend()
+
     monkeypatch.setattr(_keyring, "set_password", _set)
     monkeypatch.setattr(_keyring, "get_password", _get)
     monkeypatch.setattr(_keyring, "delete_password", _delete)
+    monkeypatch.setattr(_keyring, "get_keyring", _get_keyring)
 
 
 @pytest.fixture
