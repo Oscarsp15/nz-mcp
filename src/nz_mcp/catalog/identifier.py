@@ -21,6 +21,16 @@ def validate_database_identifier(name: str) -> str:
     return normalized
 
 
+def validate_catalog_identifier(name: str) -> str:
+    """Validate schema, table, or other single-part SQL identifiers (uppercase unquoted)."""
+    normalized = name.strip().upper()
+    if not _DB_IDENTIFIER_PATTERN.fullmatch(normalized):
+        raise InvalidInputError(
+            detail=f"Invalid catalog identifier: {name!r}",
+        )
+    return normalized
+
+
 def render_cross_db(sql: str, database: str) -> str:
     """Replace ``<BD>..`` markers with a validated database identifier."""
     validated = validate_database_identifier(database)

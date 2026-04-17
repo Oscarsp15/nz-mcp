@@ -58,7 +58,8 @@ def _resolved_timeout(profile_timeout: int, arg: int | None) -> int:
     return min(base, TIMEOUT_S_CAP)
 
 
-def _hint_from_execute(payload: dict[str, object]) -> str | None:
+def hint_from_execute_payload(payload: dict[str, object]) -> str | None:
+    """Build a localized hint string from an ``execute_select`` result payload."""
     key = payload.get("hint_key")
     if not isinstance(key, str):
         return None
@@ -104,7 +105,7 @@ def nz_query_select(
         max_rows=max_rows,
         timeout_s=timeout_s,
     )
-    hint = _hint_from_execute(raw)
+    hint = hint_from_execute_payload(raw)
     columns = [
         ColumnMeta.model_validate({"name": c["name"], "type": c["type"]}) for c in raw["columns"]
     ]

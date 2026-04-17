@@ -7,12 +7,21 @@ from contextlib import closing
 from typing import Any, Final, Protocol, cast
 
 from nz_mcp.auth import get_password
-from nz_mcp.catalog.identifier import render_cross_db
+from nz_mcp.catalog.ddl_builder import build_create_table_ddl
+from nz_mcp.catalog.execute import execute_select, inject_limit
+from nz_mcp.catalog.formatters import format_bytes_iec
+from nz_mcp.catalog.identifier import (
+    render_cross_db,
+    validate_catalog_identifier,
+    validate_database_identifier,
+)
 from nz_mcp.catalog.resolver import resolve_query
 from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
-from nz_mcp.errors import NetezzaError, ObjectNotFoundError
+from nz_mcp.errors import InvalidInputError, NetezzaError, ObjectNotFoundError
 from nz_mcp.logging_utils import sanitize
+from nz_mcp.sql_guard import StatementKind
+from nz_mcp.sql_guard import validate as guard_validate
 
 _TABLE_ROW_MIN_ITEMS: Final[int] = 2
 _TABLE_KIND: Final[str] = "TABLE"
@@ -23,6 +32,7 @@ _FK_PK_MIN: Final[int] = 4
 _FK_SCHEMA_MIN: Final[int] = 5
 _FK_REL_MIN: Final[int] = 6
 _FK_ATT_MIN: Final[int] = 7
+_STATS_ROW_MIN: Final[int] = 5
 
 
 class _DescribeCursorLike(Protocol):
@@ -363,3 +373,171 @@ def _fk_ref_column(row: Any) -> str:
     if isinstance(row, tuple) and len(row) >= _FK_ATT_MIN:
         return str(row[6])
     raise NetezzaError(operation="describe_table", detail="Unexpected FK row shape.")
+
+
+def _ensure_profile_database(profile: Profile, database: str) -> None:
+    """Direct ``SELECT`` runs in the session database; reject cross-database mismatch."""
+    db_arg = validate_database_identifier(database)
+    db_sess = validate_database_identifier(profile.database)
+    if db_arg != db_sess:
+        raise InvalidInputError(
+            detail=(
+                "The database argument must match the active profile database "
+                f"({db_sess}) when sampling table rows."
+            ),
+        )
+
+
+def get_table_sample(
+    profile: Profile,
+    database: str,
+    schema: str,
+    table: str,
+    *,
+    rows: int,
+    timeout_s: int,
+) -> dict[str, Any]:
+    """Run a bounded ``SELECT *`` for sampling; SQL is validated via ``sql_guard``."""
+    _ensure_profile_database(profile, database)
+    schema_u = validate_catalog_identifier(schema)
+    table_u = validate_catalog_identifier(table)
+    sql = f"SELECT * FROM {schema_u}.{table_u}"  # noqa: S608 identifiers validated above
+    parsed = guard_validate(sql, mode="read")
+    if parsed.kind is not StatementKind.SELECT:
+        raise NetezzaError(
+            operation="get_table_sample",
+            detail=f"Unexpected statement kind after validation: {parsed.kind}",
+        )
+    limited = inject_limit(parsed.raw, rows)
+    return execute_select(
+        profile,
+        limited,
+        max_rows=rows,
+        timeout_s=timeout_s,
+    )
+
+
+def get_table_stats(
+    profile: Profile,
+    database: str,
+    schema: str,
+    table: str,
+) -> dict[str, Any]:
+    """Return row estimate, storage bytes, skew, and creation time from catalog views."""
+    params: tuple[str, str] = (
+        validate_catalog_identifier(schema),
+        validate_catalog_identifier(table),
+    )
+    password = get_password(profile.name)
+    sql = render_cross_db(resolve_query("table_stats", profile), database=database)
+
+    connection = cast(_DescribeConnectionLike, open_connection(profile, password))
+    try:
+        with closing(connection.cursor()) as cursor:
+            cursor.execute(sql, params)
+            fetched = cursor.fetchall()
+    except Exception as exc:  # noqa: BLE001, RUF100
+        raise NetezzaError(
+            operation="get_table_stats",
+            database=database,
+            detail=sanitize(str(exc), known_secrets={password}),
+        ) from exc
+    finally:
+        connection.close()
+
+    if not fetched:
+        raise ObjectNotFoundError(
+            detail=(
+                "No statistics row returned — table may not exist or may not be visible "
+                f"(database={database!r}, schema={schema!r}, table={table!r})."
+            ),
+        )
+
+    payload = _parse_table_stats_row(fetched[0])
+    used = int(payload["size_bytes_used"])
+    allocated = int(payload["size_bytes_allocated"])
+    return {
+        "row_count": int(payload["row_count"]),
+        "size_bytes_used": used,
+        "size_used_human": format_bytes_iec(used),
+        "size_bytes_allocated": allocated,
+        "size_allocated_human": format_bytes_iec(allocated),
+        "skew": payload["skew"],
+        "table_created": payload["table_created"],
+    }
+
+
+def _parse_table_stats_row(row: Any) -> dict[str, Any]:
+    """Normalize driver row shapes for ``table_stats`` query aliases."""
+    if isinstance(row, dict):
+
+        def pick(*candidates: str) -> Any:
+            keys = {str(k).upper(): v for k, v in row.items()}
+            for c in candidates:
+                if c.upper() in keys:
+                    return keys[c.upper()]
+            return None
+
+        rc = pick("ROW_COUNT")
+        used = pick("SIZE_BYTES_USED")
+        alloc = pick("SIZE_BYTES_ALLOCATED")
+        skew = pick("SKEW")
+        created = pick("TABLE_CREATED")
+    elif isinstance(row, tuple) and len(row) >= _STATS_ROW_MIN:
+        rc, used, alloc, skew, created = (
+            row[0],
+            row[1],
+            row[2],
+            row[3],
+            row[4],
+        )
+    else:
+        raise NetezzaError(
+            operation="get_table_stats",
+            detail="Unexpected row shape from table_stats catalog query.",
+        )
+
+    skew_out: float | None = None if skew is None else float(skew)
+
+    created_out: str | None
+    if created is None:
+        created_out = None
+    else:
+        iso = getattr(created, "isoformat", None)
+        created_out = iso() if callable(iso) else str(created)
+
+    return {
+        "row_count": 0 if rc is None else int(rc),
+        "size_bytes_used": 0 if used is None else int(used),
+        "size_bytes_allocated": 0 if alloc is None else int(alloc),
+        "skew": skew_out,
+        "table_created": created_out,
+    }
+
+
+def get_table_ddl(
+    profile: Profile,
+    database: str,
+    schema: str,
+    table: str,
+    *,
+    include_constraints: bool,
+) -> dict[str, Any]:
+    """Rebuild CREATE TABLE DDL from catalog metadata (no ``SHOW TABLE``)."""
+    schema_u = validate_catalog_identifier(schema)
+    table_u = validate_catalog_identifier(table)
+    meta = describe_table(profile, database, schema_u, table_u)
+    fq = f"{schema_u}.{table_u}"
+    ddl = build_create_table_ddl(
+        fq_name=fq,
+        columns=list(meta["columns"]),
+        distribution=dict(meta["distribution"]),
+        primary_key=list(meta["primary_key"]),
+        foreign_keys=list(meta["foreign_keys"]),
+        include_constraints=include_constraints,
+    )
+    return {
+        "ddl": ddl,
+        "reconstructed": True,
+        "notes": [],
+    }

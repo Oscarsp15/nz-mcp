@@ -99,6 +99,10 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Se alcanzó el límite de tiempo ({timeout_s}s). El resultado puede estar incompleto.",
         "en": "Execution time limit ({timeout_s}s) was reached. The result may be incomplete.",
     },
+    "NOTE.DDL_RECONSTRUCTED": {
+        "es": "DDL reconstruido desde catálogo (SHOW TABLE no disponible en este servidor).",
+        "en": "DDL reconstructed from catalogs (SHOW TABLE not available on this server).",
+    },
     # nz-mcp doctor (CLI diagnostics — no secrets)
     "DOCTOR.HEADER": {
         "es": "Diagnóstico local (nz-mcp doctor)",
