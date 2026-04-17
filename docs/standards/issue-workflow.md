@@ -69,20 +69,43 @@ Sincronizado por `.github/workflows/sync-labels.yml` desde `.github/labels.yml`.
 
 ## Protocolo de claim (para evitar dos IAs trabajando en lo mismo)
 
-**Reglas duras:**
+### Claim automático por bot (desde v0.1)
 
-1. Antes de empezar, comprobar que el issue **no tiene** label `claimed` ni assignee.
-2. Para "tomarlo":
-   - **Comentar** en el issue: `🤖 Tomando este issue. Sesión: <id-corto>. Crearé draft PR y volveré con link.`
-   - **Asignarse** vía `gh issue edit <n> --add-assignee @me` (o pedir al humano si la IA no tiene cuenta propia).
-   - **Añadir label** `claimed` vía `gh issue edit <n> --add-label claimed`.
-   - **Crear draft PR** con título `[WIP] <título issue>` y `Closes #<n>` en el cuerpo.
-3. **Renunciar** si descubres que el issue es más grande, ambiguo, o requiere `human-only`:
-   - Comentar `🤖 Renuncio: <razón>. Vuelvo a dejar el issue libre.`
-   - Quitar label `claimed`, quitar assignee, cerrar draft PR sin merge.
-4. **Timeout de claim**: si un `claimed` lleva > 7 días sin commit en su PR linkeado, otra IA puede reclamarlo (comentando primero).
+El **draft PR con `Closes #N`** ES el claim real. Un workflow (`.github/workflows/auto-claim.yml`) aplica en automático, al detectar el PR:
 
-**Detector de doble-trabajo**: workflow `claim-stale.yml` corre semanalmente y comenta los `claimed` sin actividad reciente.
+- Añade label `claimed` al issue.
+- Asigna al autor del PR al issue.
+
+Al cerrar el PR sin mergear, el bot **revoca** el claim (quita label + desasigna). Al mergear, GitHub cierra el issue por sí mismo.
+
+**Consecuencia práctica**: ningún contributor necesita permisos de `issues:write` para reclamar un issue. Los contributors externos desde fork solo abren el PR y el bot hace el resto.
+
+### Protocolo (aplica a todos, internos y externos)
+
+1. Antes de empezar, comprobar que el issue **no tiene** label `claimed` ni assignee. Si los tiene, alguien más está trabajando en él.
+2. **Crear draft PR** desde tu rama (o tu fork) con:
+   - Título en formato conventional (`<tipo>(<scope>): <descripción>`).
+   - **Cuerpo usando `.github/PULL_REQUEST_TEMPLATE.md` completo**, con `Closes #N` en la sección "Issue relacionado".
+3. (Opcional, recomendado) Comentar en el issue: `🤖 Tomando este issue. Sesión: <id-corto>. PR: #<pr-n>.` — aumenta trazabilidad pero el bot hace el claim igualmente.
+4. **Renunciar** si descubres que el issue es más grande, ambiguo o requiere `human-only`:
+   - Cierra el draft PR **sin merge**. El bot revoca el claim automáticamente.
+   - Comenta en el issue: `🤖 Renuncio: <razón>. Vuelvo a dejar el issue libre.`
+5. **Timeout de claim**: si un `claimed` lleva > 7 días sin commit en su PR linkeado, otra IA puede reclamarlo (comentando primero). Ver `.github/workflows/stale-claim.yml`.
+
+### Contributors externos desde fork (OSS típico)
+
+Contributors sin permisos de `issues:write` en el repo base:
+
+1. `gh repo fork Oscarsp15/nz-mcp` → trabaja en el fork.
+2. Rama con nombre cumpliendo regex de [`git-workflow.md`](git-workflow.md) §1.
+3. Push al fork; `gh pr create --repo Oscarsp15/nz-mcp` abre PR hacia `Oscarsp15:main`.
+4. Primera vez: el owner debe aprobar workflows manualmente en `Actions` (política `Require approval for first-time contributors`). Tras una aprobación, los siguientes pushes corren automático.
+5. El **auto-claim** aplica igual — no se requiere `issues:write` en el repo base.
+6. Tras merge: GitHub borra la rama del fork automáticamente (ya configurado con `delete_branch_on_merge=true`).
+
+Ver también `CONTRIBUTING.md` sección **"Fork workflow for external contributors"**.
+
+**Detector de doble-trabajo**: workflow `stale-claim.yml` corre semanalmente y comenta los `claimed` sin actividad reciente.
 
 ## Flujo extremo a extremo
 

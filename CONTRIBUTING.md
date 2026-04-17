@@ -35,6 +35,52 @@ pre-commit install --hook-type pre-push --hook-type commit-msg
 pytest -m "not integration"
 ```
 
+## Fork workflow for external contributors
+
+Si no tienes permisos de escritura en el repo (caso típico en OSS), el flujo es:
+
+```bash
+# 1. Fork y clone
+gh repo fork Oscarsp15/nz-mcp --clone=false
+gh repo clone <tu-usuario>/nz-mcp
+cd nz-mcp
+
+# 2. Vincular upstream para sincronizar main
+git remote add upstream https://github.com/Oscarsp15/nz-mcp.git
+
+# 3. Crear branch (nombre debe cumplir el regex de git-workflow.md §1)
+git checkout -b feat/<n>-<slug-en-kebab-case>
+
+# 4. Implementar, seguir AGENTS.md, tests, etc.
+pre-commit install --hook-type pre-push --hook-type commit-msg
+# ... edita código ...
+git commit -m "feat(<scope>): <descripción en imperativo>"
+
+# 5. Push al fork y abrir PR contra el upstream
+git push -u origin feat/<n>-<slug-en-kebab-case>
+gh pr create --repo Oscarsp15/nz-mcp --title "..." --body-file body.md
+```
+
+### Primera vez
+
+GitHub Actions pide al owner aprobar workflows manualmente la primera vez que un contributor externo dispara CI. El owner clickea **"Approve and run"** en la pestaña `Actions`. Tras eso, los siguientes pushes del mismo contributor corren automático.
+
+### Permisos en el repo base
+
+Contributors externos NO pueden:
+- Asignarse a issues, aplicar labels, ni mergear PRs.
+
+**No es un problema**: el workflow `auto-claim.yml` aplica el label `claimed` y el assignee automáticamente al abrir el draft PR con `Closes #N`. Ver [`docs/standards/issue-workflow.md`](docs/standards/issue-workflow.md) sección "Claim automático".
+
+### Sincronizar fork con upstream
+
+```bash
+git fetch upstream
+git checkout main
+git merge --ff-only upstream/main
+git push origin main
+```
+
 ## Idioma
 
 - **Código y comentarios**: inglés.
