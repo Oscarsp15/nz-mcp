@@ -6,7 +6,7 @@ Commands:
 - ``list-profiles``      list configured profiles.
 - ``doctor``             print local diagnostics (no Netezza connection).
 - ``probe-catalog``      execute every catalog query with dummy parameters (validates overrides).
-- ``test-connection``    verify the active profile (stubbed in v0.1.0a0).
+- ``test-connection``    verify the active profile (opens Netezza, runs ``VERSION()``).
 - ``serve``              run the MCP server over stdio.
 - ``version``            print the package version.
 """
@@ -16,12 +16,12 @@ from __future__ import annotations
 import contextlib
 import json
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import typer
 
 from nz_mcp import __version__
-from nz_mcp.auth import store_password
+from nz_mcp.auth import get_password, store_password
 from nz_mcp.catalog.probe import probe_has_hard_failure, probe_run_to_json_dict, run_probe_catalog
 from nz_mcp.config import (
     DEFAULT_MAX_ROWS,
@@ -33,9 +33,17 @@ from nz_mcp.config import (
     list_profile_names,
     profiles_path,
 )
+from nz_mcp.connection import open_connection
 from nz_mcp.diagnostic import collect_diagnostic, format_diagnostic_report
-from nz_mcp.errors import InvalidProfileError, ProfileNotFoundError
+from nz_mcp.errors import (
+    ConnectionError,
+    CredentialNotFoundError,
+    InvalidProfileError,
+    KeyringUnavailableError,
+    ProfileNotFoundError,
+)
 from nz_mcp.i18n import resolve_locale, t
+from nz_mcp.logging_utils import sanitize
 from nz_mcp.server import run_stdio_server
 
 app = typer.Typer(
@@ -152,16 +160,54 @@ def probe_catalog_cmd(
     raise typer.Exit(code=code)
 
 
+_VERSION_SQL = "SELECT CAST(VERSION() AS VARCHAR(200)) AS v"
+
+
 @app.command("test-connection")
 def test_connection_cmd(
     profile: str | None = typer.Option(None, "--profile", "-p", help="Perfil a probar"),
 ) -> None:
-    """Verify connectivity to Netezza (stubbed in v0.1.0a0)."""
-    target = profile or "<active>"
-    typer.secho(
-        f"[stub] test-connection({target}) — no implementado aún. Issue #4.",
-        fg=typer.colors.YELLOW,
-    )
+    """Verify connectivity: open Netezza, run ``VERSION()``, report OK or FAIL (exit 0/1)."""
+    locale = resolve_locale()
+    try:
+        prof = get_profile(profile) if profile is not None else get_active_profile()
+    except ProfileNotFoundError as exc:
+        typer.secho(t("PROFILE_NOT_FOUND", locale, profile=exc.context["profile"]), err=True)
+        raise typer.Exit(code=1) from exc
+    except InvalidProfileError as exc:
+        typer.secho(t("INVALID_CONFIG", locale, detail=str(exc)), err=True)
+        raise typer.Exit(code=1) from exc
+
+    try:
+        password = get_password(prof.name)
+    except (CredentialNotFoundError, KeyringUnavailableError) as exc:
+        detail = sanitize(str(exc), known_secrets=())
+        typer.secho(f"FAIL: {detail}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    try:
+        conn: Any = open_connection(prof, password)
+    except ConnectionError as exc:
+        detail = str(exc.context.get("detail", "")) or str(exc)
+        typer.secho(f"FAIL: {detail}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    try:
+        with contextlib.closing(conn.cursor()) as cur:
+            cur.execute(_VERSION_SQL)
+            row = cur.fetchone()
+    except Exception as exc:
+        detail = sanitize(str(exc), known_secrets={password})
+        typer.secho(f"FAIL: {detail}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+    finally:
+        with contextlib.suppress(Exception):  # pragma: no cover - driver-specific close
+            conn.close()
+
+    version_text = "unknown"
+    if row is not None:
+        version_text = str(row[0] or "").strip()
+    typer.secho(f"OK: connected to {version_text} as {prof.user}", fg=typer.colors.GREEN)
     raise typer.Exit(code=0)
 
 

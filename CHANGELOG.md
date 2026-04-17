@@ -12,6 +12,10 @@ Cada entrada se documenta en **español** y **english**.
 - ES: los mensajes de error del driver en `open_connection`, `list_databases` y `probe-catalog` pasan por `sanitize()` con `known_secrets` para no filtrar contraseñas en el `detail` expuesto al cliente MCP.
 - EN: driver error messages in `open_connection`, `list_databases`, and `probe-catalog` are passed through `sanitize()` with `known_secrets` so passwords are not leaked in MCP-exposed `detail` fields.
 
+### Changed
+- ES: `nz-mcp test-connection` ya no es stub: usa `open_connection`, ejecuta `SELECT CAST(VERSION() AS VARCHAR(200))`, informa `OK: connected to … as <user>` o `FAIL: …` (detalle sanitizado) y código de salida 0/1.
+- EN: `nz-mcp test-connection` is no longer a stub: uses `open_connection`, runs `SELECT CAST(VERSION() AS VARCHAR(200))`, prints `OK: connected to … as <user>` or `FAIL: …` (sanitized detail) with exit code 0/1.
+
 ### Added
 - ES: paquete write — `nz_insert`, `nz_update`, `nz_delete` con SQL parametrizado, `sql_guard` en modo `write`, dry-run con `COUNT` y `confirm` para mutaciones reales.
 - EN: write package — `nz_insert`, `nz_update`, `nz_delete` with parameterized SQL, `sql_guard` in `write` mode, dry-run via `COUNT` and `confirm` for real mutations.
