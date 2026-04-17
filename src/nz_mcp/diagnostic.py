@@ -17,10 +17,10 @@ from pydantic import BaseModel, ConfigDict
 
 from nz_mcp import __version__
 from nz_mcp.config import (
-    _single_profile_or_none,
     config_dir,
     load_profiles_file,
     profiles_path,
+    single_profile_name_or_none,
 )
 from nz_mcp.errors import InvalidProfileError
 from nz_mcp.i18n import Locale, resolve_locale, t
@@ -113,7 +113,7 @@ def collect_diagnostic(
             profiles_count = len(data.profiles)
             profiles_names = tuple(sorted(data.profiles.keys()))
             active_profile = (
-                data.active or os.environ.get("NZ_MCP_PROFILE") or _single_profile_or_none(data)
+                data.active or os.environ.get("NZ_MCP_PROFILE") or single_profile_name_or_none(data)
             )
 
     kr_name, kr_ok = _probe_keyring()
