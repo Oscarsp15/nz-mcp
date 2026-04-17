@@ -40,7 +40,8 @@ def list_databases(profile: Profile, pattern: str | None = None) -> list[dict[st
         with closing(connection.cursor()) as cursor:
             cursor.execute(sql, params)
             rows = cursor.fetchall()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001, RUF100
+        # Catalog/driver failures are not guaranteed to use a stable exception type.
         raise NetezzaError(
             operation="list_databases",
             database=profile.database,
