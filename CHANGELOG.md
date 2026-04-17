@@ -13,6 +13,8 @@ Cada entrada se documenta en **español** y **english**.
 - EN: driver error messages in `open_connection`, `list_databases`, and `probe-catalog` are passed through `sanitize()` with `known_secrets` so passwords are not leaked in MCP-exposed `detail` fields.
 
 ### Added
+- ES: tool `nz_describe_table` para metadata de tabla (columnas, distribución, PK, FK) vía catálogo `_v_*`.
+- EN: `nz_describe_table` tool for table metadata (columns, distribution, PK, FK) via `_v_*` catalog views.
 - ES: tool `nz_get_view_ddl` para obtener el DDL `CREATE VIEW` desde `_v_view` (cross-database).
 - EN: `nz_get_view_ddl` tool to fetch `CREATE VIEW` DDL from `_v_view` (cross-database).
 - ES: tool `nz_list_views` para listar vistas en un schema vía catálogo `_v_view` (cross-database).
