@@ -55,17 +55,26 @@ To inspect your local environment (Python version, config paths, profile names w
 nz-mcp doctor
 ```
 
-Sample output (abbreviated):
+Sample literal output (reference Linux environment, Python 3.11; fictional paths and profiles ``demo`` / ``dev`` / ``prod`` — same shape as ``format_diagnostic_report`` in the package):
 
 ```text
 Local diagnostics (nz-mcp doctor)
 
 nz-mcp version: 0.1.0a0
-Python version: 3.11.x
-...
+Python version: 3.11.9
+Platform: Linux-6.8.0-generic-x86_64-with-glibc2.39
+Configuration directory: /home/demo/.nz-mcp
+  Exists: yes
+  Writable: yes
+Profiles path: /home/demo/.nz-mcp/profiles.toml
+  Exists: yes
+Profiles load OK: yes
+Profile count: 2
 Profile names: dev, prod
-Active profile: dev
-...
+Active profile: prod
+Keyring backend: SecretService Keyring
+  Available: yes
+Locale: en
 ```
 
 Exit code: `0` when the setup is OK; `1` on a critical issue (e.g. keyring unavailable).

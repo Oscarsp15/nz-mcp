@@ -55,17 +55,26 @@ Para revisar el entorno local (versión de Python, rutas de config, perfiles sin
 nz-mcp doctor
 ```
 
-Ejemplo de salida (resumido):
+Ejemplo de salida literal (referencia Linux, Python 3.11; rutas y perfiles ficticios ``demo`` / ``dev`` / ``prod`` — coincide con ``format_diagnostic_report`` del paquete):
 
 ```text
 Diagnóstico local (nz-mcp doctor)
 
 Versión nz-mcp: 0.1.0a0
-Versión de Python: 3.11.x
-...
+Versión de Python: 3.11.9
+Plataforma: Linux-6.8.0-generic-x86_64-with-glibc2.39
+Directorio de configuración: /home/demo/.nz-mcp
+  Existe: sí
+  Escribible: sí
+Ruta de perfiles: /home/demo/.nz-mcp/profiles.toml
+  Existe: sí
+Carga de perfiles OK: sí
+Número de perfiles: 2
 Nombres de perfiles: dev, prod
-Perfil activo: dev
-...
+Perfil activo: prod
+Backend de keyring: SecretService Keyring
+  Disponible: sí
+Idioma (locale): es
 ```
 
 Código de salida: `0` si el entorno es usable; `1` si hay un problema crítico (p. ej. keyring no disponible).
