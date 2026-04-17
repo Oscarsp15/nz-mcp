@@ -1,8 +1,4 @@
-"""MCP server entry — stdio transport.
-
-v0.1.0a0 status: registry + dispatcher are functional and contract-tested.
-The wire-level binding to the official ``mcp`` SDK arrives with issue #5.
-"""
+"""MCP server entry and MCP SDK adapter (stdio transport)."""
 
 from __future__ import annotations
 
@@ -10,9 +6,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import anyio
+from mcp import types
+from mcp.server.lowlevel.server import Server
+from mcp.server.stdio import stdio_server
 from pydantic import ValidationError
 
 import nz_mcp.tools  # noqa: F401  (side effect: register tools)
+from nz_mcp import __version__
 from nz_mcp.config import Profile, get_active_profile
 from nz_mcp.errors import InvalidInputError, NzMcpError, PermissionDeniedError
 from nz_mcp.i18n import both
@@ -104,4 +105,74 @@ def _i18n_key_for(code: str) -> str | None:
     return mapping.get(code)
 
 
-__all__ = ["InvalidInputError", "Profile", "ToolListing", "call_tool", "list_tools"]
+def build_mcp_server(*, config_path: Path | None = None) -> Server[Any, Any]:
+    """Build a low-level MCP server that delegates to the internal dispatcher."""
+    server: Server[Any, Any] = Server(name="nz-mcp", version=__version__)
+
+    @server.list_tools()  # type: ignore[no-untyped-call,untyped-decorator]
+    async def _handle_list_tools() -> list[types.Tool]:
+        return [_to_mcp_tool(listing) for listing in list_tools()]
+
+    @server.call_tool(validate_input=False)  # type: ignore[untyped-decorator]
+    async def _handle_call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        return call_tool(name, arguments, config_path=config_path)
+
+    return server
+
+
+def run_stdio_server(*, config_path: Path | None = None) -> None:
+    """Run the MCP server on stdio using the official MCP SDK transport."""
+    anyio.run(_run_stdio_server_async, config_path)
+
+
+async def _run_stdio_server_async(config_path: Path | None) -> None:
+    server = build_mcp_server(config_path=config_path)
+    options = server.create_initialization_options()
+    async with stdio_server() as (read_stream, write_stream):
+        await server.run(read_stream, write_stream, options)
+
+
+def _to_mcp_tool(listing: ToolListing) -> types.Tool:
+    return types.Tool(
+        name=listing.name,
+        description=listing.description,
+        inputSchema=listing.input_schema,
+        outputSchema=_tool_output_schema(listing.output_schema),
+        annotations=types.ToolAnnotations.model_validate(listing.annotations),
+    )
+
+
+def _tool_output_schema(result_schema: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "result": result_schema,
+            "error": {
+                "type": "object",
+                "additionalProperties": True,
+                "properties": {
+                    "code": {"type": "string"},
+                    "message_en": {"type": "string"},
+                    "message_es": {"type": "string"},
+                    "context": {"type": "object"},
+                },
+                "required": ["code", "message_en", "message_es", "context"],
+            },
+        },
+        "oneOf": [
+            {"required": ["result"]},
+            {"required": ["error"]},
+        ],
+    }
+
+
+__all__ = [
+    "InvalidInputError",
+    "Profile",
+    "ToolListing",
+    "build_mcp_server",
+    "call_tool",
+    "list_tools",
+    "run_stdio_server",
+]
