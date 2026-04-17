@@ -13,6 +13,8 @@ Cada entrada se documenta en **español** y **english**.
 - EN: driver error messages in `open_connection`, `list_databases`, and `probe-catalog` are passed through `sanitize()` with `known_secrets` so passwords are not leaked in MCP-exposed `detail` fields.
 
 ### Added
+- ES: paquete write — `nz_insert`, `nz_update`, `nz_delete` con SQL parametrizado, `sql_guard` en modo `write`, dry-run con `COUNT` y `confirm` para mutaciones reales.
+- EN: write package — `nz_insert`, `nz_update`, `nz_delete` with parameterized SQL, `sql_guard` in `write` mode, dry-run via `COUNT` and `confirm` for real mutations.
 - ES: paquete de procedures — `nz_list_procedures`, `nz_describe_procedure`, `nz_get_procedure_ddl`, `nz_get_procedure_section` (parser NZPLSQL por marcadores, rangos de líneas acotados).
 - EN: procedures package — `nz_list_procedures`, `nz_describe_procedure`, `nz_get_procedure_ddl`, `nz_get_procedure_section` (marker-based NZPLSQL parser, capped line ranges).
 - ES: tools `nz_table_sample`, `nz_table_stats` y `nz_get_table_ddl` — muestra de filas (`execute_select`), estadísticas de almacenamiento/datasets humanos IEC, y DDL `CREATE TABLE` reconstruido desde catálogo.

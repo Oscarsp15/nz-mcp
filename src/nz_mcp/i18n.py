@@ -90,6 +90,10 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Hay varias sobrecargas para el procedimiento '{procedure}'; indica proceduresignature.",
         "en": "Multiple overloads exist for procedure '{procedure}'; specify proceduresignature.",
     },
+    "CONFIRM_REQUIRED": {
+        "es": "Se requiere confirm=true para ejecutar la mutación con dry_run=false.",
+        "en": "confirm=true is required to run the mutation with dry_run=false.",
+    },
     # Hints
     "HINT.RESULT_TRUNCATED": {
         "es": "Resultado truncado en {n} filas. Añade WHERE o LIMIT para refinar.",

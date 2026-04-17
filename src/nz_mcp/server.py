@@ -115,6 +115,7 @@ def _i18n_key_for(code: str) -> str | None:
         "WRONG_STATEMENT_FOR_TOOL": "GUARD_REJECTED.WRONG_STATEMENT_FOR_TOOL",
         "SECTION_NOT_FOUND": "SECTION_NOT_FOUND",
         "OVERLOAD_AMBIGUOUS": "OVERLOAD_AMBIGUOUS",
+        "CONFIRM_REQUIRED": "CONFIRM_REQUIRED",
     }
     return mapping.get(code)
 

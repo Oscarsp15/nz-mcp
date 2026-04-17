@@ -14,6 +14,7 @@ from nz_mcp.tools import (
     session,  # noqa: F401  (registers session tools)
     tables,  # noqa: F401  (registers table tools)
     views,  # noqa: F401  (registers view tools)
+    write,  # noqa: F401  (registers nz_insert, nz_update, nz_delete)
 )
 from nz_mcp.tools.registry import TOOLS, ToolSpec
 

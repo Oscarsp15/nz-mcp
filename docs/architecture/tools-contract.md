@@ -362,7 +362,7 @@ Implementación: parser ligero NZPLSQL en `catalog/procedures.py` (basado en mar
 
 **Output**: `{ "inserted": N, "duration_ms": T }`
 
-Implementación: `INSERT INTO ... VALUES (...)` parametrizado. **Prohibido** construir SQL por concatenación de strings.
+Implementación: `INSERT INTO ... VALUES (...)` parametrizado. **Prohibido** construir SQL por concatenación de strings de valores (identificadores validados con el validador de catálogo).
 
 ---
 
@@ -378,7 +378,9 @@ Implementación: `INSERT INTO ... VALUES (...)` parametrizado. **Prohibido** con
 | `dry_run` | bool (default true) | Ejecuta `SELECT COUNT(*) WHERE ...` primero y pide `confirm: true` para aplicar. |
 | `confirm` | bool (default false) | Requerido si `dry_run: false`. |
 
-**Output**: `{ "updated": N, "duration_ms": T, "dry_run": bool }`
+**Output** (dry-run `true`): `{ "updated": 0, "would_update": N, "dry_run": true, "confirm_required": true, "duration_ms": T }`
+
+**Output** (ejecución real): `{ "updated": N, "duration_ms": T, "dry_run": false }`
 
 **Regla de seguridad**: `sql_guard` rechaza `UPDATE` sin `WHERE`.
 
@@ -388,7 +390,11 @@ Implementación: `INSERT INTO ... VALUES (...)` parametrizado. **Prohibido** con
 
 Mismo patrón que `nz_update` con `where` obligatorio, `dry_run` default `true`.
 
-**Output**: `{ "deleted": N, "duration_ms": T, "dry_run": bool }`
+**Output** (dry-run `true`): `{ "deleted": 0, "would_delete": N, "dry_run": true, "confirm_required": true, "duration_ms": T }`
+
+**Output** (ejecución real): `{ "deleted": N, "duration_ms": T, "dry_run": false }`
+
+Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 
 ---
 
@@ -539,7 +545,7 @@ Todas las tools devuelven errores con estructura estable:
 ```
 
 Códigos estables (contrato):
-`GUARD_REJECTED`, `PERMISSION_DENIED`, `PROFILE_NOT_FOUND`, `CONNECTION_FAILED`, `QUERY_TIMEOUT`, `RESULT_TOO_LARGE`, `INVALID_INPUT`, `NETEZZA_ERROR`, `INTERNAL_ERROR`, `OBJECT_NOT_FOUND`, `SECTION_NOT_FOUND`, `PROCEDURE_ALREADY_EXISTS`, `OVERLOAD_AMBIGUOUS`, `CLONE_VALIDATION_FAILED`.
+`GUARD_REJECTED`, `PERMISSION_DENIED`, `PROFILE_NOT_FOUND`, `CONNECTION_FAILED`, `QUERY_TIMEOUT`, `RESULT_TOO_LARGE`, `INVALID_INPUT`, `CONFIRM_REQUIRED`, `NETEZZA_ERROR`, `INTERNAL_ERROR`, `OBJECT_NOT_FOUND`, `SECTION_NOT_FOUND`, `PROCEDURE_ALREADY_EXISTS`, `OVERLOAD_AMBIGUOUS`, `CLONE_VALIDATION_FAILED`.
 
 ### Descripciones de tool (lo que ve la IA)
 
