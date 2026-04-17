@@ -6,7 +6,7 @@ Commands:
 - ``list-profiles``      list configured profiles.
 - ``doctor``             print local diagnostics (no Netezza connection).
 - ``test-connection``    verify the active profile (stubbed in v0.1.0a0).
-- ``serve``              run the MCP server over stdio (stubbed in v0.1.0a0).
+- ``serve``              run the MCP server over stdio.
 - ``version``            print the package version.
 """
 
@@ -30,6 +30,7 @@ from nz_mcp.config import (
 )
 from nz_mcp.diagnostic import collect_diagnostic, format_diagnostic_report
 from nz_mcp.i18n import resolve_locale
+from nz_mcp.server import run_stdio_server
 
 app = typer.Typer(
     name="nz-mcp",
@@ -98,14 +99,8 @@ def test_connection_cmd(
 
 @app.command("serve")
 def serve_cmd() -> None:
-    """Run the MCP server over stdio (stubbed in v0.1.0a0)."""
-    typer.secho(
-        "[stub] serve — la integración con el SDK 'mcp' llega en issue #5.\n"
-        "Mientras tanto el registro de tools es funcional y testeado.",
-        fg=typer.colors.YELLOW,
-        err=True,
-    )
-    raise typer.Exit(code=0)
+    """Run the MCP server over stdio."""
+    run_stdio_server()
 
 
 # --- helpers ------------------------------------------------------------------
