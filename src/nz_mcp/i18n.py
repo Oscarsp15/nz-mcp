@@ -79,6 +79,91 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "La query tardó {ms}ms, cerca del timeout. Considera filtrar más.",
         "en": "Query took {ms}ms, near timeout. Consider filtering further.",
     },
+    # nz-mcp doctor (CLI diagnostics — no secrets)
+    "DOCTOR.HEADER": {
+        "es": "Diagnóstico local (nz-mcp doctor)",
+        "en": "Local diagnostics (nz-mcp doctor)",
+    },
+    "DOCTOR.BOOL_YES": {
+        "es": "sí",
+        "en": "yes",
+    },
+    "DOCTOR.BOOL_NO": {
+        "es": "no",
+        "en": "no",
+    },
+    "DOCTOR.NONE": {
+        "es": "(ninguno)",
+        "en": "(none)",
+    },
+    "DOCTOR.LABEL.NZ_MCP_VERSION": {
+        "es": "Versión nz-mcp",
+        "en": "nz-mcp version",
+    },
+    "DOCTOR.LABEL.PYTHON_VERSION": {
+        "es": "Versión de Python",
+        "en": "Python version",
+    },
+    "DOCTOR.LABEL.PLATFORM": {
+        "es": "Plataforma",
+        "en": "Platform",
+    },
+    "DOCTOR.LABEL.CONFIG_DIR": {
+        "es": "Directorio de configuración",
+        "en": "Configuration directory",
+    },
+    "DOCTOR.LABEL.EXISTS": {
+        "es": "Existe",
+        "en": "Exists",
+    },
+    "DOCTOR.LABEL.WRITABLE": {
+        "es": "Escribible",
+        "en": "Writable",
+    },
+    "DOCTOR.LABEL.PROFILES_PATH": {
+        "es": "Ruta de perfiles",
+        "en": "Profiles path",
+    },
+    "DOCTOR.LABEL.PROFILES_LOAD_OK": {
+        "es": "Carga de perfiles OK",
+        "en": "Profiles load OK",
+    },
+    "DOCTOR.LABEL.PROFILES_COUNT": {
+        "es": "Número de perfiles",
+        "en": "Profile count",
+    },
+    "DOCTOR.LABEL.PROFILES_NAMES": {
+        "es": "Nombres de perfiles",
+        "en": "Profile names",
+    },
+    "DOCTOR.LABEL.ACTIVE_PROFILE": {
+        "es": "Perfil activo",
+        "en": "Active profile",
+    },
+    "DOCTOR.LABEL.KEYRING_BACKEND": {
+        "es": "Backend de keyring",
+        "en": "Keyring backend",
+    },
+    "DOCTOR.LABEL.AVAILABLE": {
+        "es": "Disponible",
+        "en": "Available",
+    },
+    "DOCTOR.LABEL.LOCALE": {
+        "es": "Idioma (locale)",
+        "en": "Locale",
+    },
+    "DOCTOR.CRITICAL_HEADER": {
+        "es": "Problemas críticos detectados:",
+        "en": "Critical issues detected:",
+    },
+    "DOCTOR.CRITICAL.CONFIG_DIR_NOT_WRITABLE": {
+        "es": "El directorio de configuración no es escribible.",
+        "en": "The configuration directory is not writable.",
+    },
+    "DOCTOR.CRITICAL.KEYRING_UNAVAILABLE": {
+        "es": "El backend de keyring no está disponible.",
+        "en": "The keyring backend is unavailable.",
+    },
 }
 
 

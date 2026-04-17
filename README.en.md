@@ -47,6 +47,29 @@ nz-mcp init        # interactive wizard
 
 Restart Claude Desktop and ask: *"list the databases on my Netezza"*.
 
+### Diagnostics
+
+To inspect your local environment (Python version, config paths, profile names without credentials, keyring) **without connecting to Netezza**:
+
+```bash
+nz-mcp doctor
+```
+
+Sample output (abbreviated):
+
+```text
+Local diagnostics (nz-mcp doctor)
+
+nz-mcp version: 0.1.0a0
+Python version: 3.11.x
+...
+Profile names: dev, prod
+Active profile: dev
+...
+```
+
+Exit code: `0` when the setup is OK; `1` on a critical issue (e.g. keyring unavailable).
+
 ## Available tools (24)
 
 Full contract: [`docs/architecture/tools-contract.md`](docs/architecture/tools-contract.md).

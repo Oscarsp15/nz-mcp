@@ -4,6 +4,7 @@ Commands:
 - ``init``               first-time wizard: creates the first profile.
 - ``add-profile``        add another profile.
 - ``list-profiles``      list configured profiles.
+- ``doctor``             print local diagnostics (no Netezza connection).
 - ``test-connection``    verify the active profile (stubbed in v0.1.0a0).
 - ``serve``              run the MCP server over stdio (stubbed in v0.1.0a0).
 - ``version``            print the package version.
@@ -27,6 +28,8 @@ from nz_mcp.config import (
     list_profile_names,
     profiles_path,
 )
+from nz_mcp.diagnostic import collect_diagnostic, format_diagnostic_report
+from nz_mcp.i18n import resolve_locale
 
 app = typer.Typer(
     name="nz-mcp",
@@ -69,6 +72,15 @@ def list_profiles_cmd() -> None:
         raise typer.Exit(code=0)
     for n in names:
         typer.echo(n)
+
+
+@app.command("doctor")
+def doctor_cmd() -> None:
+    """Print local diagnostics (package, Python, profiles metadata, keyring) — no Netezza."""
+    report = collect_diagnostic()
+    locale = resolve_locale()
+    typer.echo(format_diagnostic_report(report, locale=locale))
+    raise typer.Exit(code=0 if report.is_healthy else 1)
 
 
 @app.command("test-connection")
