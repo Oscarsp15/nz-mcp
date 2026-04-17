@@ -70,7 +70,7 @@ def call_tool(
     except NzMcpError as exc:
         return _error_response(exc.code, **exc.context)
 
-    return {"result": result.model_dump(mode="json")}
+    return {"result": result.model_dump(mode="json", by_alias=True)}
 
 
 def _invoke(spec: ToolSpec, params: Any, *, config_path: Path | None) -> Any:
