@@ -46,6 +46,23 @@ def test_open_connection_calls_nzpy_with_expected_parameters(
     assert captured["securityLevel"] == 1
 
 
+def test_open_connection_sanitizes_known_password_in_driver_detail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    known_pw = "known-test-pw"
+
+    def _raise_with_password(**_kwargs: object) -> object:
+        raise RuntimeError(f"connection failed: dsn contains password={known_pw}")
+
+    monkeypatch.setattr("nz_mcp.connection.nzpy.connect", _raise_with_password)
+
+    with pytest.raises(NzConnectionError) as exc:
+        open_connection(_profile(), known_pw)
+
+    detail = exc.value.context["detail"]
+    assert known_pw not in detail
+
+
 def test_open_connection_wraps_driver_failures(monkeypatch: pytest.MonkeyPatch) -> None:
     def _raise_connect(**_kwargs: object) -> object:
         raise RuntimeError("dial timeout")

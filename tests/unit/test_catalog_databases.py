@@ -75,6 +75,34 @@ def test_list_databases_queries_catalog_with_optional_like(monkeypatch: pytest.M
     assert connection.closed is True
 
 
+def test_list_databases_sanitizes_password_in_driver_detail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    known_pw = "known-test-pw"
+
+    class _LeakCursor(_FakeCursor):
+        def execute(self, sql: str, params: tuple[str | None, str | None]) -> None:
+            _ = (sql, params)
+            raise RuntimeError(f"driver error password={known_pw}")
+
+    cursor = _LeakCursor(rows=[])
+    connection = _FakeConnection(cursor)
+    monkeypatch.setattr("nz_mcp.catalog.databases.get_password", lambda _name: known_pw)
+    monkeypatch.setattr(
+        "nz_mcp.catalog.databases.open_connection",
+        lambda *_args, **_kwargs: connection,
+    )
+    monkeypatch.setattr(
+        "nz_mcp.catalog.databases.resolve_query",
+        lambda _query_id, _profile: "SELECT DATABASE, OWNER FROM _V_DATABASE",
+    )
+
+    with pytest.raises(NetezzaError) as exc:
+        list_databases(_profile(), pattern=None)
+
+    assert known_pw not in exc.value.context["detail"]
+
+
 def test_list_databases_wraps_driver_errors_and_closes_connection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

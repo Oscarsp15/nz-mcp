@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Final
 import nzpy
 
 from nz_mcp.errors import ConnectionError as NzConnectionError
+from nz_mcp.logging_utils import sanitize
 
 if TYPE_CHECKING:
     from nz_mcp.config import Profile
@@ -33,5 +34,5 @@ def open_connection(profile: Profile, password: str) -> object:
             port=profile.port,
             database=profile.database,
             user=profile.user,
-            detail=str(exc),
+            detail=sanitize(str(exc), known_secrets={password}),
         ) from exc
