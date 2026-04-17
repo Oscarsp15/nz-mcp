@@ -13,6 +13,8 @@ Cada entrada se documenta en **español** y **english**.
 - EN: driver error messages in `open_connection`, `list_databases`, and `probe-catalog` are passed through `sanitize()` with `known_secrets` so passwords are not leaked in MCP-exposed `detail` fields.
 
 ### Added
+- ES: tool `nz_list_schemas` para listar schemas en una base vía catálogo `_v_schema` (cross-database).
+- EN: `nz_list_schemas` tool to list schemas in a database via `_v_schema` catalog (cross-database).
 - ES: comando CLI `nz-mcp probe-catalog` para validar todas las consultas de catálogo contra Netezza (parámetros dummy, duración, filas; salida `--json` opcional).
 - EN: `nz-mcp probe-catalog` CLI to validate all catalog queries against Netezza (dummy parameters, duration, rows; optional `--json` output).
 - ES: soporte `catalog_overrides` por perfil para resolver SQL de catálogo por `query_id` desde `profiles.toml`.
