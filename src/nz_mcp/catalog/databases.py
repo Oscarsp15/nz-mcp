@@ -11,6 +11,7 @@ from nz_mcp.catalog.resolver import resolve_query
 from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
 from nz_mcp.errors import NetezzaError
+from nz_mcp.logging_utils import sanitize
 
 _DATABASE_ROW_MIN_ITEMS: Final[int] = 2
 
@@ -43,7 +44,7 @@ def list_databases(profile: Profile, pattern: str | None = None) -> list[dict[st
         raise NetezzaError(
             operation="list_databases",
             database=profile.database,
-            detail=str(exc),
+            detail=sanitize(str(exc), known_secrets={password}),
         ) from exc
     finally:
         connection.close()

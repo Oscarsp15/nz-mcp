@@ -8,6 +8,10 @@ Cada entrada se documenta en **español** y **english**.
 
 ## [Unreleased]
 
+### Security
+- ES: los mensajes de error del driver en `open_connection`, `list_databases` y `probe-catalog` pasan por `sanitize()` con `known_secrets` para no filtrar contraseñas en el `detail` expuesto al cliente MCP.
+- EN: driver error messages in `open_connection`, `list_databases`, and `probe-catalog` are passed through `sanitize()` with `known_secrets` so passwords are not leaked in MCP-exposed `detail` fields.
+
 ### Added
 - ES: comando CLI `nz-mcp probe-catalog` para validar todas las consultas de catálogo contra Netezza (parámetros dummy, duración, filas; salida `--json` opcional).
 - EN: `nz-mcp probe-catalog` CLI to validate all catalog queries against Netezza (dummy parameters, duration, rows; optional `--json` output).

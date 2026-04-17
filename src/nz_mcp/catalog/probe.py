@@ -15,6 +15,7 @@ from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
 from nz_mcp.errors import ConnectionError as NzConnectionError
 from nz_mcp.errors import CredentialNotFoundError, InvalidInputError, InvalidProfileError
+from nz_mcp.logging_utils import sanitize
 
 _DUMMY_SCHEMA: Final[str] = "DBO"
 _DUMMY_OBJECT: Final[str] = "__NZ_MCP_PROBE_DUMMY__"
@@ -114,6 +115,8 @@ def probe_one_row(
     cursor: Any,
     profile: Profile,
     cq: CatalogQuery,
+    *,
+    password: str,
 ) -> ProbeResult:
     """Execute one catalog probe using an open cursor."""
     try:
@@ -146,7 +149,7 @@ def probe_one_row(
         rows = cursor.fetchall()
     except Exception as exc:
         duration_ms = (time.perf_counter() - start) * 1000.0
-        detail_text = str(exc)
+        detail_text = sanitize(str(exc), known_secrets={password})
         if cq.id in _STRUCTURAL_IDS and _looks_like_missing_object(detail_text):
             return ProbeResult(
                 query_id=cq.id,
@@ -198,7 +201,7 @@ def run_probe_catalog(profile: Profile) -> ProbeRun:
         with closing(connection.cursor()) as cursor:
             cur = cast(Any, cursor)
             for cq in ALL_QUERIES:
-                results.append(probe_one_row(cur, profile, cq))
+                results.append(probe_one_row(cur, profile, cq, password=password))
     finally:
         connection.close()
 
