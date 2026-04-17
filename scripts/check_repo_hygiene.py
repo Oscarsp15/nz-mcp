@@ -194,7 +194,7 @@ def main(argv: list[str]) -> int:
         for path, reason in violations:
             print(f"  - {path}\n      motivo: {reason}", file=sys.stderr)
         print(
-            "\nSi el archivo es legítimo, añadilo a la whitelist en scripts/check_no_scratch.py\n"
+            "\nSi el archivo es legítimo, añadilo a la whitelist en scripts/check_repo_hygiene.py\n"
             "y abrí ADR documentando por qué (las whitelists son contrato, no impulso).",
             file=sys.stderr,
         )

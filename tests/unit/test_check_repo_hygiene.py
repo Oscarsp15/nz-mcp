@@ -1,4 +1,4 @@
-"""Tests for scripts/check_no_scratch.py.
+"""Tests for scripts/check_repo_hygiene.py.
 
 Imports the script as a module via importlib to avoid adding it to the package.
 """
@@ -12,14 +12,14 @@ from types import ModuleType
 
 import pytest
 
-_SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "check_no_scratch.py"
+_SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "check_repo_hygiene.py"
 
 
 def _load_module() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("_check_no_scratch", _SCRIPT_PATH)
+    spec = importlib.util.spec_from_file_location("_check_repo_hygiene", _SCRIPT_PATH)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["_check_no_scratch"] = mod
+    sys.modules["_check_repo_hygiene"] = mod
     spec.loader.exec_module(mod)
     return mod
 

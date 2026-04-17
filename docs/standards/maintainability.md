@@ -109,12 +109,12 @@ Las IAs tienden a fabricar archivos de "auto-ayuda" mientras trabajan: `notes.md
 
 ### Defensa en profundidad (4 capas)
 
-1. **Whitelist explícita** de paths permitidos en `scripts/check_no_scratch.py`:
+1. **Whitelist explícita** de paths permitidos en `scripts/check_repo_hygiene.py`:
    - **Root**: `AGENTS.md`, `README.md`, `README.en.md`, `CHANGELOG.md`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `LICENSE`, `SECURITY.md`, `pyproject.toml`, `.gitignore`, `.python-version`, `.pre-commit-config.yaml`, `.secrets.baseline`.
    - **Directorios top-level**: `src/`, `tests/`, `docs/`, `.github/`, `scripts/`.
 2. **Blacklist de patrones** de nombre y directorios (regex case-insensitive). Cubre `notes`, `notas`, `scratch`, `todo`, `plan`, `wip`, `draft`, `borrador`, `analysis`, `tmp`, `temp`, `debug`, `sandbox`, `playground`, `local_test`, `test_local`, `deleteme`, `borrame`, `untitled`, sufijos `*.bak/.orig/.swp/.tmp/.log`, dirs `.scratch/`, `.aider/`, `.cursor/`, `agent_workspace/`, etc.
-3. **Hook pre-commit** (`no-scratch-files`) rechaza el commit local antes del push.
-4. **CI obligatorio** (`No scratch files` en `validate-conventions.yml`) bloquea el merge incluso si el dev usa `--no-verify`.
+3. **Hook pre-commit** (`repo-hygiene`) rechaza el commit local antes del push.
+4. **CI obligatorio** (`Repo hygiene` en `validate-conventions.yml`) bloquea el merge incluso si el dev usa `--no-verify`.
 
 ### ¿Y si necesito pensar?
 
@@ -123,7 +123,7 @@ Las IAs tienden a fabricar archivos de "auto-ayuda" mientras trabajan: `notes.md
 
 ### ¿Y si añado una capacidad nueva legítima que no encaja en la whitelist?
 
-1. Abre PR que **añade el path a la whitelist** en `scripts/check_no_scratch.py`.
+1. Abre PR que **añade el path a la whitelist** en `scripts/check_repo_hygiene.py`.
 2. Justifica con ADR (`type/adr` issue + ADR en `docs/adr/`).
 3. Owner aprueba expansión de la whitelist.
 
