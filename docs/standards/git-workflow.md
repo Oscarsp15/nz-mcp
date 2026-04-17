@@ -218,8 +218,11 @@ Workflow `.github/workflows/validate-conventions.yml` corre en cada PR y push:
 2. Verifica todos los commits del PR (subject regex).
 3. Verifica título del PR.
 4. Verifica que el cuerpo del PR contiene `Closes #` o `Refs #`.
+5. Verifica que el cuerpo del PR contiene los encabezados obligatorios del template (`## ¿Qué cambia?`, `## Issue relacionado`, `## Acción según AGENTS.md`, `## Auditoría pre-merge`, `## Validación humana`). Ver `scripts/check_pr_body.py`.
 
 Si alguno falla → CI rojo → no merge.
+
+Dependabot está exento de los jobs `branch-name`, `pr-body` y `pr-body-structure` porque usa su propio naming/formato.
 
 ---
 
