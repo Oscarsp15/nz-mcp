@@ -82,6 +82,14 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "No se encontró credencial para el perfil '{profile}'.",
         "en": "No credential found for profile '{profile}'.",
     },
+    "SECTION_NOT_FOUND": {
+        "es": "La sección solicitada no existe en el cuerpo del procedimiento (section={section}).",
+        "en": "The requested section does not exist in the procedure body (section={section}).",
+    },
+    "OVERLOAD_AMBIGUOUS": {
+        "es": "Hay varias sobrecargas para el procedimiento '{procedure}'; indica proceduresignature.",
+        "en": "Multiple overloads exist for procedure '{procedure}'; specify proceduresignature.",
+    },
     # Hints
     "HINT.RESULT_TRUNCATED": {
         "es": "Resultado truncado en {n} filas. Añade WHERE o LIMIT para refinar.",
