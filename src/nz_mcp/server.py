@@ -1,7 +1,7 @@
 """MCP server entry — stdio transport.
 
 v0.1.0a0 status: registry + dispatcher are functional and contract-tested.
-The wire-level binding to the official ``mcp`` SDK arrives with issue #2.
+The wire-level binding to the official ``mcp`` SDK arrives with issue #5.
 """
 
 from __future__ import annotations

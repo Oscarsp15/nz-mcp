@@ -29,4 +29,4 @@ El humano confirma que pasaron antes de cada release (ver `docs/actions/release.
 ## v0.1.0a0
 
 Ningún test de integration aún. Llegan junto con la primera tool de lectura
-real (issue #1).
+real (issue #4).
