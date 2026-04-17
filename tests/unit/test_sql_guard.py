@@ -19,6 +19,11 @@ def test_explain_passes_in_read() -> None:
     assert parsed.kind is StatementKind.EXPLAIN
 
 
+def test_show_passthrough_command_parses_as_show() -> None:
+    parsed = validate("SHOW DATABASES", mode="read")
+    assert parsed.kind is StatementKind.SHOW
+
+
 def test_insert_blocked_in_read() -> None:
     with pytest.raises(GuardRejectedError) as exc:
         validate("INSERT INTO t (a) VALUES (1)", mode="read")

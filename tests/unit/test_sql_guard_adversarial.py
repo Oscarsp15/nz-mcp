@@ -57,3 +57,27 @@ def test_delete_without_where_blocked_in_admin() -> None:
 def test_grant_blocked_in_all_modes(mode: str) -> None:
     with pytest.raises(GuardRejectedError):
         validate("GRANT SELECT ON t TO u", mode=mode)  # type: ignore[arg-type]
+
+
+@pytest.mark.adversarial
+def test_vacuum_command_blocked_as_unknown_statement() -> None:
+    """Command nodes that are not SHOW/EXPLAIN stay UNKNOWN (no unintended allowlist)."""
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("VACUUM FULL my_table", mode="read")
+    assert exc.value.code == "UNKNOWN_STATEMENT"
+
+
+@pytest.mark.adversarial
+def test_non_read_command_blocked_as_unknown_statement() -> None:
+    """Other sqlglot Command statements must not bypass classification as read-only."""
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("REINDEX TABLE t", mode="read")
+    assert exc.value.code == "UNKNOWN_STATEMENT"
+
+
+@pytest.mark.adversarial
+def test_show_stacked_with_select_blocked() -> None:
+    """SHOW ... must not hide a second stacked statement."""
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("SHOW DATABASES; SELECT 1", mode="read")
+    assert exc.value.code == "STACKED_NOT_ALLOWED"
