@@ -83,7 +83,7 @@ def test_run_probe_all_ok(monkeypatch: pytest.MonkeyPatch) -> None:
         def execute(self, *_a: Any, **_k: Any) -> None:
             return None
 
-        def fetchall(self) -> list[tuple[str]]:
+        def fetchall(self) -> list[tuple[str, str]]:
             return [("a", "b")]
 
         def close(self) -> None:
