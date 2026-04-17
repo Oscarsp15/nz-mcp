@@ -90,7 +90,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "PLR2004", "ARG", "PLC0415"]   # assert / magic numbers / unused fixture args / nested imports for fixture isolation
 "src/nz_mcp/i18n.py" = ["E501"]                       # message strings may exceed line length
-"scripts/**" = ["S607", "PLR0911", "PLR2004", "T201"] # CLI utility scripts
+"scripts/**" = ["S603", "S607", "PLR0911", "PLR2004", "T201"] # CLI utility scripts
 
 # ----- mypy -----
 [tool.mypy]

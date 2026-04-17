@@ -103,6 +103,41 @@ Añadir una tool = añadir un decorador. Sin tocar el dispatcher.
 v0.1: logs estructurados. Suficiente para auditar y depurar.
 v0.2+ (cuando justifique): métricas (tools llamadas, duración, errores) → expuestas como `nz_self_metrics` tool. ADR primero.
 
+## Archivos prohibidos en el repo
+
+Las IAs tienden a fabricar archivos de "auto-ayuda" mientras trabajan: `notes.md` para pensar, `plan.md` para estructurarse, `scratch.py` para probar, `analysis.md` para razonar. **Ninguno entra al repo**.
+
+### Defensa en profundidad (4 capas)
+
+1. **Whitelist explícita** de paths permitidos en `scripts/check_no_scratch.py`:
+   - **Root**: `AGENTS.md`, `README.md`, `README.en.md`, `CHANGELOG.md`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `LICENSE`, `SECURITY.md`, `pyproject.toml`, `.gitignore`, `.python-version`, `.pre-commit-config.yaml`, `.secrets.baseline`.
+   - **Directorios top-level**: `src/`, `tests/`, `docs/`, `.github/`, `scripts/`.
+2. **Blacklist de patrones** de nombre y directorios (regex case-insensitive). Cubre `notes`, `notas`, `scratch`, `todo`, `plan`, `wip`, `draft`, `borrador`, `analysis`, `tmp`, `temp`, `debug`, `sandbox`, `playground`, `local_test`, `test_local`, `deleteme`, `borrame`, `untitled`, sufijos `*.bak/.orig/.swp/.tmp/.log`, dirs `.scratch/`, `.aider/`, `.cursor/`, `agent_workspace/`, etc.
+3. **Hook pre-commit** (`no-scratch-files`) rechaza el commit local antes del push.
+4. **CI obligatorio** (`No scratch files` en `validate-conventions.yml`) bloquea el merge incluso si el dev usa `--no-verify`.
+
+### ¿Y si necesito pensar?
+
+- **Sí**: usa `/tmp/<algo>.md`, tu área de runtime, comentarios en el PR, o un issue de tracking en GitHub.
+- **No**: nada dentro del clone del repo, aunque esté en `.gitignore` (lo correcto: que ni exista en el directorio).
+
+### ¿Y si añado una capacidad nueva legítima que no encaja en la whitelist?
+
+1. Abre PR que **añade el path a la whitelist** en `scripts/check_no_scratch.py`.
+2. Justifica con ADR (`type/adr` issue + ADR en `docs/adr/`).
+3. Owner aprueba expansión de la whitelist.
+
+**Whitelists son contrato, no impulso. Cada nueva entrada se debate.**
+
+### Anti-patrones rechazados automáticamente
+
+- ❌ `notes.md`, `plan.md`, `analysis.md` en root o dentro de cualquier dir.
+- ❌ `scratch.py`, `tmp.py`, `playground/`, `sandbox.py`.
+- ❌ `TODO.md`, `WIP.txt`, `borrador.md`, `untitled.md`.
+- ❌ Backups: `*.bak`, `*.orig`, `*.swp`, `*.tmp`, `*.log`, `*~`.
+- ❌ Dirs de IA: `.scratch/`, `.aider/`, `.cursor/`, `.windsurf/`, `agent_workspace/`.
+- ❌ Cualquier dir top-level fuera de `src/tests/docs/.github/scripts/`.
+
 ## Qué NO hacer (anti-patrones de mantenibilidad)
 
 - ❌ Helper "utils.py" cajón de sastre.

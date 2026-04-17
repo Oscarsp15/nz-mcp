@@ -15,6 +15,7 @@
 6. **Jamás** publicar una release sin que el humano confirme que los integration tests locales han pasado.
 7. **Jamás** hacer mocking del driver en tests marcados `@pytest.mark.integration`.
 8. **Jamás** escribir comentarios o nombres de funciones en español — **el código y los comentarios van en inglés**.
+9. **Jamás** crear archivos temporales o de auto-ayuda en el repo (`notes.md`, `plan.md`, `scratch.py`, `wip.txt`, `analysis.md`, `TODO_LOCAL.md`, `.scratch/`, `playground/`, etc.). Si necesitas pensar en voz alta, usa `/tmp` o el área de tu propio runtime — **fuera del repo**. Validado por `scripts/check_no_scratch.py` (whitelist+blacklist), hook `pre-commit` y CI bloqueante. Si un archivo legítimo cae en blacklist, abre PR para añadirlo a la whitelist con ADR justificándolo.
 
 ---
 
