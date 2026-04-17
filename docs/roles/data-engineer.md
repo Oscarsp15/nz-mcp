@@ -36,6 +36,9 @@ conn = nzpy.connect(
 
 ## Catálogo Netezza (vistas relevantes)
 
+Referencia obligatoria de SQL validado por versión:
+- [`../architecture/netezza-catalog-queries.md`](../architecture/netezza-catalog-queries.md)
+
 | Vista | Para qué |
 |---|---|
 | `_v_database` | `nz_list_databases` |
