@@ -14,11 +14,17 @@ jobs:
     name: Branch name
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Skip for bots
+        if: github.actor == 'dependabot[bot]'
+        run: echo "Skipping for ${{ github.actor }} — bots use their own naming."
+      - uses: actions/checkout@v6
+        if: github.actor != 'dependabot[bot]'
+      - uses: actions/setup-python@v6
+        if: github.actor != 'dependabot[bot]'
         with:
           python-version: "3.11"
       - name: Validate branch name
+        if: github.actor != 'dependabot[bot]'
         run: |
           BRANCH="${{ github.head_ref }}"
           echo "Branch: $BRANCH"
@@ -46,8 +52,8 @@ jobs:
     name: PR title
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Validate PR title
@@ -59,7 +65,11 @@ jobs:
     name: PR body has Closes/Refs
     runs-on: ubuntu-latest
     steps:
+      - name: Skip for bots
+        if: github.actor == 'dependabot[bot]'
+        run: echo "Skipping for ${{ github.actor }} — bots have their own PR body format."
       - name: Verify Closes #N or Refs #N
+        if: github.actor != 'dependabot[bot]'
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
@@ -75,10 +85,10 @@ jobs:
     name: Commit subjects
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Validate every commit subject in PR
