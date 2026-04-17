@@ -14,10 +14,12 @@ from nz_mcp.server import call_tool, list_tools
 from nz_mcp.tools.registry import TOOLS
 
 EXPECTED_V010A0: set[str] = {
+    "nz_create_table",
     "nz_current_profile",
     "nz_delete",
     "nz_describe_procedure",
     "nz_describe_table",
+    "nz_drop_table",
     "nz_explain",
     "nz_get_procedure_ddl",
     "nz_get_procedure_section",
@@ -33,6 +35,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_switch_profile",
     "nz_table_sample",
     "nz_table_stats",
+    "nz_truncate",
     "nz_update",
 }
 
