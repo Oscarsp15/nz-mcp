@@ -260,3 +260,256 @@ def test_describe_table_routing_detects_pk_query(monkeypatch: pytest.MonkeyPatch
     joined = "\n".join(cursor.executed_sql).lower()
     assert "contype = 'p'" in joined
     assert "contype = 'f'" in joined
+
+
+def test_describe_table_dict_shaped_catalog_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cover dict-row parsing paths (nzpy-style keys) for all four queries."""
+    buckets = {
+        "columns": [
+            {
+                "COLUMN_NAME": "ID",
+                "DATA_TYPE": "INTEGER",
+                "NOT_NULL": True,
+                "DEFAULT_VALUE": None,
+            },
+            {
+                "COLUMN_NAME": "NM",
+                "DATA_TYPE": "VARCHAR(5)",
+                "NOT_NULL": False,
+                "DEFAULT_VALUE": "'x'",
+            },
+        ],
+        "dist": [{"ATTNAME": "ID", "DISTSEQNO": 1}],
+        "pk": [{"CONSTRAINTNAME": "pk_t", "ATTNAME": "ID", "CONSEQ": 1}],
+        "fk": [
+            {
+                "CONSTRAINTNAME": "fk_ref",
+                "ATTNAME": "NM",
+                "CONSEQ": 1,
+                "PKDATABASE": None,
+                "PKSCHEMA": "REF",
+                "PKRELATION": "T2",
+                "PKATTNAME": "RID",
+                "DEL_TYPE": "a",
+                "UPDT_TYPE": "b",
+            },
+        ],
+    }
+    cursor = _RoutingCursor(buckets)
+    monkeypatch.setattr(tables_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(tables_mod, "open_connection", lambda *_a, **_k: _FakeConn(cursor))
+    monkeypatch.setattr(
+        tables_mod,
+        "resolve_query",
+        lambda qid, _p: {
+            "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_distribution": "_V_TABLE_DIST_MAP",
+            "describe_table_pk": "CONTYPE = 'p'",
+            "describe_table_fk": "CONTYPE = 'f'",
+        }[qid],
+    )
+
+    out = describe_table(_profile(), database="DB", schema="PUBLIC", table="t")
+
+    assert out["distribution"]["type"] == "HASH"
+    assert out["columns"][1]["nullable"] is True
+    assert out["columns"][1]["default"] == "'x'"
+    assert out["foreign_keys"][0]["references"]["database"] is None
+    assert out["foreign_keys"][0]["references"]["schema"] == "REF"
+
+
+def test_describe_table_pk_lexicographic_constraint_choice(monkeypatch: pytest.MonkeyPatch) -> None:
+    buckets = {
+        "columns": [("ID", "INT", True, None, 1)],
+        "dist": [],
+        "pk": [
+            ("ZPK", "ZCOL", 1),
+            ("APK", "ACOL", 1),
+        ],
+        "fk": [],
+    }
+    cursor = _RoutingCursor(buckets)
+    monkeypatch.setattr(tables_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(tables_mod, "open_connection", lambda *_a, **_k: _FakeConn(cursor))
+    monkeypatch.setattr(
+        tables_mod,
+        "resolve_query",
+        lambda qid, _p: {
+            "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_distribution": "_V_TABLE_DIST_MAP",
+            "describe_table_pk": "CONTYPE = 'p'",
+            "describe_table_fk": "CONTYPE = 'f'",
+        }[qid],
+    )
+
+    out = describe_table(_profile(), database="DB", schema="S", table="T")
+    assert out["primary_key"] == ["ACOL"]
+
+
+def test_describe_table_distribution_bad_dict_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    buckets = {
+        "columns": [("ID", "INT", True, None, 1)],
+        "dist": [{"DISTSEQNO": 1}],
+        "pk": [],
+        "fk": [],
+    }
+    cursor = _RoutingCursor(buckets)
+    monkeypatch.setattr(tables_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(tables_mod, "open_connection", lambda *_a, **_k: _FakeConn(cursor))
+    monkeypatch.setattr(
+        tables_mod,
+        "resolve_query",
+        lambda qid, _p: {
+            "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_distribution": "_V_TABLE_DIST_MAP",
+            "describe_table_pk": "CONTYPE = 'p'",
+            "describe_table_fk": "CONTYPE = 'f'",
+        }[qid],
+    )
+
+    with pytest.raises(NetezzaError) as exc:
+        describe_table(_profile(), database="DB", schema="S", table="T")
+
+    assert "ATTNAME" in exc.value.context["detail"]
+
+
+def test_describe_table_column_bad_dict_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    buckets = {
+        "columns": [{"COLUMN_NAME": "ID", "NOT_NULL": True}],
+        "dist": [],
+        "pk": [],
+        "fk": [],
+    }
+    cursor = _RoutingCursor(buckets)
+    monkeypatch.setattr(tables_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(tables_mod, "open_connection", lambda *_a, **_k: _FakeConn(cursor))
+    monkeypatch.setattr(
+        tables_mod,
+        "resolve_query",
+        lambda qid, _p: {
+            "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_distribution": "_V_TABLE_DIST_MAP",
+            "describe_table_pk": "CONTYPE = 'p'",
+            "describe_table_fk": "CONTYPE = 'f'",
+        }[qid],
+    )
+
+    with pytest.raises(NetezzaError) as exc:
+        describe_table(_profile(), database="DB", schema="S", table="T")
+
+    assert (
+        "COLUMN_NAME" in exc.value.context["detail"] or "DATA_TYPE" in exc.value.context["detail"]
+    )
+
+
+def test_describe_table_pk_bad_dict_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    buckets = {
+        "columns": [("ID", "INT", True, None, 1)],
+        "dist": [],
+        "pk": [{"CONSTRAINTNAME": "p", "ATTNAME": "ID"}],
+        "fk": [],
+    }
+    cursor = _RoutingCursor(buckets)
+    monkeypatch.setattr(tables_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(tables_mod, "open_connection", lambda *_a, **_k: _FakeConn(cursor))
+    monkeypatch.setattr(
+        tables_mod,
+        "resolve_query",
+        lambda qid, _p: {
+            "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_distribution": "_V_TABLE_DIST_MAP",
+            "describe_table_pk": "CONTYPE = 'p'",
+            "describe_table_fk": "CONTYPE = 'f'",
+        }[qid],
+    )
+
+    with pytest.raises(NetezzaError) as exc:
+        describe_table(_profile(), database="DB", schema="S", table="T")
+
+    assert "CONSEQ" in exc.value.context["detail"]
+
+
+def test_describe_table_fk_bad_row_missing_constraint_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    buckets = {
+        "columns": [("ID", "INT", True, None, 1)],
+        "dist": [],
+        "pk": [],
+        "fk": [{"ATTNAME": "ID", "CONSEQ": 1}],
+    }
+    cursor = _RoutingCursor(buckets)
+    monkeypatch.setattr(tables_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(tables_mod, "open_connection", lambda *_a, **_k: _FakeConn(cursor))
+    monkeypatch.setattr(
+        tables_mod,
+        "resolve_query",
+        lambda qid, _p: {
+            "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_distribution": "_V_TABLE_DIST_MAP",
+            "describe_table_pk": "CONTYPE = 'p'",
+            "describe_table_fk": "CONTYPE = 'f'",
+        }[qid],
+    )
+
+    with pytest.raises(NetezzaError) as exc:
+        describe_table(_profile(), database="DB", schema="S", table="T")
+
+    assert "CONSTRAINTNAME" in exc.value.context["detail"]
+
+
+def test_describe_table_column_tuple_too_short_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    buckets = {
+        "columns": [("A", "B", 0)],
+        "dist": [],
+        "pk": [],
+        "fk": [],
+    }
+    cursor = _RoutingCursor(buckets)
+    monkeypatch.setattr(tables_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(tables_mod, "open_connection", lambda *_a, **_k: _FakeConn(cursor))
+    monkeypatch.setattr(
+        tables_mod,
+        "resolve_query",
+        lambda qid, _p: {
+            "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_distribution": "_V_TABLE_DIST_MAP",
+            "describe_table_pk": "CONTYPE = 'p'",
+            "describe_table_fk": "CONTYPE = 'f'",
+        }[qid],
+    )
+
+    with pytest.raises(NetezzaError) as exc:
+        describe_table(_profile(), database="DB", schema="S", table="T")
+
+    assert "column row" in exc.value.context["detail"].lower()
+
+
+def test_describe_table_not_null_zero_and_f_string(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cover _is_not_null branches for 0 and 'f' string values."""
+    buckets = {
+        "columns": [
+            ("A", "INT", 0, None, 1),
+            ("B", "INT", "f", None, 2),
+        ],
+        "dist": [],
+        "pk": [],
+        "fk": [],
+    }
+    cursor = _RoutingCursor(buckets)
+    monkeypatch.setattr(tables_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(tables_mod, "open_connection", lambda *_a, **_k: _FakeConn(cursor))
+    monkeypatch.setattr(
+        tables_mod,
+        "resolve_query",
+        lambda qid, _p: {
+            "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_distribution": "_V_TABLE_DIST_MAP",
+            "describe_table_pk": "CONTYPE = 'p'",
+            "describe_table_fk": "CONTYPE = 'f'",
+        }[qid],
+    )
+
+    out = describe_table(_profile(), database="DB", schema="S", table="T")
+    assert out["columns"][0]["nullable"] is True
+    assert out["columns"][1]["nullable"] is True

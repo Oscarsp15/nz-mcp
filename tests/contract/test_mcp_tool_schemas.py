@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from nz_mcp.errors import ObjectNotFoundError
 from nz_mcp.server import call_tool, list_tools
 from nz_mcp.tools.registry import TOOLS
 
@@ -70,6 +71,24 @@ def test_call_tool_happy_path(two_profiles: Path) -> None:
     out = call_tool("nz_current_profile", {}, config_path=two_profiles)
     assert "result" in out
     assert out["result"]["profile"] == "dev"
+
+
+@pytest.mark.contract
+def test_call_tool_describe_table_object_not_found(
+    two_profiles: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _raise(_profile: object, **_kwargs: object) -> dict[str, object]:
+        raise ObjectNotFoundError(detail="no such table")
+
+    monkeypatch.setattr("nz_mcp.tools.describe_table.describe_table", _raise)
+
+    out = call_tool(
+        "nz_describe_table",
+        {"database": "DEV", "schema": "PUBLIC", "table": "__missing__"},
+        config_path=two_profiles,
+    )
+    assert "error" in out
+    assert out["error"]["code"] == "OBJECT_NOT_FOUND"
 
 
 @pytest.mark.contract
