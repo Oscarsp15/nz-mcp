@@ -40,3 +40,11 @@ repos:
         entry: python scripts/check_commit_msg.py
         language: system
         stages: [commit-msg]
+
+      - id: repo-hygiene
+        name: Bloquea archivos temporales / auto-ayuda
+        entry: python scripts/check_repo_hygiene.py
+        language: system
+        always_run: true
+        pass_filenames: false
+        stages: [pre-commit, pre-push]
