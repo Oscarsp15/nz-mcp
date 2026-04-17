@@ -104,6 +104,7 @@
 ## Referencias cruzadas
 
 - Contrato de tools: [tools-contract.md](tools-contract.md)
+- Catálogo Netezza validado (queries y columnas): [netezza-catalog-queries.md](netezza-catalog-queries.md)
 - Modelo de seguridad: [security-model.md](security-model.md)
 - Estándares: `../standards/`
 - Roles: `../roles/`
