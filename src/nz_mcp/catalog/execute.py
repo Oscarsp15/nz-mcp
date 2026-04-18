@@ -8,6 +8,7 @@ from contextlib import closing
 from typing import Any, Final, Protocol, cast
 
 import sqlglot
+from nzpy import ProgrammingError
 from sqlglot import expressions as exp
 
 from nz_mcp.auth import get_password
@@ -18,6 +19,23 @@ from nz_mcp.logging_utils import sanitize
 
 FETCH_BATCH: Final[int] = 200
 RESPONSE_BYTES_CAP: Final[int] = 100 * 1024
+
+# Common PostgreSQL / Netezza type OIDs (driver may return OID ints in cursor.description).
+_TYPE_OID_TO_NAME: Final[dict[int, str]] = {
+    16: "bool",
+    19: "name",
+    20: "bigint",
+    21: "smallint",
+    23: "integer",
+    25: "text",
+    700: "real",
+    701: "double precision",
+    1042: "char",
+    1043: "varchar",
+    1082: "date",
+    1114: "timestamp",
+    1700: "numeric",
+}
 
 
 class _CursorLike(Protocol):
@@ -127,20 +145,34 @@ def execute_select(
 
 
 def fetch_explain_text(profile: Profile, explain_sql: str) -> str:
-    """Execute ``EXPLAIN`` / ``EXPLAIN VERBOSE`` and return plan text."""
+    """Execute ``EXPLAIN`` / ``EXPLAIN VERBOSE`` and return plan text.
+
+    On some NPS versions the plan is delivered as server notices (no row description);
+    nzpy then raises ``ProgrammingError: no result set`` on fetch — we join ``cursor.notices``.
+    """
     password = get_password(profile.name)
     connection = cast(_ConnectionLike, open_connection(profile, password))
     chunks: list[str] = []
     try:
         with closing(connection.cursor()) as cursor:
             cursor.execute(explain_sql)
-            while True:
-                batch = cursor.fetchmany(FETCH_BATCH)
-                if not batch:
-                    break
-                for raw in batch:
-                    cell = (raw[0] if raw else "") if isinstance(raw, (tuple, list)) else raw
-                    chunks.append("" if cell is None else str(cell))
+            try:
+                while True:
+                    batch = cursor.fetchmany(FETCH_BATCH)
+                    if not batch:
+                        break
+                    for raw in batch:
+                        cell = (raw[0] if raw else "") if isinstance(raw, (tuple, list)) else raw
+                        chunks.append("" if cell is None else str(cell))
+            except ProgrammingError as exc:
+                if "no result set" not in str(exc).lower():
+                    raise
+            if chunks:
+                return "\n".join(chunks).strip()
+            notice_texts = list(getattr(cursor, "notices", None) or [])
+            if notice_texts:
+                return "\n".join(n.strip() for n in notice_texts if n).strip()
+            return ""
     except Exception as exc:  # noqa: BLE001, RUF100
         raise NetezzaError(
             operation="explain",
@@ -150,7 +182,16 @@ def fetch_explain_text(profile: Profile, explain_sql: str) -> str:
     finally:
         connection.close()
 
-    return "\n".join(chunks).strip()
+
+def _type_label_from_oid_cell(cell: Any) -> str:
+    if isinstance(cell, int):
+        return _TYPE_OID_TO_NAME.get(cell, str(cell))
+    if isinstance(cell, str) and cell.isdigit():
+        oid = int(cell)
+        return _TYPE_OID_TO_NAME.get(oid, cell)
+    if cell is None:
+        return "unknown"
+    return str(cell)
 
 
 def _column_meta_from_cursor(cursor: _CursorLike) -> list[dict[str, str]]:
@@ -162,9 +203,9 @@ def _column_meta_from_cursor(cursor: _CursorLike) -> list[dict[str, str]]:
     for col in desc:
         if isinstance(col, (tuple, list)) and len(col) >= _min_parts:
             name = str(col[0]) if col[0] is not None else ""
-            ctype = str(col[1]) if len(col) > 1 and col[1] is not None else "unknown"
+            ctype = _type_label_from_oid_cell(col[1])
             out.append({"name": name, "type": ctype})
-        elif isinstance(col, tuple):
+        elif isinstance(col, (tuple, list)) and len(col) >= 1:
             out.append({"name": str(col[0]), "type": "unknown"})
         else:
             out.append({"name": str(col), "type": "unknown"})

@@ -15,6 +15,7 @@ from nz_mcp.catalog.nzplsql_parser import (
     parse_sections,
 )
 from nz_mcp.catalog.resolver import resolve_query
+from nz_mcp.catalog.row_shape import is_sequence_row
 from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
 from nz_mcp.errors import (
@@ -350,7 +351,7 @@ def _row_to_list_item(row: Any) -> dict[str, str]:
             "arguments": "" if args is None else str(args),
             "returns": "" if ret is None else str(ret),
         }
-    if isinstance(row, tuple) and len(row) >= _ROW_LIST_MIN:
+    if is_sequence_row(row, _ROW_LIST_MIN):
         return {
             "name": str(row[0]),
             "owner": str(row[1]),
@@ -369,7 +370,7 @@ def _ddl_get(row: Any, field: str) -> str:
                 return str(row[k])
         return ""
     idx = _DDL_TUPLE_INDEX.get(field)
-    if idx is not None and isinstance(row, tuple) and len(row) > idx:
+    if idx is not None and is_sequence_row(row, idx + 1):
         cell = row[idx]
         return "" if cell is None else str(cell)
     return ""

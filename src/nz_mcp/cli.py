@@ -71,8 +71,12 @@ def init_cmd() -> None:
 
 @app.command("add-profile")
 def add_profile_cmd(
-    name: str = typer.Argument(..., help="Nombre del perfil"),
-    set_active: bool = typer.Option(False, "--active/--no-active", help="Marcar como activo"),
+    name: str = typer.Argument(..., help="Profile name"),
+    set_active: bool = typer.Option(
+        False,
+        "--active/--no-active",
+        help="Mark the new profile as active",
+    ),
 ) -> None:
     """Add a new profile (interactive)."""
     _add_profile_interactive(name=name, set_active=set_active)
@@ -165,7 +169,9 @@ _VERSION_SQL = "SELECT CAST(VERSION() AS VARCHAR(200)) AS v"
 
 @app.command("test-connection")
 def test_connection_cmd(
-    profile: str | None = typer.Option(None, "--profile", "-p", help="Perfil a probar"),
+    profile: str | None = typer.Option(
+        None, "--profile", "-p", help="Profile to test (defaults to active profile)"
+    ),
 ) -> None:
     """Verify connectivity: open Netezza, run ``VERSION()``, report OK or FAIL (exit 0/1)."""
     locale = resolve_locale()

@@ -16,6 +16,7 @@ from nz_mcp.catalog.identifier import (
     validate_database_identifier,
 )
 from nz_mcp.catalog.resolver import resolve_query
+from nz_mcp.catalog.row_shape import is_sequence_row
 from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
 from nz_mcp.errors import InvalidInputError, NetezzaError, ObjectNotFoundError
@@ -104,7 +105,7 @@ def _row_to_table(row: Any) -> dict[str, str]:
                 detail="Catalog query must return NAME (or TABLENAME) column.",
             )
         return {"name": str(row[name_key]), "kind": _TABLE_KIND}
-    if isinstance(row, tuple) and len(row) >= _TABLE_ROW_MIN_ITEMS:
+    if is_sequence_row(row, _TABLE_ROW_MIN_ITEMS):
         return {"name": str(row[0]), "kind": _TABLE_KIND}
     raise NetezzaError(operation="list_tables", detail="Unexpected row shape from _v_table")
 
@@ -200,7 +201,7 @@ def _distribution_pair(row: Any) -> tuple[str, int]:
                 detail="Distribution row must include ATTNAME and DISTSEQNO.",
             )
         return str(att), int(seq)
-    if isinstance(row, tuple) and len(row) >= _DIST_ROW_MIN:
+    if is_sequence_row(row, _DIST_ROW_MIN):
         return str(row[0]), int(row[1])
     raise NetezzaError(operation="describe_table", detail="Unexpected distribution row shape.")
 
@@ -222,7 +223,7 @@ def _column_descriptor(row: Any) -> dict[str, Any]:
             "nullable": not _is_not_null(not_null),
             "default": None if default is None else str(default),
         }
-    if isinstance(row, tuple) and len(row) >= _COL_TUPLE_MIN:
+    if is_sequence_row(row, _COL_TUPLE_MIN):
         default_val = row[3]
         return {
             "name": str(row[0]),
@@ -265,7 +266,7 @@ def _pk_triplet(row: Any) -> tuple[str, str, int]:
                 detail="Primary key row must include CONSTRAINTNAME, ATTNAME, CONSEQ.",
             )
         return str(c), str(a), int(s)
-    if isinstance(row, tuple) and len(row) >= _PK_TUPLE_MIN:
+    if is_sequence_row(row, _PK_TUPLE_MIN):
         return str(row[0]), str(row[1]), int(row[2])
     raise NetezzaError(operation="describe_table", detail="Unexpected primary key row shape.")
 
@@ -301,7 +302,7 @@ def _fk_constraint_name(row: Any) -> str:
         if v is None:
             raise NetezzaError(operation="describe_table", detail="FK row missing CONSTRAINTNAME.")
         return str(v)
-    if isinstance(row, tuple) and len(row) >= 1:
+    if is_sequence_row(row, 1):
         return str(row[0])
     raise NetezzaError(operation="describe_table", detail="Unexpected FK row shape.")
 
@@ -312,7 +313,7 @@ def _fk_conseq(row: Any) -> int:
         if s is None:
             raise NetezzaError(operation="describe_table", detail="FK row missing CONSEQ.")
         return int(s)
-    if isinstance(row, tuple) and len(row) >= _PK_TUPLE_MIN:
+    if is_sequence_row(row, _PK_TUPLE_MIN):
         return int(row[2])
     raise NetezzaError(operation="describe_table", detail="Unexpected FK row shape.")
 
@@ -323,7 +324,7 @@ def _fk_local_column(row: Any) -> str:
         if v is None:
             raise NetezzaError(operation="describe_table", detail="FK row missing ATTNAME.")
         return str(v)
-    if isinstance(row, tuple) and len(row) >= _DIST_ROW_MIN:
+    if is_sequence_row(row, _DIST_ROW_MIN):
         return str(row[1])
     raise NetezzaError(operation="describe_table", detail="Unexpected FK row shape.")
 
@@ -333,7 +334,7 @@ def _fk_ref_database(row: Any) -> str | None:
     if isinstance(row, dict):
         val = row.get(key)
         return None if val is None else str(val)
-    if isinstance(row, tuple) and len(row) >= _FK_PK_MIN:
+    if is_sequence_row(row, _FK_PK_MIN):
         val = row[3]
         return None if val is None else str(val)
     raise NetezzaError(operation="describe_table", detail="Unexpected FK row shape.")
@@ -346,7 +347,7 @@ def _fk_ref_schema(row: Any) -> str:
         if v is None:
             raise NetezzaError(operation="describe_table", detail="FK row missing PKSCHEMA.")
         return str(v)
-    if isinstance(row, tuple) and len(row) >= _FK_SCHEMA_MIN:
+    if is_sequence_row(row, _FK_SCHEMA_MIN):
         return str(row[4])
     raise NetezzaError(operation="describe_table", detail="Unexpected FK row shape.")
 
@@ -358,7 +359,7 @@ def _fk_ref_table(row: Any) -> str:
         if v is None:
             raise NetezzaError(operation="describe_table", detail="FK row missing PKRELATION.")
         return str(v)
-    if isinstance(row, tuple) and len(row) >= _FK_REL_MIN:
+    if is_sequence_row(row, _FK_REL_MIN):
         return str(row[5])
     raise NetezzaError(operation="describe_table", detail="Unexpected FK row shape.")
 
@@ -370,7 +371,7 @@ def _fk_ref_column(row: Any) -> str:
         if v is None:
             raise NetezzaError(operation="describe_table", detail="FK row missing PKATTNAME.")
         return str(v)
-    if isinstance(row, tuple) and len(row) >= _FK_ATT_MIN:
+    if is_sequence_row(row, _FK_ATT_MIN):
         return str(row[6])
     raise NetezzaError(operation="describe_table", detail="Unexpected FK row shape.")
 
@@ -483,7 +484,7 @@ def _parse_table_stats_row(row: Any) -> dict[str, Any]:
         alloc = pick("SIZE_BYTES_ALLOCATED")
         skew = pick("SKEW")
         created = pick("TABLE_CREATED")
-    elif isinstance(row, tuple) and len(row) >= _STATS_ROW_MIN:
+    elif is_sequence_row(row, _STATS_ROW_MIN):
         rc, used, alloc, skew, created = (
             row[0],
             row[1],
