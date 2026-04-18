@@ -74,3 +74,8 @@ def test_both_returns_both_locales() -> None:
     out = both("HINT.RESULT_TRUNCATED_BY_ROWS", n=10)
     assert set(out) == {"es", "en"}
     assert "10" in out["es"] and "10" in out["en"]
+
+
+def test_both_truncation_by_bytes() -> None:
+    out = both("HINT.RESULT_TRUNCATED_BY_BYTES", max_kb=100)
+    assert "100" in out["es"] and "100" in out["en"]

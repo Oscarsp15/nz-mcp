@@ -129,6 +129,7 @@ markers = [
 [tool.coverage.run]
 branch = true
 source = ["src/nz_mcp"]
+omit = ["*/__main__.py"]
 
 [tool.coverage.report]
 exclude_lines = [

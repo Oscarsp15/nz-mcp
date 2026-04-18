@@ -91,6 +91,22 @@ def test_parse_sections_whitespace_only() -> None:
     assert parse_sections("  \n  ") == {}
 
 
+def test_parse_sections_plain_unbalanced_begin_returns_empty() -> None:
+    assert parse_sections("BEGIN\n") == {}
+
+
+def test_parse_sections_marked_header_prefix_same_line_as_begin_proc() -> None:
+    src = "PREFIX BEGIN_PROC\nDECLARE x INT;\nBEGIN\nNULL;\nEND;\nEND_PROC\n"
+    sec = parse_sections(src)
+    assert sec.get("header") == (1, 1)
+
+
+def test_parse_sections_marked_body_when_endproc_after_closing_end() -> None:
+    src = "BEGIN_PROC\nBEGIN\nNULL;\nEND;\nEND_PROC\n"
+    sec = parse_sections(src)
+    assert sec.get("body") == (3, 3)
+
+
 def test_parse_sections_no_begin_proc() -> None:
     assert parse_sections("BEGIN\nEND;\n") == {}
 
