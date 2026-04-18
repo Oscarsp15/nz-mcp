@@ -7,10 +7,18 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from nzpy import ProgrammingError
 
 from nz_mcp.catalog import execute as execute_mod
-from nz_mcp.catalog.execute import execute_select, fetch_explain_text, inject_limit
+from nz_mcp.catalog.execute import (
+    _column_meta_from_cursor,
+    _type_label_from_oid_cell,
+    execute_select,
+    fetch_explain_text,
+    inject_limit,
+)
 from nz_mcp.config import Profile
+from nz_mcp.errors import NetezzaError
 
 
 def test_inject_limit_adds_limit_when_missing() -> None:
@@ -77,7 +85,7 @@ def test_execute_select_streams_rows(monkeypatch: pytest.MonkeyPatch) -> None:
     out = execute_select(profile, "SELECT 1", max_rows=10, timeout_s=30)
     assert out["row_count"] == 3
     assert out["rows"] == [[1], [2], [3]]
-    assert out["columns"] == [{"name": "n", "type": "23"}]
+    assert out["columns"] == [{"name": "n", "type": "integer"}]
     assert out["truncated"] is False
     assert out["hint_key"] is None
 
@@ -261,3 +269,198 @@ def test_fetch_explain_text_concatenates_lines(monkeypatch: pytest.MonkeyPatch) 
 
     text = fetch_explain_text(profile, "EXPLAIN SELECT 1")
     assert "step1" in text and "step2" in text
+
+
+def test_fetch_explain_falls_back_to_cursor_notices(monkeypatch: pytest.MonkeyPatch) -> None:
+    profile = Profile(
+        name="dev",
+        host="h",
+        port=5480,
+        database="D",
+        user="u",
+        mode="read",
+    )
+
+    class _Cur:
+        notices: list[str]
+
+        def __init__(self) -> None:
+            self.notices = ["Seq Scan on t", "  Cost: 0"]
+
+        def execute(self, _sql: str) -> None:
+            return None
+
+        def fetchmany(self, _size: int) -> list[tuple[Any, ...]]:
+            raise ProgrammingError("no result set")
+
+        def close(self) -> None:
+            return None
+
+    class _Conn:
+        def cursor(self) -> _Cur:
+            return _Cur()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(execute_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(execute_mod, "open_connection", lambda _p, _pw: _Conn())
+
+    text = fetch_explain_text(profile, "EXPLAIN SELECT 1")
+    assert "Seq Scan" in text
+
+
+def test_column_meta_maps_oid_int_to_name() -> None:
+    class _C:
+        description = (("c", 1043),)
+
+    meta = _column_meta_from_cursor(_C())
+    assert meta == [{"name": "c", "type": "varchar"}]
+
+
+def test_column_meta_empty_description() -> None:
+    class _C:
+        description = None
+
+    assert _column_meta_from_cursor(_C()) == []
+
+
+def test_column_meta_non_sequence_and_single_part_descriptors() -> None:
+    class _C:
+        description = (123, ("only",))
+
+    meta = _column_meta_from_cursor(_C())
+    assert meta == [{"name": "123", "type": "unknown"}, {"name": "only", "type": "unknown"}]
+
+
+def test_column_meta_string_oid_and_unknown_int() -> None:
+    class _C:
+        description = (("a", "23"), ("b", 99999))
+
+    meta = _column_meta_from_cursor(_C())
+    assert meta == [{"name": "a", "type": "integer"}, {"name": "b", "type": "99999"}]
+
+
+def test_column_meta_null_type_cell() -> None:
+    class _C:
+        description = (("n", None),)
+
+    meta = _column_meta_from_cursor(_C())
+    assert meta == [{"name": "n", "type": "unknown"}]
+
+
+def test_type_label_from_oid_cell_fallback() -> None:
+    assert _type_label_from_oid_cell("notdigits") == "notdigits"
+
+
+def test_execute_select_accepts_scalar_fetch_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Driver may yield a non-sequence cell row; normalize to a one-column list."""
+    profile = Profile(
+        name="dev",
+        host="h",
+        port=5480,
+        database="D",
+        user="u",
+        mode="read",
+    )
+
+    class _Cur:
+        description = (("x", 23),)
+        _done = False
+
+        def execute(self, _sql: str) -> None:
+            return None
+
+        def fetchmany(self, _size: int) -> list[Any]:
+            if self._done:
+                return []
+            self._done = True
+            return [42]
+
+        def close(self) -> None:
+            return None
+
+    class _Conn:
+        def cursor(self) -> _Cur:
+            return _Cur()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(execute_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(execute_mod, "open_connection", lambda _p, _pw: _Conn())
+
+    out = execute_select(profile, "SELECT 1", max_rows=10, timeout_s=30)
+    assert out["rows"] == [[42]]
+
+
+def test_fetch_explain_empty_when_no_notices(monkeypatch: pytest.MonkeyPatch) -> None:
+    profile = Profile(
+        name="dev",
+        host="h",
+        port=5480,
+        database="D",
+        user="u",
+        mode="read",
+    )
+
+    class _Cur:
+        def __init__(self) -> None:
+            self.notices: list[str] = []
+
+        def execute(self, _sql: str) -> None:
+            return None
+
+        def fetchmany(self, _size: int) -> list[tuple[Any, ...]]:
+            raise ProgrammingError("no result set")
+
+        def close(self) -> None:
+            return None
+
+    class _Conn:
+        def cursor(self) -> _Cur:
+            return _Cur()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(execute_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(execute_mod, "open_connection", lambda _p, _pw: _Conn())
+
+    assert fetch_explain_text(profile, "EXPLAIN SELECT 1") == ""
+
+
+def test_fetch_explain_wraps_unrelated_programming_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    profile = Profile(
+        name="dev",
+        host="h",
+        port=5480,
+        database="D",
+        user="u",
+        mode="read",
+    )
+
+    class _Cur:
+        def execute(self, _sql: str) -> None:
+            return None
+
+        def fetchmany(self, _size: int) -> list[tuple[Any, ...]]:
+            raise ProgrammingError("permission denied for explain")
+
+        def close(self) -> None:
+            return None
+
+    class _Conn:
+        def cursor(self) -> _Cur:
+            return _Cur()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(execute_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(execute_mod, "open_connection", lambda _p, _pw: _Conn())
+
+    with pytest.raises(NetezzaError) as exc:
+        fetch_explain_text(profile, "EXPLAIN SELECT 1")
+
+    assert exc.value.context.get("operation") == "explain"
