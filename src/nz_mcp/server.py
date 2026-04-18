@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import inspect
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import anyio
 from mcp import types
@@ -152,18 +153,60 @@ def _to_mcp_tool(listing: ToolListing) -> types.Tool:
     return types.Tool(
         name=listing.name,
         description=listing.description,
-        inputSchema=listing.input_schema,
+        inputSchema=_inline_refs(listing.input_schema),
         outputSchema=_tool_output_schema(listing.output_schema),
         annotations=types.ToolAnnotations.model_validate(listing.annotations),
     )
 
 
+def _inline_refs(schema: dict[str, Any]) -> dict[str, Any]:
+    """Inline ``$ref`` to ``#/$defs`` / ``#/definitions`` so nested MCP schemas stay valid.
+
+    Pydantic puts reusable models under ``$defs`` with ``$ref`` at ``#/$defs/Name``. Wrapping the
+    result model under ``properties.result`` breaks root-based resolvers (e.g. Claude Desktop).
+    Inlining yields a self-contained subtree.
+    """
+    defs: dict[str, Any] = {}
+    defs.update(schema.get("$defs") or {})
+    defs.update(schema.get("definitions") or {})
+
+    out = deepcopy(schema)
+    out.pop("$defs", None)
+    out.pop("definitions", None)
+
+    if not defs:
+        return out
+
+    def _walk(node: Any, visited: frozenset[str]) -> Any:
+        if isinstance(node, dict):
+            ref = node.get("$ref")
+            if isinstance(ref, str) and ref.startswith(("#/$defs/", "#/definitions/")):
+                name = ref.rsplit("/", 1)[-1]
+                if name in visited:
+                    return dict(node)
+                target = defs.get(name)
+                if target is None:
+                    return {k: _walk(v, visited) for k, v in node.items()}
+                merged: dict[str, Any] = deepcopy(target)
+                for k, v in node.items():
+                    if k != "$ref":
+                        merged[k] = v
+                return _walk(merged, visited | {name})
+            return {k: _walk(v, visited) for k, v in node.items()}
+        if isinstance(node, list):
+            return [_walk(x, visited) for x in node]
+        return node
+
+    return cast(dict[str, Any], _walk(out, frozenset()))
+
+
 def _tool_output_schema(result_schema: dict[str, Any]) -> dict[str, Any]:
+    inlined = _inline_refs(result_schema)
     return {
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "result": result_schema,
+            "result": inlined,
             "error": {
                 "type": "object",
                 "additionalProperties": True,
