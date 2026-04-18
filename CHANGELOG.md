@@ -21,6 +21,18 @@ Cada entrada se documenta en **español** y **english**.
 - EN: ``resolve_locale()`` also consults ``locale.getdefaultlocale()`` when ``LANG`` / ``NZ_MCP_LANG`` are unset (helps on Windows).
 - ES: textos de ``help=`` en CLI (p. ej. ``add-profile``, ``test-connection``) unificados en inglés.
 - EN: CLI ``help=`` strings (e.g. ``add-profile``, ``test-connection``) standardized to English.
+- ES: ``nz_get_procedure_ddl`` — cabecera ``CREATE OR REPLACE PROCEDURE`` sin duplicar el nombre cuando ``PROCEDURESIGNATURE`` ya incluye ``NAME(args)`` (NPS 11.x).
+- EN: ``nz_get_procedure_ddl`` — ``CREATE OR REPLACE PROCEDURE`` header no longer duplicates the procedure name when ``PROCEDURESIGNATURE`` already includes ``NAME(args)`` (NPS 11.x).
+- ES: parser NZPLSQL — secciones ``body``/``declare`` con fuentes sin ``BEGIN_PROC``/``END_PROC`` (``BEGIN``/``END`` planos y bloques anidados).
+- EN: NZPLSQL parser — ``body``/``declare`` sections for sources without ``BEGIN_PROC``/``END_PROC`` (plain ``BEGIN``/``END`` and nested blocks).
+- ES: ``execute_select`` / ``nz_query_select`` — pistas i18n distintas por motivo de truncado: filas, bytes de salida o tiempo.
+- EN: ``execute_select`` / ``nz_query_select`` — distinct i18n hints for truncation: rows, output bytes, or time budget.
+- ES: ``nz_describe_table`` — distribución HASH leyendo ``_v_table_dist_map`` con filtro ``DATABASE`` además de schema/tabla.
+- EN: ``nz_describe_table`` — HASH distribution from ``_v_table_dist_map`` using ``DATABASE`` plus schema/table filters.
+
+### Documentation
+- ES: README y ``docs/guides/claude-desktop-setup.md`` — instalación recomendada con pipx/venv y rutas de ``command`` para Claude Desktop.
+- EN: README plus ``docs/guides/claude-desktop-setup.md`` — pipx/venv-first install and ``command`` paths for Claude Desktop.
 
 ### Security
 - ES: los mensajes de error del driver en `open_connection`, `list_databases` y `probe-catalog` pasan por `sanitize()` con `known_secrets` para no filtrar contraseñas en el `detail` expuesto al cliente MCP.
