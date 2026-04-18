@@ -5,6 +5,7 @@ Rule: every key MUST have both ``es`` and ``en``. ``test_i18n.py`` enforces pari
 
 from __future__ import annotations
 
+import locale as _std_locale
 import os
 from typing import Final, Literal, TypedDict
 
@@ -240,6 +241,12 @@ def resolve_locale(explicit: Locale | None = None) -> Locale:
             return "es"
         if value.startswith("en"):
             return "en"
+    try:
+        loc = _std_locale.getdefaultlocale()[0]
+        if loc and str(loc).lower().startswith("es"):
+            return "es"
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
     return DEFAULT_LOCALE
 
 
