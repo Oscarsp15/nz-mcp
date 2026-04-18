@@ -121,6 +121,31 @@ END;
     assert parsed.kind is StatementKind.CREATE
 
 
+@pytest.mark.parametrize(
+    "sig",
+    [
+        "CHARACTER(8)",
+        "CHARACTER VARYING(100)",
+        "NUMERIC(10,2)",
+        "DATE, VARCHAR(20)",
+        "CHARACTER(10), NUMERIC(10,2), VARCHAR(50)",
+    ],
+)
+def test_validate_nzplsql_procedure_nested_param_types(sig: str) -> None:
+    sql = f"CREATE PROCEDURE DBO.P({sig})\nRETURNS INTEGER\nLANGUAGE NZPLSQL AS\nBEGIN NULL; END;\n"
+    parsed = validate(sql, mode="admin")
+    assert parsed.kind is StatementKind.CREATE
+
+
+def test_validate_nzplsql_procedure_rejects_triple_nested_param_list() -> None:
+    sql = (
+        "CREATE PROCEDURE DBO.P(((INT)))\nRETURNS INTEGER\nLANGUAGE NZPLSQL AS\nBEGIN NULL; END;\n"
+    )
+    with pytest.raises(GuardRejectedError) as exc:
+        validate(sql, mode="admin")
+    assert exc.value.code == "UNKNOWN_STATEMENT"
+
+
 def test_validate_procedure_with_loops() -> None:
     sql = """CREATE OR REPLACE PROCEDURE SCH.P()
 RETURNS INTEGER

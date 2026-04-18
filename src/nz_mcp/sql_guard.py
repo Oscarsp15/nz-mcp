@@ -17,6 +17,7 @@ from sqlglot import expressions as exp
 from nz_mcp.catalog.identifier import validate_catalog_identifier
 from nz_mcp.config import PermissionMode
 from nz_mcp.errors import GuardRejectedError, InvalidInputError, PermissionDeniedError
+from nz_mcp.procedure_head_pattern import PROCEDURE_PARAM_LIST_PATTERN
 
 
 class StatementKind(StrEnum):
@@ -52,7 +53,7 @@ _NZPLSQL_MARKER: Final[re.Pattern[str]] = re.compile(
 _NZPLSQL_PROC_HEAD: Final[re.Pattern[str]] = re.compile(
     r"^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\s+"
     r"(?P<sch>[A-Za-z][A-Za-z0-9_]*)\s*\.\s*(?P<proc>[A-Za-z][A-Za-z0-9_]*)"
-    r"\s*\([^)]*\)"
+    rf"\s*{PROCEDURE_PARAM_LIST_PATTERN}"
     r"(?:\s+RETURNS\b[\s\S]*)?\s*$",
     re.IGNORECASE | re.DOTALL,
 )
