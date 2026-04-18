@@ -82,3 +82,32 @@ def test_mcp_tools_list_and_call(two_profiles: Path) -> None:
             assert isinstance(error["context"], dict)
 
     anyio.run(_run)
+
+
+@pytest.mark.contract
+def test_mcp_nz_export_ddl_embedded_resource(
+    two_profiles: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _fake_get_table_ddl(_profile: object, **_kwargs: object) -> dict[str, object]:
+        return {"ddl": "CREATE TABLE t(i int);", "reconstructed": True}
+
+    monkeypatch.setattr("nz_mcp.tools.export_ddl.get_table_ddl", _fake_get_table_ddl)
+
+    async def _run() -> None:
+        async with _inprocess_client(two_profiles) as client:
+            await client.initialize()
+            res: CallToolResult = await client.call_tool(
+                "nz_export_ddl",
+                {
+                    "object_type": "table",
+                    "database": "DB",
+                    "schema": "PUB",
+                    "name": "T1",
+                },
+            )
+            assert res.structuredContent is not None
+            assert res.structuredContent["meta"]["schema"] == "PUB"
+            assert len(res.content) == 2
+            assert res.content[0].type == "resource"
+
+    anyio.run(_run)

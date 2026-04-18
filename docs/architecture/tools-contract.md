@@ -13,6 +13,7 @@
 - **`nz_table_stats`**: `skew_class` (`balanced` \| `moderate` \| `severe`) según umbrales documentados en código; `stats_last_analyzed` desde `_v_statistic` cuando exista fila/columna.
 - **`nz_get_procedure_ddl`**: `size_bytes` (UTF-8), `warning` si el DDL supera ~100 KB (sin truncar).
 - **`nz_get_table_ddl`**: `notes` lista de cadenas i18n; `reconstructed` indica reconstrucción desde catálogo.
+- **`nz_export_ddl`**: respuesta MCP con `content` (bloques `EmbeddedResource` `text/sql` + `TextContent` resumen) y `meta` (incluye `resource_uri` `nz-mcp://ddl/...`, `duration_ms`, y campos opcionales alineados con table/view/procedure).
 - **CLI**: `nz-mcp edit-profile` actualiza campos de un perfil existente (sin password).
 
 ## Modos de permiso (recordatorio)
@@ -25,7 +26,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (24 tools registradas)
+## Catálogo v0.1 (25 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -531,6 +532,25 @@ No incluye password ni secretos.
 
 ---
 
+#### 25. `nz_export_ddl`
+
+Unifica la obtención de DDL de **tabla**, **vista** o **procedimiento** y lo devuelve como **resultado MCP nativo**: bloque **resource** embebido (`mimeType: text/sql`, URI estable `nz-mcp://ddl/...`) más un bloque **text** con resumen. Pensado para clientes que muestran tarjeta de recurso / copia (p. ej. Claude Desktop). Delega en la misma lógica de catálogo que `nz_get_*_ddl`.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `object_type` | enum: `table` \| `view` \| `procedure` (required) | |
+| `database` | string (required) | |
+| `schema` | string (required) | |
+| `name` | string (required) | Nombre de tabla, vista o procedimiento. |
+| `signature` | string (optional) | Solo procedimientos: firma/overload. |
+| `include_constraints` | bool (default `true`) | Solo tablas: igual que `nz_get_table_ddl`. |
+
+**Output exitoso** (`structuredContent`): objeto con `content` (array de bloques MCP serializados) y `meta` (metadatos: `object_type`, `database`, `schema`, `name`, `resource_uri`, `duration_ms`, y según tipo `reconstructed`/`notes`, `size_bytes`/`warning`, etc.).
+
+**Transporte MCP**: el servidor puede devolver `CallToolResult` con los bloques tipados en `content` (no solo JSON plano).
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -539,7 +559,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
 |---|---|---|---|
-| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_current_profile` | true | false | true |
+| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_export_ddl`, `nz_get_procedure_section`, `nz_current_profile` | true | false | true |
 | `nz_insert` | false | false | false |
 | `nz_update`, `nz_delete` | false | true | false |
 | `nz_create_table`, `nz_clone_procedure` | false | false | true |

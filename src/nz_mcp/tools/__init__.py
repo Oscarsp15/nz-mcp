@@ -9,6 +9,7 @@ from nz_mcp.tools import (
     clone_procedure,  # noqa: F401  (registers nz_clone_procedure)
     databases,  # noqa: F401  (registers database tools)
     ddl,  # noqa: F401  (registers DDL tools)
+    export_ddl,  # noqa: F401  (registers nz_export_ddl)
     describe_table,  # noqa: F401  (registers nz_describe_table)
     procedures,  # noqa: F401  (registers procedure tools)
     query,  # noqa: F401  (registers nz_query_select, nz_explain)

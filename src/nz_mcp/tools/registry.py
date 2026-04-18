@@ -14,7 +14,8 @@ from pydantic import BaseModel
 
 from nz_mcp.config import PermissionMode
 
-ToolHandler = Callable[..., BaseModel]
+OutputKind = Literal["model", "content_blocks"]
+ToolHandler = Callable[..., Any]
 
 P = ParamSpec("P")
 R = TypeVar("R", bound=BaseModel)
@@ -28,6 +29,7 @@ class ToolSpec:
     input_model: type[BaseModel]
     output_model: type[BaseModel]
     handler: ToolHandler
+    output_kind: OutputKind = "model"
     annotations: dict[str, Any] = field(default_factory=dict)
 
 
@@ -41,6 +43,7 @@ def tool(
     mode: PermissionMode,
     input_model: type[BaseModel],
     output_model: type[BaseModel],
+    output_kind: OutputKind = "model",
     annotations: dict[str, Any] | None = None,
 ) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """Register a tool. Idempotent fail: re-registering the same name raises."""
@@ -55,6 +58,7 @@ def tool(
             input_model=input_model,
             output_model=output_model,
             handler=fn,
+            output_kind=output_kind,
             annotations=annotations or {},
         )
         return fn
