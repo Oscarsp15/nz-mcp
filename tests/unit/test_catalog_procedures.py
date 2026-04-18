@@ -44,6 +44,34 @@ def test_parse_procedure_arguments_empty() -> None:
     assert proc.parse_procedure_arguments("") == []
 
 
+def test_signature_clause_does_not_duplicate_proc_name() -> None:
+    """NPS 11.x may store PROCEDURESIGNATURE as NAME(args) — do not emit NAME+NAME."""
+    row = (
+        "AGRUPAR_ALERTAS",
+        "ADMIN",
+        "(DATE)",
+        "",
+        "DECLARE x INT; BEGIN NULL; END;",
+        "AGRUPAR_ALERTAS(DATE)",
+    )
+    ddl = proc._build_procedure_ddl("DBO", row)
+    assert "AGRUPAR_ALERTASAGRUPAR_ALERTAS" not in ddl
+    assert "CREATE OR REPLACE PROCEDURE DBO.AGRUPAR_ALERTAS(DATE)" in ddl
+
+
+def test_signature_clause_legacy_paren_only() -> None:
+    row = ("P", "O", "(INT)", "", "BEGIN END;", "(INT)")
+    ddl = proc._build_procedure_ddl("S", row)
+    assert "CREATE OR REPLACE PROCEDURE S.P(INT)" in ddl
+    assert "P.P(" not in ddl
+
+
+def test_signature_clause_empty_args_procedure() -> None:
+    row = ("PROC", "O", "()", "", "BEGIN END;", "()")
+    ddl = proc._build_procedure_ddl("S", row)
+    assert "CREATE OR REPLACE PROCEDURE S.PROC()" in ddl
+
+
 def test_ddl_get_tuple_row() -> None:
     row = ("MYPROC", "ADMIN", "(X INT)", "INT", "BEGIN\nEND;", "(X INT)")
     assert proc._ddl_get(row, "PROCEDURE") == "MYPROC"

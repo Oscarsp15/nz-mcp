@@ -23,16 +23,30 @@ Servidor MCP (Model Context Protocol) para **IBM Netezza Performance Server**. P
 
 ## Instalación
 
-```bash
-pipx install nz-mcp
-nz-mcp init        # wizard interactivo: host, port, db, user, password, mode
-```
+1. **Recomendada — [pipx](https://pypa.github.io/pipx/)** (aisla dependencias; evita choques de `typer`/`click` con otros CLI globales):
 
-> v0.1 aún no publicada en PyPI. Mientras tanto: `pipx install git+https://github.com/Oscarsp15/nz-mcp.git`
+   ```bash
+   pipx install git+https://github.com/Oscarsp15/nz-mcp.git
+   nz-mcp init
+   ```
+
+   > Cuando exista release en PyPI: `pipx install nz-mcp`.
+
+2. **Desarrollo** — clona el repo y usa un venv:
+
+   ```bash
+   python -m venv .venv
+   .venv\Scripts\activate
+   pip install -e ".[dev]"
+   ```
+
+3. **Global con `pip`** — posible pero **desaconsejada**: otros paquetes pueden fijar versiones viejas de `typer`/`click` y romper el arranque del CLI.
+
+Rutas completas al ejecutable para Claude Desktop (pipx vs `.venv`) y ejemplos de `claude_desktop_config.json`: [docs/guides/claude-desktop-setup.md](docs/guides/claude-desktop-setup.md).
 
 ## Configuración rápida en Claude Desktop
 
-`claude_desktop_config.json`:
+`claude_desktop_config.json` (ajusta `command` al `nz-mcp` de pipx o del venv, ver guía arriba):
 
 ```json
 {

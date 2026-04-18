@@ -61,7 +61,7 @@ def test_resolve_locale_from_getdefaultlocale_es(monkeypatch: pytest.MonkeyPatch
 
 
 def test_t_formats_placeholders() -> None:
-    text = t("HINT.RESULT_TRUNCATED", "es", n=42)
+    text = t("HINT.RESULT_TRUNCATED_BY_ROWS", "es", n=42)
     assert "42" in text
 
 
@@ -71,6 +71,11 @@ def test_t_unknown_key_raises() -> None:
 
 
 def test_both_returns_both_locales() -> None:
-    out = both("HINT.RESULT_TRUNCATED", n=10)
+    out = both("HINT.RESULT_TRUNCATED_BY_ROWS", n=10)
     assert set(out) == {"es", "en"}
     assert "10" in out["es"] and "10" in out["en"]
+
+
+def test_both_truncation_by_bytes() -> None:
+    out = both("HINT.RESULT_TRUNCATED_BY_BYTES", max_kb=100)
+    assert "100" in out["es"] and "100" in out["en"]

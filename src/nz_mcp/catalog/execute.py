@@ -99,7 +99,7 @@ def execute_select(
             while remaining > 0:
                 if time.monotonic() > deadline:
                     truncated = True
-                    hint_key = "HINT.EXECUTION_DEADLINE"
+                    hint_key = "HINT.RESULT_TRUNCATED_BY_TIMEOUT"
                     hint_fmt = {"timeout_s": timeout_s}
                     break
                 batch = cursor.fetchmany(min(FETCH_BATCH, remaining))
@@ -111,12 +111,12 @@ def execute_select(
                     remaining -= 1
                     if _approx_rows_json_bytes(rows) >= RESPONSE_BYTES_CAP:
                         truncated = True
-                        hint_key = "HINT.BYTES_CAP_REACHED"
+                        hint_key = "HINT.RESULT_TRUNCATED_BY_BYTES"
                         hint_fmt = {"max_kb": RESPONSE_BYTES_CAP // 1024}
                         break
                     if remaining <= 0:
                         truncated = True
-                        hint_key = "HINT.RESULT_TRUNCATED"
+                        hint_key = "HINT.RESULT_TRUNCATED_BY_ROWS"
                         hint_fmt = {"n": max_rows}
                         break
                 if truncated:

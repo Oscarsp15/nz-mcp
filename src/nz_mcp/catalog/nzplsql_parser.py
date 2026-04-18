@@ -12,6 +12,7 @@ _EXCEPTION: Final[re.Pattern[str]] = re.compile(r"(?i)\bEXCEPTION\b")
 _END_PROC: Final[re.Pattern[str]] = re.compile(r"(?i)\bEND_PROC\b")
 _BEGIN_NOT_PROC: Final[re.Pattern[str]] = re.compile(r"(?i)\bBEGIN\b")
 _END_STMT: Final[re.Pattern[str]] = re.compile(r"(?i)^\s*END\s*;\s*$")
+_END_LOOP_IF_CASE: Final[re.Pattern[str]] = re.compile(r"(?i)^\s*END\s+(LOOP|IF|CASE)\b")
 
 
 def mask_single_quoted_strings(source: str) -> str:
@@ -44,11 +45,14 @@ def mask_single_quoted_strings(source: str) -> str:
     return "".join(out)
 
 
-def parse_sections(source: str) -> dict[str, tuple[int, int]]:  # noqa: PLR0912
+def parse_sections(source: str) -> dict[str, tuple[int, int]]:
     """Return 1-indexed inclusive line ranges per detected section.
 
     Keys may include: ``header``, ``declare``, ``body``, ``exception``.
     Omitted keys mean the section does not exist in the source.
+
+    Supports catalog markers ``BEGIN_PROC`` / ``END_PROC`` (some NPS builds) and
+    plain ``DECLARE`` / ``BEGIN`` / ``END;`` bodies as stored from user sources.
     """
     if not source.strip():
         return {}
@@ -61,10 +65,19 @@ def parse_sections(source: str) -> dict[str, tuple[int, int]]:  # noqa: PLR0912
         return {}
 
     begin_proc_line = _first_line_matching(masked_lines, _BEGIN_PROC)
-    end_proc_line = _first_line_matching(masked_lines, _END_PROC)
+    if begin_proc_line is not None:
+        return _parse_sections_begin_proc_markers(masked_lines, lines, n, begin_proc_line)
 
-    if begin_proc_line is None:
-        return {}
+    return _parse_sections_plain_nzplsql(masked_lines, n)
+
+
+def _parse_sections_begin_proc_markers(
+    masked_lines: list[str],
+    lines: list[str],
+    n: int,
+    begin_proc_line: int,
+) -> dict[str, tuple[int, int]]:
+    end_proc_line = _first_line_matching(masked_lines, _END_PROC)
 
     declare_line = _first_line_matching_after(masked_lines, _DECLARE, begin_proc_line + 1)
 
@@ -80,7 +93,6 @@ def parse_sections(source: str) -> dict[str, tuple[int, int]]:  # noqa: PLR0912
 
     sections: dict[str, tuple[int, int]] = {}
 
-    # header: full lines before BEGIN_PROC; partial first line handled in header_content().
     if begin_proc_line > 1:
         sections["header"] = (1, begin_proc_line - 1)
     else:
@@ -113,6 +125,87 @@ def parse_sections(source: str) -> dict[str, tuple[int, int]]:  # noqa: PLR0912
         sections["body"] = (main_begin_line + 1, end_proc_line - 1)
 
     return sections
+
+
+def _parse_sections_plain_nzplsql(
+    masked_lines: list[str],
+    n: int,
+) -> dict[str, tuple[int, int]]:
+    declare_line = _first_line_matching(masked_lines, _DECLARE)
+    start_search = 1 if declare_line is None else declare_line + 1
+    main_begin_line = _first_plain_begin(masked_lines, start_search, n)
+    if main_begin_line is None:
+        return {}
+
+    exception_line = _first_line_matching_after(masked_lines, _EXCEPTION, main_begin_line + 1)
+
+    closing_end_line = _find_plain_outer_end(masked_lines, main_begin_line, n)
+    if closing_end_line is None:
+        return {}
+
+    sections: dict[str, tuple[int, int]] = {}
+
+    if declare_line is not None and declare_line > 1:
+        sections["header"] = (1, declare_line - 1)
+    elif declare_line is None and main_begin_line > 1:
+        sections["header"] = (1, main_begin_line - 1)
+
+    if declare_line is not None and declare_line < main_begin_line:
+        sections["declare"] = (declare_line, main_begin_line - 1)
+
+    if exception_line is not None:
+        body_end = exception_line - 1
+        if body_end >= main_begin_line + 1:
+            sections["body"] = (main_begin_line + 1, body_end)
+        if closing_end_line > exception_line:
+            exc_end = closing_end_line - 1
+            if exc_end >= exception_line + 1:
+                sections["exception"] = (exception_line + 1, exc_end)
+    elif closing_end_line > main_begin_line + 1:
+        sections["body"] = (main_begin_line + 1, closing_end_line - 1)
+
+    return sections
+
+
+def _first_plain_begin(masked_lines: list[str], start_line: int, n: int) -> int | None:
+    for i in range(start_line, n + 1):
+        line = masked_lines[i - 1]
+        if _BEGIN_PROC.search(line):
+            continue
+        if _BEGIN_NOT_PROC.search(line):
+            return i
+    return None
+
+
+def _find_plain_outer_end(masked_lines: list[str], main_begin_line: int, n: int) -> int | None:
+    """Find the ``END;`` that closes the outer ``BEGIN`` at ``main_begin_line``."""
+    depth = 1
+    i = main_begin_line + 1
+    while i <= n:
+        ml = masked_lines[i - 1]
+        if _line_is_nested_end_keyword(ml):
+            i += 1
+            continue
+        if _END_STMT.match(ml):
+            depth -= 1
+            if depth == 0:
+                return i
+            i += 1
+            continue
+        if _plain_begin_increments_depth(ml):
+            depth += 1
+        i += 1
+    return None
+
+
+def _plain_begin_increments_depth(line: str) -> bool:
+    if _BEGIN_PROC.search(line):
+        return False
+    return _BEGIN_NOT_PROC.search(line) is not None
+
+
+def _line_is_nested_end_keyword(line: str) -> bool:
+    return _END_LOOP_IF_CASE.match(line.strip()) is not None
 
 
 def _first_line_matching(lines: list[str], pattern: re.Pattern[str]) -> int | None:

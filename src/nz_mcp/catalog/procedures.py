@@ -376,16 +376,42 @@ def _ddl_get(row: Any, field: str) -> str:
     return ""
 
 
+def _signature_clause_for_ddl(proc: str, signature: str, arguments: str) -> str:
+    """Return ``NAME(args)`` for the CREATE head without duplicating ``PROCEDURE``.
+
+    On NPS 11.x, ``PROCEDURESIGNATURE`` is often ``PROCNAME(DATE,...)`` already.
+    Older shapes store only parenthesized formal parameters; we then prefix ``proc``.
+    """
+    proc_stripped = proc.strip()
+    proc_u = proc_stripped.upper()
+    sig_stripped = signature.strip()
+    args_stripped = arguments.strip()
+
+    if not sig_stripped:
+        if args_stripped:
+            inner = args_stripped[1:-1].strip() if args_stripped.startswith("(") else args_stripped
+            return f"{proc_stripped}({inner})" if inner else f"{proc_stripped}()"
+        return f"{proc_stripped}()"
+
+    sig_norm = " ".join(sig_stripped.split())
+    sig_u = sig_norm.upper()
+    if sig_u.startswith(f"{proc_u}(") or sig_u == proc_u:
+        return sig_norm
+    if sig_norm.startswith("("):
+        return f"{proc_stripped}{sig_norm}"
+    return sig_norm
+
+
 def _build_procedure_ddl(schema: str, row: Any) -> str:
     proc = _ddl_get(row, "PROCEDURE").strip()
     args = _ddl_get(row, "ARGUMENTS").strip()
     returns = _ddl_get(row, "RETURNS").strip()
     source = _ddl_get(row, "PROCEDURESOURCE")
     sig = _ddl_get(row, "PROCEDURESIGNATURE").strip()
-    sig_use = sig if sig else (f"({args})" if args else "()")
+    sig_use = _signature_clause_for_ddl(proc, sig, args)
     sch = validate_catalog_identifier(schema)
     ret_clause = f"RETURNS {returns}" if returns else ""
-    head = f"CREATE OR REPLACE PROCEDURE {sch}.{proc}{sig_use}"
+    head = f"CREATE OR REPLACE PROCEDURE {sch}.{sig_use}"
     if ret_clause:
         head = f"{head}\n{ret_clause}"
     return f"{head}\nLANGUAGE NZPLSQL AS\n{source}"

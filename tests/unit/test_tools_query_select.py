@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from nz_mcp.errors import GuardRejectedError
-from nz_mcp.tools.query import QuerySelectInput, nz_query_select
+from nz_mcp.tools.query import QuerySelectInput, hint_from_execute_payload, nz_query_select
 
 
 def test_query_select_rejects_insert(two_profiles: Path) -> None:
@@ -73,3 +73,33 @@ def test_query_select_happy_path(monkeypatch: pytest.MonkeyPatch, two_profiles: 
     assert seen["inject_max"] == 100  # profile default
     assert seen["exec_max_rows"] == 100
     assert seen["exec_timeout"] == 30
+
+
+def test_hint_from_execute_payload_bytes_truncation() -> None:
+    h = hint_from_execute_payload(
+        {
+            "hint_key": "HINT.RESULT_TRUNCATED_BY_BYTES",
+            "hint_fmt": {"max_kb": 100},
+        },
+    )
+    assert h is not None and "100" in h
+
+
+def test_query_select_truncation_hint(monkeypatch: pytest.MonkeyPatch, two_profiles: Path) -> None:
+    def _exec(_p: object, _sql: str, *, max_rows: int, timeout_s: int) -> dict[str, object]:
+        return {
+            "columns": [{"name": "x", "type": "int"}],
+            "rows": [[1]],
+            "row_count": 1,
+            "truncated": True,
+            "duration_ms": 1,
+            "hint_key": "HINT.RESULT_TRUNCATED_BY_BYTES",
+            "hint_fmt": {"max_kb": 100},
+        }
+
+    monkeypatch.setattr("nz_mcp.tools.query.inject_limit", lambda sql, _m: sql)
+    monkeypatch.setattr("nz_mcp.tools.query.execute_select", _exec)
+
+    out = nz_query_select(QuerySelectInput(sql="SELECT 1"), config_path=two_profiles)
+    assert out.truncated is True
+    assert out.hint is not None

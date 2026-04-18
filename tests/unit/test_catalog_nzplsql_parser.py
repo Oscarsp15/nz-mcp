@@ -91,8 +91,82 @@ def test_parse_sections_whitespace_only() -> None:
     assert parse_sections("  \n  ") == {}
 
 
+def test_parse_sections_plain_unbalanced_begin_returns_empty() -> None:
+    assert parse_sections("BEGIN\n") == {}
+
+
+def test_parse_sections_marked_header_prefix_same_line_as_begin_proc() -> None:
+    src = "PREFIX BEGIN_PROC\nDECLARE x INT;\nBEGIN\nNULL;\nEND;\nEND_PROC\n"
+    sec = parse_sections(src)
+    assert sec.get("header") == (1, 1)
+
+
+def test_parse_sections_marked_body_when_endproc_after_closing_end() -> None:
+    src = "BEGIN_PROC\nBEGIN\nNULL;\nEND;\nEND_PROC\n"
+    sec = parse_sections(src)
+    assert sec.get("body") == (3, 3)
+
+
 def test_parse_sections_no_begin_proc() -> None:
     assert parse_sections("BEGIN\nEND;\n") == {}
+
+
+def test_parse_sections_plain_declare_begin_with_nested_loop() -> None:
+    src = """
+DECLARE
+  P_FecCorte ALIAS FOR $1;
+  v_keyregla INT;
+BEGIN
+  FOR V_RecCascada IN SELECT KEYREGLA FROM t LOOP
+    NULL;
+  END LOOP;
+
+  RETURN 0;
+END;
+""".strip()
+    sec = parse_sections(src)
+    assert "declare" in sec
+    assert "body" in sec
+    body = line_slice(src, sec["body"][0], sec["body"][1])
+    assert "FOR V_RecCascada" in body
+    assert "RETURN 0" in body
+    assert "END LOOP" in body
+
+
+def test_parse_sections_plain_with_exception_block() -> None:
+    src = """
+DECLARE x INT;
+BEGIN
+  SELECT 1;
+EXCEPTION
+  WHEN OTHERS THEN
+    NULL;
+END;
+""".strip()
+    sec = parse_sections(src)
+    assert "body" in sec and "exception" in sec
+    body = line_slice(src, sec["body"][0], sec["body"][1])
+    assert "SELECT 1" in body
+    assert "EXCEPTION" not in body
+    exc = line_slice(src, sec["exception"][0], sec["exception"][1])
+    assert "WHEN OTHERS" in exc
+
+
+def test_parse_sections_mixed_begin_proc_and_inner_begin_end() -> None:
+    src = """
+CREATE P AS BEGIN_PROC
+DECLARE x INT;
+BEGIN
+  BEGIN
+    NULL;
+  END;
+END;
+END_PROC;
+""".strip()
+    sec = parse_sections(src)
+    assert "body" in sec
+    body = line_slice(src, sec["body"][0], sec["body"][1])
+    assert "BEGIN" in body and "END;" in body
 
 
 def test_mask_doubled_quote_in_string() -> None:
