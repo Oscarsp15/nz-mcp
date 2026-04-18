@@ -196,6 +196,85 @@ def test_invalid_default_type_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
 
+def test_create_table_column_without_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeConn()
+    monkeypatch.setattr("nz_mcp.catalog.ddl.open_connection", lambda _p, _w: fake)
+    monkeypatch.setattr("nz_mcp.catalog.ddl.get_password", lambda _n: "pw")
+    prof = _admin_profile()
+    out = execute_create_table(
+        prof,
+        database="DEV",
+        schema="PUBLIC",
+        table="TND",
+        columns=[{"name": "ID", "type": "INT"}, {"name": "N", "type": "VARCHAR(100)"}],
+        distribution=None,
+        organized_on=None,
+        if_not_exists=True,
+    )
+    sql = str(out["ddl_executed"])
+    inner = sql.split("(", 1)[1].rsplit(")", 1)[0]
+    assert "DEFAULT" not in inner
+
+
+def test_create_table_column_explicit_null_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeConn()
+    monkeypatch.setattr("nz_mcp.catalog.ddl.open_connection", lambda _p, _w: fake)
+    monkeypatch.setattr("nz_mcp.catalog.ddl.get_password", lambda _n: "pw")
+    prof = _admin_profile()
+    out = execute_create_table(
+        prof,
+        database="DEV",
+        schema="PUBLIC",
+        table="TNULL",
+        columns=[
+            {"name": "ID", "type": "INT"},
+            {"name": "N", "type": "VARCHAR(100)", "default": None},
+        ],
+        distribution=None,
+        organized_on=None,
+        if_not_exists=True,
+    )
+    sql = str(out["ddl_executed"])
+    inner = sql.split("(", 1)[1].rsplit(")", 1)[0]
+    assert "DEFAULT" not in inner
+
+
+def test_create_table_column_with_default_literal(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeConn()
+    monkeypatch.setattr("nz_mcp.catalog.ddl.open_connection", lambda _p, _w: fake)
+    monkeypatch.setattr("nz_mcp.catalog.ddl.get_password", lambda _n: "pw")
+    prof = _admin_profile()
+    out = execute_create_table(
+        prof,
+        database="DEV",
+        schema="PUBLIC",
+        table="TDEF",
+        columns=[{"name": "N", "type": "INT", "default": 0}],
+        distribution=None,
+        organized_on=None,
+        if_not_exists=True,
+    )
+    assert "DEFAULT 0" in str(out["ddl_executed"])
+
+
+def test_create_table_column_with_injection_in_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("nz_mcp.catalog.ddl.open_connection", lambda _p, _w: _FakeConn())
+    monkeypatch.setattr("nz_mcp.catalog.ddl.get_password", lambda _n: "pw")
+    prof = _admin_profile()
+    with pytest.raises(InvalidInputError) as ei:
+        execute_create_table(
+            prof,
+            database="DEV",
+            schema="PUBLIC",
+            table="T",
+            columns=[{"name": "ID", "type": "INTEGER", "default": "0; DROP TABLE x"}],
+            distribution=None,
+            organized_on=None,
+            if_not_exists=True,
+        )
+    assert "semicolon" in str(ei.value).lower()
+
+
 def test_distribution_hash_requires_columns(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("nz_mcp.catalog.ddl.open_connection", lambda _p, _w: _FakeConn())
     monkeypatch.setattr("nz_mcp.catalog.ddl.get_password", lambda _n: "pw")

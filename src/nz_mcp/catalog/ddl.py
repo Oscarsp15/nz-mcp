@@ -63,13 +63,13 @@ def _validate_column_type_fragment(raw: str) -> str:
 
 
 def _format_default(value: Any) -> str:
-    if value is None:
-        raise InvalidInputError(detail="Column default cannot be null; omit the key instead.")
     if isinstance(value, bool):
         return "TRUE" if value else "FALSE"
     if isinstance(value, int | float) and not isinstance(value, bool):
         return str(value)
     if isinstance(value, str):
+        if ";" in value:
+            raise InvalidInputError(detail="Column default string cannot contain semicolons.")
         return "'" + value.replace("'", "''") + "'"
     raise InvalidInputError(detail="Column default must be a string, number, or boolean.")
 
@@ -121,7 +121,7 @@ def _build_create_table_base_sql(
         segment = f"{cname} {ctype}"
         if not bool(col.get("nullable", True)):
             segment += " NOT NULL"
-        if "default" in col:
+        if col.get("default") is not None:
             segment += f" DEFAULT {_format_default(col.get('default'))}"
         lines.append(segment)
     inner = ",\n  ".join(lines)
