@@ -36,12 +36,16 @@ class CreateTableInput(BaseModel):
     distribution: DistributionInput | None = None
     organized_on: list[str] | None = None
     if_not_exists: bool = True
+    dry_run: bool = True
+    confirm: bool = False
 
 
 class CreateTableOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    created: bool
-    ddl_executed: str
+    dry_run: bool
+    ddl_to_execute: str
+    executed: bool
+    duration_ms: int
 
 
 class TruncateInput(BaseModel):
@@ -84,7 +88,8 @@ def _require_confirm_true(confirm: bool, *, tool: str) -> None:
     name="nz_create_table",
     description=(
         "Create a base table with validated identifiers and Netezza distribution. "
-        "Requires profile mode admin. Use for new tables only — not for ALTER."
+        "Requires profile mode admin. Default dry_run=true returns DDL only; set "
+        "dry_run=false and confirm=true to execute. Use for new tables only — not for ALTER."
     ),
     mode="admin",
     input_model=CreateTableInput,
@@ -103,6 +108,29 @@ def nz_create_table(
 ) -> CreateTableOutput:
     profile = get_active_profile(path=config_path)
     dist_dict = params.distribution.model_dump() if params.distribution is not None else None
+    if params.dry_run:
+        raw = execute_create_table(
+            profile,
+            database=params.database,
+            schema=params.table_schema,
+            table=params.table,
+            columns=[c.model_dump() for c in params.columns],
+            distribution=dist_dict,
+            organized_on=params.organized_on,
+            if_not_exists=params.if_not_exists,
+            dry_run=True,
+        )
+        return CreateTableOutput(
+            dry_run=True,
+            ddl_to_execute=str(raw["ddl_to_execute"]),
+            executed=False,
+            duration_ms=int(raw["duration_ms"]),
+        )
+    if params.confirm is not True:
+        raise InvalidInputError(
+            code="CONFIRM_REQUIRED",
+            detail="confirm=true is required when dry_run=false for nz_create_table.",
+        )
     raw = execute_create_table(
         profile,
         database=params.database,
@@ -112,8 +140,14 @@ def nz_create_table(
         distribution=dist_dict,
         organized_on=params.organized_on,
         if_not_exists=params.if_not_exists,
+        dry_run=False,
     )
-    return CreateTableOutput(created=bool(raw["created"]), ddl_executed=str(raw["ddl_executed"]))
+    return CreateTableOutput(
+        dry_run=False,
+        ddl_to_execute=str(raw["ddl_to_execute"]),
+        executed=bool(raw["executed"]),
+        duration_ms=int(raw["duration_ms"]),
+    )
 
 
 @tool(

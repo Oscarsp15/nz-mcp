@@ -59,6 +59,10 @@
 
 `sqlglot` no clasifica cuerpos NZPLSQL reales (`DECLARE`, `BEGIN`/`END`, cursores, etc.). Para sentencias que contienen el marcador `LANGUAGE NZPLSQL AS`, el guard **no** intenta parsear el cuerpo: valida la cabecera con regex (firma `schema.procedimiento`, sin `;` en la cabecera) y los identificadores con las mismas reglas que el catálogo. El cuerpo se trata como **opaco**; no es texto libre arbitrario del LLM en los flujos soportados (p. ej. clonado desde DDL ya obtenido del catálogo del propio servidor). El riesgo de inyección se concentra en la cabecera; ahí se exige `admin` y se rechazan cabeceras malformadas o apiladas.
 
+#### ``DROP TABLE`` con ``IF EXISTS`` en sufijo (Netezza)
+
+NPS 11.x usa ``DROP TABLE esquema.tabla IF EXISTS``, no el orden ANSI ``DROP TABLE IF EXISTS esquema.tabla``. ``sqlglot`` no parsea la forma sufijo; el guard la reconoce con un patrón dedicado (identificadores validados, sin apilamiento) y la clasifica como ``DROP`` en modo ``admin``, igual que el resto de DDL administrativo.
+
 ### Reglas por modo
 
 | Statement kind | `read` | `write` | `admin` |

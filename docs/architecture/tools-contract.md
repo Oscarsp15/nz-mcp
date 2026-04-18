@@ -428,8 +428,14 @@ Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 | `distribution` | object (optional) | `{type: HASH\|RANDOM, columns: [...]}` |
 | `organized_on` | array (optional) | |
 | `if_not_exists` | bool (default true) | |
+| `dry_run` | bool (default **true**) | Si `true`, solo devuelve el DDL que se ejecutaría. |
+| `confirm` | bool (**required if** `dry_run=false`) | Debe ser `true` para ejecutar cuando `dry_run=false`. |
 
-**Output**: `{ "created": true, "ddl_executed": "..." }`
+**Output** (dry-run `true`): `{ "dry_run": true, "ddl_to_execute": "...", "executed": false, "duration_ms": 0 }`
+
+**Output** (ejecución real): `{ "dry_run": false, "ddl_to_execute": "...", "executed": true, "duration_ms": T }`
+
+Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 
 ---
 
@@ -454,7 +460,7 @@ Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 | `schema` | string (required) | |
 | `table` | string (required) | |
 | `confirm` | bool (**required**, no default) | |
-| `if_exists` | bool (default true) | |
+| `if_exists` | bool (default true) | Emite sintaxis Netezza ``DROP TABLE schema.table IF EXISTS`` (sufijo). |
 
 **Output**: `{ "dropped": true }`
 
@@ -562,7 +568,8 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 | `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_export_ddl`, `nz_get_procedure_section`, `nz_current_profile` | true | false | true |
 | `nz_insert` | false | false | false |
 | `nz_update`, `nz_delete` | false | true | false |
-| `nz_create_table`, `nz_clone_procedure` | false | false | true |
+| `nz_create_table` | false | false | true |
+| `nz_clone_procedure` | false | false | true |
 | `nz_truncate`, `nz_drop_table` | false | **true** | true |
 | `nz_switch_profile` | false | false | true |
 
