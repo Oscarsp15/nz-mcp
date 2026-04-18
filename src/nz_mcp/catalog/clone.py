@@ -69,6 +69,18 @@ def _parse_first_procedure_line(line: str) -> tuple[str, str, str]:
     )
 
 
+def _wrap_nzplsql_body(body: str) -> str:
+    """Wrap raw procedure body for CREATE execution (catalog source omits delimiters)."""
+    stripped = body.strip()
+    if re.match(r"^\s*BEGIN_PROC\b", stripped, re.IGNORECASE) and re.search(
+        r"\bEND_PROC\s*;?\s*$",
+        stripped,
+        re.IGNORECASE,
+    ):
+        return body
+    return f"BEGIN_PROC\n{stripped}\nEND_PROC;\n"
+
+
 def _extract_returns(head_block: str) -> str | None:
     lines = head_block.strip().splitlines()
     if len(lines) < _MIN_LINES_FOR_RETURNS:
@@ -159,7 +171,8 @@ def _build_target_ddl(
     new_head = f"{kw} {ts}.{tp}{sig}"
     if ret:
         new_head = f"{new_head}\n{ret}"
-    return f"{new_head}{_MARKER}{body}"
+    wrapped = _wrap_nzplsql_body(body)
+    return f"{new_head}{_MARKER}{wrapped}"
 
 
 def clone_procedure(

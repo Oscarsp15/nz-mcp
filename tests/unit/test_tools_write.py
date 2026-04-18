@@ -47,13 +47,51 @@ def test_nz_insert_happy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
 
     monkeypatch.setattr(
         "nz_mcp.tools.write.execute_insert",
-        lambda *_a, **_k: {"inserted": 2, "duration_ms": 10},
+        lambda *_a, **_k: {"inserted": 2, "duration_ms": 10, "dry_run": False},
     )
     out = nz_insert(
-        InsertInput(database="DEV", table_schema="PUBLIC", table="T", rows=[{"A": 1}, {"A": 2}]),
+        InsertInput(
+            database="DEV",
+            table_schema="PUBLIC",
+            table="T",
+            rows=[{"A": 1}, {"A": 2}],
+            dry_run=False,
+            confirm=True,
+        ),
         config_path=profiles,
     )
     assert out.inserted == 2
+    assert out.dry_run is False
+
+
+def test_nz_insert_dry_run_mocked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    home = tmp_path / "nz-mcp"
+    home.mkdir()
+    profiles = home / "profiles.toml"
+    profiles.write_text(
+        'active = "w"\n[profiles.w]\nhost="h"\nport=5480\ndatabase="DEV"\nuser="u"\nmode="write"\n',
+        encoding="utf-8",
+    )
+    import nz_mcp.config as cfg
+
+    monkeypatch.setenv("NZ_MCP_HOME", str(home))
+    monkeypatch.setattr(cfg, "config_dir", lambda: home)
+    monkeypatch.setattr(
+        "nz_mcp.tools.write.execute_insert",
+        lambda *_a, **_k: {
+            "inserted": 0,
+            "would_insert": 3,
+            "dry_run": True,
+            "confirm_required": True,
+            "duration_ms": 0,
+        },
+    )
+    out = nz_insert(
+        InsertInput(database="DEV", table_schema="PUBLIC", table="T", rows=[{"A": 1}]),
+        config_path=profiles,
+    )
+    assert out.dry_run is True
+    assert out.would_insert == 3
 
 
 def test_nz_update_output_dry_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

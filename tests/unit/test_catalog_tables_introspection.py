@@ -88,9 +88,18 @@ def test_parse_table_stats_tuple() -> None:
     assert p.get("stats_last_analyzed") is None
 
 
-def test_parse_table_stats_six_tuple_with_analyzed() -> None:
-    p = _parse_table_stats_row((10, 100, 200, 0.05, None, "2024-03-12"))
-    assert p["stats_last_analyzed"] == "2024-03-12"
+def test_parse_table_stats_dict_ignores_stats_last_analyzed_column() -> None:
+    p = _parse_table_stats_row(
+        {
+            "ROW_COUNT": 1,
+            "SIZE_BYTES_USED": 100,
+            "SIZE_BYTES_ALLOCATED": 200,
+            "SKEW": None,
+            "TABLE_CREATED": None,
+            "STATS_LAST_ANALYZED": "2024-03-12",
+        },
+    )
+    assert p["stats_last_analyzed"] is None
 
 
 def test_skew_class_bands() -> None:

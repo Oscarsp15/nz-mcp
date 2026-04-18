@@ -179,3 +179,17 @@ def test_validate_netezza_drop_if_exists_suffix_rejected_in_read() -> None:
     with pytest.raises(GuardRejectedError) as exc:
         validate("DROP TABLE DBO.X IF EXISTS", mode="read")
     assert exc.value.code == "STATEMENT_NOT_ALLOWED"
+
+
+def test_validate_nzplsql_procedure_with_begin_proc_wrapped_body() -> None:
+    sql = (
+        "CREATE PROCEDURE DBO.P()\n"
+        "RETURNS INTEGER\n"
+        "LANGUAGE NZPLSQL AS\n"
+        "BEGIN_PROC\n"
+        "DECLARE x INT;\n"
+        "BEGIN NULL; END;\n"
+        "END_PROC;\n"
+    )
+    parsed = validate(sql, mode="admin")
+    assert parsed.kind is StatementKind.CREATE

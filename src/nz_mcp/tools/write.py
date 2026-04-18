@@ -19,12 +19,17 @@ class InsertInput(BaseModel):
     table: str = Field(min_length=1, max_length=128)
     rows: list[dict[str, Any]]
     on_conflict: Literal["error", "skip"] = "error"
+    dry_run: bool = True
+    confirm: bool = False
 
 
 class InsertOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     inserted: int
     duration_ms: int
+    dry_run: bool
+    would_insert: int | None = None
+    confirm_required: bool | None = None
 
 
 class UpdateInput(BaseModel):
@@ -88,7 +93,9 @@ class DeleteOutput(BaseModel):
     name="nz_insert",
     description=(
         "Insert rows into a base table using parameterized INSERT. "
-        "Requires profile mode write or admin. Database must match the active profile database."
+        "Default dry_run=true validates the INSERT without executing; set dry_run=false and "
+        "confirm=true to apply. Requires profile mode write or admin. Database must match "
+        "the active profile database."
     ),
     mode="write",
     input_model=InsertInput,
@@ -113,8 +120,22 @@ def nz_insert(
         table=params.table,
         rows=list(params.rows),
         on_conflict=params.on_conflict,
+        dry_run=params.dry_run,
+        confirm=params.confirm,
     )
-    return InsertOutput(inserted=int(raw["inserted"]), duration_ms=int(raw["duration_ms"]))
+    if raw.get("dry_run"):
+        return InsertOutput(
+            inserted=0,
+            duration_ms=int(raw["duration_ms"]),
+            dry_run=True,
+            would_insert=int(raw["would_insert"]),
+            confirm_required=bool(raw["confirm_required"]),
+        )
+    return InsertOutput(
+        inserted=int(raw["inserted"]),
+        duration_ms=int(raw["duration_ms"]),
+        dry_run=False,
+    )
 
 
 @tool(

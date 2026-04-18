@@ -34,7 +34,6 @@ _FK_SCHEMA_MIN: Final[int] = 5
 _FK_REL_MIN: Final[int] = 6
 _FK_ATT_MIN: Final[int] = 7
 _STATS_ROW_MIN: Final[int] = 5
-_STATS_ROW_WITH_ANALYZED: Final[int] = 6
 
 # Rule-of-thumb skew bands (Netezza): document-only, not policy thresholds.
 _SKEW_BALANCED_LT: Final[float] = 0.1
@@ -507,16 +506,6 @@ def _parse_table_stats_row(row: Any) -> dict[str, Any]:
         alloc = pick("SIZE_BYTES_ALLOCATED")
         skew = pick("SKEW")
         created = pick("TABLE_CREATED")
-        analyzed = pick("STATS_LAST_ANALYZED", "LASTUPDATETIMESTAMP")
-    elif is_sequence_row(row, _STATS_ROW_WITH_ANALYZED):
-        rc, used, alloc, skew, created, analyzed = (
-            row[0],
-            row[1],
-            row[2],
-            row[3],
-            row[4],
-            row[5],
-        )
     elif is_sequence_row(row, _STATS_ROW_MIN):
         rc, used, alloc, skew, created = (
             row[0],
@@ -525,7 +514,6 @@ def _parse_table_stats_row(row: Any) -> dict[str, Any]:
             row[3],
             row[4],
         )
-        analyzed = None
     else:
         raise NetezzaError(
             operation="get_table_stats",
@@ -541,21 +529,15 @@ def _parse_table_stats_row(row: Any) -> dict[str, Any]:
         iso = getattr(created, "isoformat", None)
         created_out = iso() if callable(iso) else str(created)
 
-    analyzed_out: str | None
-    if analyzed is None:
-        analyzed_out = None
-    else:
-        iso_a = getattr(analyzed, "isoformat", None)
-        analyzed_out = iso_a() if callable(iso_a) else str(analyzed)
-
+    # NPS 11.x _V_STATISTIC has no LASTUPDATETIMESTAMP; do not surface a fake timestamp.
     out: dict[str, Any] = {
         "row_count": 0 if rc is None else int(rc),
         "size_bytes_used": 0 if used is None else int(used),
         "size_bytes_allocated": 0 if alloc is None else int(alloc),
         "skew": skew_out,
         "table_created": created_out,
+        "stats_last_analyzed": None,
     }
-    out["stats_last_analyzed"] = analyzed_out
     return out
 
 

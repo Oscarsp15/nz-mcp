@@ -78,8 +78,8 @@ class TableStatsOutput(BaseModel):
     stats_last_analyzed: str | None = Field(
         default=None,
         description=(
-            "ISO timestamp from _v_statistic when available; None if statistics row missing "
-            "or column unsupported on this NPS build."
+            "Always None on NPS 11.x: _V_STATISTIC has no last-analyzed timestamp column. "
+            "Reserved for a future catalog source if one becomes available."
         ),
     )
     table_created: str | None
@@ -186,8 +186,8 @@ def nz_table_sample(
     name="nz_table_stats",
     description=(
         "Return estimated row count and on-disk storage metrics for a base table "
-        "from catalog statistics. skew_class summarizes skew; stats_last_analyzed comes from "
-        "_v_statistic when present. Use for capacity planning."
+        "from catalog statistics. skew_class summarizes skew. stats_last_analyzed is always "
+        "null on NPS 11.x (no stable timestamp in _V_STATISTIC). Use for capacity planning."
     ),
     mode="read",
     input_model=TableStatsInput,
