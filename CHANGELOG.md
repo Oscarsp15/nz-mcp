@@ -15,6 +15,12 @@ Cada entrada se documenta en **español** y **english**.
 - EN: ``nz_create_table`` — defaults to ``dry_run=true``; execution requires ``dry_run=false`` and ``confirm=true``. Output aligned with other DDL tools: ``ddl_to_execute``, ``executed``, ``duration_ms``.
 
 ### Added
+- ES: ``sql_guard`` — ``UNION`` / ``UNION ALL`` entre solo ``SELECT`` se clasifican como ``SELECT`` (desbloquea ``nz_insert_select`` / CTAS con multi-fila vía UNION).
+- EN: ``sql_guard`` — ``UNION`` / ``UNION ALL`` of ``SELECT``-only branches classify as ``SELECT`` (enables ``nz_insert_select`` / CTAS multi-row via UNION).
+- ES: ``nz_insert_select`` — ``INSERT INTO … SELECT …`` con ``select_sql`` validado (modo ``write``); ``dry_run``/``confirm``; ``estimate_rows`` opcional para previsualizar filas con ``COUNT`` (costoso).
+- EN: ``nz_insert_select`` — ``INSERT INTO … SELECT …`` with validated ``select_sql`` (``write`` mode); ``dry_run``/``confirm``; optional ``estimate_rows`` for ``COUNT`` preview (expensive).
+- ES: ``nz_create_table_as`` — CTAS (``CREATE TABLE … AS SELECT …``) con distribución Netezza (modo ``admin``); rechaza si el destino ya existe; ``estimate_rows`` opcional.
+- EN: ``nz_create_table_as`` — CTAS with Netezza distribution (``admin`` mode); rejects if target exists; optional ``estimate_rows``.
 - ES: tool ``nz_export_ddl`` — DDL de tabla/vista/procedimiento como bloques MCP (resource ``text/sql`` + texto resumen) y ``meta`` con URI ``nz-mcp://ddl/...``; pensada para copia nativa en clientes como Claude Desktop.
 - EN: ``nz_export_ddl`` tool — table/view/procedure DDL as MCP content blocks (``text/sql`` embedded resource + summary text) and ``meta`` with ``nz-mcp://ddl/...`` URI; intended for native copy UX in clients such as Claude Desktop.
 - ES: ``duration_ms`` en outputs de tools de lectura que consultan Netezza (listados, describe, DDL de tabla/vista/procedimiento, secciones).

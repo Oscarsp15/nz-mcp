@@ -78,6 +78,21 @@ class _ConnectionLike(Protocol):
     def close(self) -> None: ...
 
 
+def table_exists(
+    profile: Profile,
+    database: str,
+    schema: str,
+    table: str,
+) -> bool:
+    """Return True if a base table name exists in ``schema`` (case-insensitive match)."""
+    tab_ident = validate_catalog_identifier(table)
+    want = tab_ident.upper()
+    for entry in list_tables(profile, database, schema, pattern=None):
+        if str(entry["name"]).upper() == want:
+            return True
+    return False
+
+
 def list_tables(
     profile: Profile,
     database: str,

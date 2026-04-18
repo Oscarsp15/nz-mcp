@@ -67,7 +67,7 @@ NPS 11.x usa ``DROP TABLE esquema.tabla IF EXISTS``, no el orden ANSI ``DROP TAB
 
 | Statement kind | `read` | `write` | `admin` |
 |---|---|---|---|
-| `SELECT`, `WITH` (solo SELECT), `EXPLAIN`, `SHOW` | ✅ | ✅ | ✅ |
+| `SELECT`, `WITH` (solo SELECT), `UNION` / `UNION ALL` (solo ramas `SELECT`), `EXPLAIN`, `SHOW` | ✅ | ✅ | ✅ |
 | `INSERT` | ❌ | ✅ | ✅ |
 | `UPDATE` (con `WHERE`) | ❌ | ✅ | ✅ |
 | `UPDATE` sin `WHERE` | ❌ | ❌ | ❌ |

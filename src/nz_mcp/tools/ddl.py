@@ -5,9 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from nz_mcp.catalog.ddl import execute_create_table, execute_drop_table, execute_truncate
+from nz_mcp.catalog.ddl import (
+    execute_create_table,
+    execute_create_table_as,
+    execute_drop_table,
+    execute_truncate,
+)
 from nz_mcp.config import get_active_profile
 from nz_mcp.errors import InvalidInputError
 from nz_mcp.tools.registry import tool
@@ -44,6 +49,37 @@ class CreateTableOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     dry_run: bool
     ddl_to_execute: str
+    executed: bool
+    duration_ms: int
+
+
+class CreateTableAsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    database: str = Field(min_length=1, max_length=128)
+    target_schema: str = Field(min_length=1, max_length=128)
+    target_table: str = Field(min_length=1, max_length=128)
+    select_sql: str = Field(min_length=1, max_length=65536)
+    distribution: DistributionInput | None = None
+    organized_on: list[str] | None = None
+    dry_run: bool = True
+    confirm: bool = False
+    estimate_rows: bool = False
+
+    @field_validator("select_sql")
+    @classmethod
+    def strip_select_sql(cls, v: str) -> str:
+        s = v.strip()
+        if not s:
+            msg = "select_sql must be non-empty"
+            raise ValueError(msg)
+        return s
+
+
+class CreateTableAsOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    dry_run: bool
+    ddl_to_execute: str
+    would_create_rows: int | None = None
     executed: bool
     duration_ms: int
 
@@ -145,6 +181,52 @@ def nz_create_table(
     return CreateTableOutput(
         dry_run=False,
         ddl_to_execute=str(raw["ddl_to_execute"]),
+        executed=bool(raw["executed"]),
+        duration_ms=int(raw["duration_ms"]),
+    )
+
+
+@tool(
+    name="nz_create_table_as",
+    description=(
+        "Create a base table from a validated SELECT (CTAS) with Netezza distribution. "
+        "Requires profile mode admin. Default dry_run=true returns DDL only; set "
+        "estimate_rows=true to run a COUNT preview (can be expensive). "
+        "Rejects if the target table already exists."
+    ),
+    mode="admin",
+    input_model=CreateTableAsInput,
+    output_model=CreateTableAsOutput,
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    },
+)
+def nz_create_table_as(
+    params: CreateTableAsInput,
+    *,
+    config_path: Path | None = None,
+) -> CreateTableAsOutput:
+    profile = get_active_profile(path=config_path)
+    dist_dict = params.distribution.model_dump() if params.distribution is not None else None
+    raw = execute_create_table_as(
+        profile,
+        database=params.database,
+        schema=params.target_schema,
+        table=params.target_table,
+        select_sql=params.select_sql,
+        distribution=dist_dict,
+        organized_on=params.organized_on,
+        dry_run=params.dry_run,
+        confirm=params.confirm,
+        estimate_rows=params.estimate_rows,
+    )
+    return CreateTableAsOutput(
+        dry_run=bool(raw["dry_run"]),
+        ddl_to_execute=str(raw["ddl_to_execute"]),
+        would_create_rows=raw["would_create_rows"],
         executed=bool(raw["executed"]),
         duration_ms=int(raw["duration_ms"]),
     )

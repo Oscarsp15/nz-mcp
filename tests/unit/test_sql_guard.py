@@ -14,6 +14,27 @@ def test_select_passes_in_read(sql: str) -> None:
     assert parsed.kind is StatementKind.SELECT
 
 
+def test_union_all_select_passes_in_read() -> None:
+    parsed = validate("SELECT 1 AS a UNION ALL SELECT 2 AS a", mode="read")
+    assert parsed.kind is StatementKind.SELECT
+
+
+def test_union_three_selects_passes_in_write() -> None:
+    parsed = validate(
+        "SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3",
+        mode="write",
+    )
+    assert parsed.kind is StatementKind.SELECT
+
+
+def test_insert_select_with_union_inner_passes_in_write() -> None:
+    parsed = validate(
+        "INSERT INTO dbo.t (a, b) SELECT 'x', 1 UNION ALL SELECT 'y', 2",
+        mode="write",
+    )
+    assert parsed.kind is StatementKind.INSERT
+
+
 def test_explain_passes_in_read() -> None:
     parsed = validate("EXPLAIN SELECT 1", mode="read")
     assert parsed.kind is StatementKind.EXPLAIN
