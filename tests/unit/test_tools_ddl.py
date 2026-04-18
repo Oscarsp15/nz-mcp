@@ -129,8 +129,10 @@ def test_nz_create_table_happy_mocked(monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setattr(
         "nz_mcp.tools.ddl.execute_create_table",
         lambda *_a, **_k: {
-            "created": True,
-            "ddl_executed": "CREATE TABLE PUBLIC.X (ID INTEGER)\nDISTRIBUTE ON RANDOM",
+            "dry_run": False,
+            "ddl_to_execute": "CREATE TABLE PUBLIC.X (ID INTEGER)\nDISTRIBUTE ON RANDOM",
+            "executed": True,
+            "duration_ms": 5,
         },
     )
     out = nz_create_table(
@@ -139,11 +141,88 @@ def test_nz_create_table_happy_mocked(monkeypatch: pytest.MonkeyPatch, tmp_path:
             table_schema="PUBLIC",
             table="X",
             columns=[ColumnDef(name="ID", type="INTEGER")],
+            dry_run=False,
+            confirm=True,
         ),
         config_path=profiles,
     )
-    assert out.created is True
-    assert "DISTRIBUTE ON RANDOM" in out.ddl_executed
+    assert out.executed is True
+    assert out.dry_run is False
+    assert out.duration_ms == 5
+    assert "DISTRIBUTE ON RANDOM" in out.ddl_to_execute
+
+
+def test_nz_create_table_dry_run_skips_execute(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "nz-mcp"
+    home.mkdir()
+    profiles = home / "profiles.toml"
+    profiles.write_text(
+        'active = "a"\n[profiles.a]\nhost="h"\nport=5480\ndatabase="DEV"\nuser="u"\nmode="admin"\n',
+        encoding="utf-8",
+    )
+    import nz_mcp.config as cfg
+
+    monkeypatch.setenv("NZ_MCP_HOME", str(home))
+    monkeypatch.setattr(cfg, "config_dir", lambda: home)
+    calls: list[bool] = []
+
+    def _stub(*_a: object, **kw: object) -> dict[str, object]:
+        dr = kw.get("dry_run", True)
+        calls.append(bool(dr))
+        return {
+            "dry_run": True,
+            "ddl_to_execute": "CREATE ...",
+            "executed": False,
+            "duration_ms": 0,
+        }
+
+    monkeypatch.setattr("nz_mcp.tools.ddl.execute_create_table", _stub)
+    out = nz_create_table(
+        CreateTableInput(
+            database="DEV",
+            table_schema="PUBLIC",
+            table="Y",
+            columns=[ColumnDef(name="ID", type="INTEGER")],
+        ),
+        config_path=profiles,
+    )
+    assert out.dry_run is True
+    assert out.executed is False
+    assert calls == [True]
+
+
+def test_nz_create_table_confirm_required_when_dry_run_false(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "nz-mcp"
+    home.mkdir()
+    profiles = home / "profiles.toml"
+    profiles.write_text(
+        'active = "a"\n[profiles.a]\nhost="h"\nport=5480\ndatabase="DEV"\nuser="u"\nmode="admin"\n',
+        encoding="utf-8",
+    )
+    import nz_mcp.config as cfg
+
+    monkeypatch.setenv("NZ_MCP_HOME", str(home))
+    monkeypatch.setattr(cfg, "config_dir", lambda: home)
+
+    from nz_mcp.errors import InvalidInputError
+
+    with pytest.raises(InvalidInputError) as ei:
+        nz_create_table(
+            CreateTableInput(
+                database="DEV",
+                table_schema="PUBLIC",
+                table="Z",
+                columns=[ColumnDef(name="ID", type="INTEGER")],
+                dry_run=False,
+                confirm=False,
+            ),
+            config_path=profiles,
+        )
+    assert ei.value.code == "CONFIRM_REQUIRED"
 
 
 def test_nz_truncate_happy_mocked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

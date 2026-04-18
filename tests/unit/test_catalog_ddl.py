@@ -68,8 +68,8 @@ def test_execute_create_table_validates_core_and_distributes(
         organized_on=None,
         if_not_exists=True,
     )
-    assert out["created"] is True
-    sql = out["ddl_executed"]
+    assert out["executed"] is True
+    sql = out["ddl_to_execute"]
     assert "CREATE TABLE IF NOT EXISTS PUBLIC.T1" in sql
     assert "ID INTEGER NOT NULL" in sql
     assert "DISTRIBUTE ON RANDOM" in sql
@@ -94,7 +94,7 @@ def test_execute_create_table_hash_and_organize(monkeypatch: pytest.MonkeyPatch)
         organized_on=["ID"],
         if_not_exists=False,
     )
-    sql = str(out["ddl_executed"])
+    sql = str(out["ddl_to_execute"])
     assert "CREATE TABLE PUBLIC.T2" in sql
     assert "ORGANIZE ON (ID)" in sql
     assert "DISTRIBUTE ON HASH (ID)" in sql
@@ -130,7 +130,9 @@ def test_execute_truncate_and_drop(monkeypatch: pytest.MonkeyPatch) -> None:
 
     d_out = execute_drop_table(prof, "DEV", "PUBLIC", "T", if_exists=True)
     assert d_out["dropped"] is True
-    assert "DROP TABLE IF EXISTS PUBLIC.T" in fake.cursor_obj.executed[-1][0]
+    executed_sql = fake.cursor_obj.executed[-1][0]
+    assert "DROP TABLE PUBLIC.T IF EXISTS" in executed_sql
+    assert "IF EXISTS PUBLIC" not in executed_sql
 
 
 def test_execute_drop_table_if_not_exists_false(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -211,9 +213,39 @@ def test_create_table_column_without_default(monkeypatch: pytest.MonkeyPatch) ->
         organized_on=None,
         if_not_exists=True,
     )
-    sql = str(out["ddl_executed"])
+    sql = str(out["ddl_to_execute"])
     inner = sql.split("(", 1)[1].rsplit(")", 1)[0]
     assert "DEFAULT" not in inner
+
+
+def test_execute_create_table_dry_run_skips_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened: list[object] = []
+
+    def _boom_open(_p: object, _w: object) -> object:
+        opened.append(True)
+        return _FakeConn()
+
+    monkeypatch.setattr("nz_mcp.catalog.ddl.open_connection", _boom_open)
+    monkeypatch.setattr("nz_mcp.catalog.ddl.get_password", lambda _n: "pw")
+    prof = _admin_profile()
+    out = execute_create_table(
+        prof,
+        database="DEV",
+        schema="PUBLIC",
+        table="DRY1",
+        columns=[{"name": "ID", "type": "INTEGER"}],
+        distribution=None,
+        organized_on=None,
+        if_not_exists=True,
+        dry_run=True,
+    )
+    assert out["dry_run"] is True
+    assert out["executed"] is False
+    assert out["duration_ms"] == 0
+    assert "CREATE TABLE" in out["ddl_to_execute"]
+    assert opened == []
 
 
 def test_create_table_column_explicit_null_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -234,7 +266,7 @@ def test_create_table_column_explicit_null_default(monkeypatch: pytest.MonkeyPat
         organized_on=None,
         if_not_exists=True,
     )
-    sql = str(out["ddl_executed"])
+    sql = str(out["ddl_to_execute"])
     inner = sql.split("(", 1)[1].rsplit(")", 1)[0]
     assert "DEFAULT" not in inner
 
@@ -254,7 +286,7 @@ def test_create_table_column_with_default_literal(monkeypatch: pytest.MonkeyPatc
         organized_on=None,
         if_not_exists=True,
     )
-    assert "DEFAULT 0" in str(out["ddl_executed"])
+    assert "DEFAULT 0" in str(out["ddl_to_execute"])
 
 
 def test_create_table_column_with_injection_in_default(monkeypatch: pytest.MonkeyPatch) -> None:

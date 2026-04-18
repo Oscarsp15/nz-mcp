@@ -139,8 +139,9 @@ def execute_create_table(
     distribution: dict[str, Any] | None,
     organized_on: list[str] | None,
     if_not_exists: bool,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Build Netezza ``CREATE TABLE`` DDL, validate the parseable core, execute full DDL."""
+    """Build Netezza ``CREATE TABLE`` DDL, validate the parseable core, optionally execute."""
     _ensure_session_database(profile, database)
     base_sql = _build_create_table_base_sql(
         schema=schema,
@@ -162,8 +163,17 @@ def execute_create_table(
     pieces.append(dist_clause)
     full_sql = "\n".join(pieces)
 
+    if dry_run:
+        return {
+            "dry_run": True,
+            "ddl_to_execute": full_sql,
+            "executed": False,
+            "duration_ms": 0,
+        }
+
     password = get_password(profile.name)
     connection = cast(_ConnectionLike, open_connection(profile, password))
+    start = time.monotonic()
     try:
         with closing(connection.cursor()) as cursor:
             cursor.execute(full_sql, ())
@@ -176,7 +186,13 @@ def execute_create_table(
     finally:
         connection.close()
 
-    return {"created": True, "ddl_executed": full_sql}
+    duration_ms = int((time.monotonic() - start) * 1000)
+    return {
+        "dry_run": False,
+        "ddl_to_execute": full_sql,
+        "executed": True,
+        "duration_ms": duration_ms,
+    }
 
 
 def execute_truncate(
@@ -225,7 +241,8 @@ def execute_drop_table(
     """Execute ``DROP TABLE`` with ``sql_guard`` (admin)."""
     _ensure_session_database(profile, database)
     qual = _qualified_table(schema, table)
-    sql = f"DROP TABLE IF EXISTS {qual}" if if_exists else f"DROP TABLE {qual}"
+    # Netezza NPS expects ``DROP TABLE name IF EXISTS``, not ``DROP TABLE IF EXISTS name``.
+    sql = f"DROP TABLE {qual} IF EXISTS" if if_exists else f"DROP TABLE {qual}"
     parsed = guard_validate(sql, mode="admin")
     if parsed.kind is not StatementKind.DROP:
         raise NetezzaError(

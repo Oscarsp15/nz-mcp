@@ -8,6 +8,10 @@ Cada entrada se documenta en **español** y **english**.
 
 ## [Unreleased]
 
+### Changed
+- ES: ``nz_create_table`` — por defecto ``dry_run=true``; para ejecutar en el servidor hace falta ``dry_run=false`` y ``confirm=true``. Salida alineada con otras tools DDL: ``ddl_to_execute``, ``executed``, ``duration_ms``.
+- EN: ``nz_create_table`` — defaults to ``dry_run=true``; execution requires ``dry_run=false`` and ``confirm=true``. Output aligned with other DDL tools: ``ddl_to_execute``, ``executed``, ``duration_ms``.
+
 ### Added
 - ES: tool ``nz_export_ddl`` — DDL de tabla/vista/procedimiento como bloques MCP (resource ``text/sql`` + texto resumen) y ``meta`` con URI ``nz-mcp://ddl/...``; pensada para copia nativa en clientes como Claude Desktop.
 - EN: ``nz_export_ddl`` tool — table/view/procedure DDL as MCP content blocks (``text/sql`` embedded resource + summary text) and ``meta`` with ``nz-mcp://ddl/...`` URI; intended for native copy UX in clients such as Claude Desktop.
@@ -25,6 +29,8 @@ Cada entrada se documenta en **español** y **english**.
 - EN: CLI command ``nz-mcp edit-profile`` to update mode/limits on an existing profile (``tomli-w`` dependency).
 
 ### Fixed
+- ES: ``nz_drop_table`` con ``if_exists=true`` — emite ``DROP TABLE esquema.tabla IF EXISTS`` (sintaxis Netezza NPS 11.x), no ``DROP TABLE IF EXISTS ...`` (error de parser en el servidor).
+- EN: ``nz_drop_table`` with ``if_exists=true`` — emits ``DROP TABLE schema.table IF EXISTS`` (Netezza NPS 11.x syntax), not ``DROP TABLE IF EXISTS ...`` (server parse error).
 - ES: ``nz_create_table`` / ``execute_create_table`` — columna con ``default`` omitido o ``null`` en JSON ya no falla; se omite la cláusula ``DEFAULT`` (equivalente a sin default). Rechazo explícito de ``default`` string con ``;`` (inyección).
 - EN: ``nz_create_table`` / ``execute_create_table`` — column with omitted or JSON ``null`` ``default`` no longer errors; the ``DEFAULT`` clause is omitted (same as no default). String defaults containing ``;`` are rejected (injection).
 - ES: ``sql_guard`` — ``CREATE PROCEDURE ... LANGUAGE NZPLSQL AS`` se valida por cabecera (modo ``admin``); el cuerpo NZPLSQL no se parsea con ``sqlglot``, desbloqueando ``nz_clone_procedure`` con DDL real.

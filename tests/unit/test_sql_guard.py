@@ -168,3 +168,14 @@ def test_validate_create_table_without_language_nzplsql_not_header_only_path() -
     sql = "CREATE TABLE z (a INT)"
     assert "LANGUAGE" not in sql
     assert validate(sql, mode="admin").kind is StatementKind.CREATE
+
+
+def test_validate_netezza_drop_table_if_exists_suffix() -> None:
+    parsed = validate("DROP TABLE DBO.X IF EXISTS", mode="admin")
+    assert parsed.kind is StatementKind.DROP
+
+
+def test_validate_netezza_drop_if_exists_suffix_rejected_in_read() -> None:
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("DROP TABLE DBO.X IF EXISTS", mode="read")
+    assert exc.value.code == "STATEMENT_NOT_ALLOWED"

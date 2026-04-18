@@ -56,6 +56,13 @@ _NZPLSQL_PROC_HEAD: Final[re.Pattern[str]] = re.compile(
     r"(?:\s+RETURNS\b[\s\S]*)?\s*$",
     re.IGNORECASE | re.DOTALL,
 )
+# Netezza NPS places ``IF EXISTS`` after the qualified name (not ANSI ``DROP TABLE IF EXISTS ...``).
+_NETEZZA_DROP_TABLE_IF_EXISTS_SUFFIX: Final[re.Pattern[str]] = re.compile(
+    r"^\s*DROP\s+TABLE\s+"
+    r"(?P<sch>[A-Za-z][A-Za-z0-9_]*)\s*\.\s*(?P<tbl>[A-Za-z][A-Za-z0-9_]*)"
+    r"\s+IF\s+EXISTS\s*$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +82,9 @@ def validate(sql: str, *, mode: PermissionMode) -> ParsedStatement:
 
     if _NZPLSQL_MARKER.search(sql):
         return _validate_nzplsql_procedure(sql, mode=mode)
+
+    if _NETEZZA_DROP_TABLE_IF_EXISTS_SUFFIX.match(sql.strip()):
+        return _validate_netezza_drop_if_exists_suffix(sql, mode=mode)
 
     try:
         parsed_list = sqlglot.parse(sql, read="postgres")
@@ -145,6 +155,28 @@ def _validate_nzplsql_procedure(sql: str, *, mode: PermissionMode) -> ParsedStat
         ) from exc
 
     return ParsedStatement(kind=StatementKind.CREATE, has_where=False, raw=sql)
+
+
+def _validate_netezza_drop_if_exists_suffix(sql: str, *, mode: PermissionMode) -> ParsedStatement:
+    """Accept Netezza ``DROP TABLE schema.table IF EXISTS`` (suffix form)."""
+    m = _NETEZZA_DROP_TABLE_IF_EXISTS_SUFFIX.match(sql.strip())
+    if not m:
+        raise GuardRejectedError(
+            code="UNKNOWN_STATEMENT",
+            detail="Malformed Netezza DROP TABLE ... IF EXISTS.",
+        )
+
+    try:
+        validate_catalog_identifier(m.group("sch"))
+        validate_catalog_identifier(m.group("tbl"))
+    except InvalidInputError as exc:
+        raise GuardRejectedError(
+            code="UNKNOWN_STATEMENT",
+            detail="Invalid DROP TABLE identifier.",
+        ) from exc
+
+    _enforce(kind=StatementKind.DROP, has_where=False, mode=mode)
+    return ParsedStatement(kind=StatementKind.DROP, has_where=False, raw=sql)
 
 
 _SIMPLE_KIND_MAP: Final[tuple[tuple[type[exp.Expr], StatementKind], ...]] = (
