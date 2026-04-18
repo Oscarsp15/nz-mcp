@@ -10,6 +10,7 @@ from nz_mcp.tools import (
     databases,  # noqa: F401  (registers database tools)
     ddl,  # noqa: F401  (registers DDL tools)
     describe_table,  # noqa: F401  (registers nz_describe_table)
+    export_ddl,  # noqa: F401  (registers nz_export_ddl)
     procedures,  # noqa: F401  (registers procedure tools)
     query,  # noqa: F401  (registers nz_query_select, nz_explain)
     schemas,  # noqa: F401  (registers schema tools)

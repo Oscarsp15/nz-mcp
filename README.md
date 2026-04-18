@@ -111,7 +111,7 @@ Ver el contrato completo en [`docs/architecture/tools-contract.md`](docs/archite
 
 | Categoría | Tools |
 |---|---|
-| Lectura | `nz_query_select`, `nz_explain`, `nz_list_databases`, `nz_list_schemas`, `nz_list_tables`, `nz_describe_table`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_list_views`, `nz_get_view_ddl`, `nz_list_procedures`, `nz_describe_procedure`, `nz_get_procedure_ddl`, `nz_get_procedure_section` |
+| Lectura | `nz_query_select`, `nz_explain`, `nz_list_databases`, `nz_list_schemas`, `nz_list_tables`, `nz_describe_table`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_list_views`, `nz_get_view_ddl`, `nz_list_procedures`, `nz_describe_procedure`, `nz_get_procedure_ddl`, `nz_export_ddl`, `nz_get_procedure_section` |
 | Escritura | `nz_insert`, `nz_update`, `nz_delete` |
 | DDL / SP | `nz_create_table`, `nz_truncate`, `nz_drop_table`, `nz_clone_procedure` |
 | Sesión | `nz_current_profile`, `nz_switch_profile` |

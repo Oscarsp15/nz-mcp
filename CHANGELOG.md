@@ -9,6 +9,8 @@ Cada entrada se documenta en **español** y **english**.
 ## [Unreleased]
 
 ### Added
+- ES: tool ``nz_export_ddl`` — DDL de tabla/vista/procedimiento como bloques MCP (resource ``text/sql`` + texto resumen) y ``meta`` con URI ``nz-mcp://ddl/...``; pensada para copia nativa en clientes como Claude Desktop.
+- EN: ``nz_export_ddl`` tool — table/view/procedure DDL as MCP content blocks (``text/sql`` embedded resource + summary text) and ``meta`` with ``nz-mcp://ddl/...`` URI; intended for native copy UX in clients such as Claude Desktop.
 - ES: ``duration_ms`` en outputs de tools de lectura que consultan Netezza (listados, describe, DDL de tabla/vista/procedimiento, secciones).
 - EN: ``duration_ms`` on read-tool outputs that hit Netezza (list/describe/table-view-procedure DDL and sections).
 - ES: ``nz_table_stats`` — ``skew_class`` (balanced/moderate/severe) y ``stats_last_analyzed`` vía ``_v_statistic`` cuando aplica.

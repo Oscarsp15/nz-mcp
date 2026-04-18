@@ -12,14 +12,14 @@ import anyio
 from mcp import types
 from mcp.server.lowlevel.server import Server
 from mcp.server.stdio import stdio_server
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 import nz_mcp.tools  # noqa: F401  (side effect: register tools)
 from nz_mcp import __version__
 from nz_mcp.config import Profile, get_active_profile
 from nz_mcp.errors import InvalidInputError, NzMcpError, PermissionDeniedError
 from nz_mcp.i18n import MESSAGES, both
-from nz_mcp.tools.registry import TOOLS, ToolSpec
+from nz_mcp.tools.registry import TOOLS, OutputKind, ToolSpec
 
 _MODE_RANK = {"read": 0, "write": 1, "admin": 2}
 
@@ -30,6 +30,7 @@ class ToolListing:
     description: str
     input_schema: dict[str, Any]
     output_schema: dict[str, Any]
+    output_kind: OutputKind
     annotations: dict[str, Any]
 
 
@@ -40,18 +41,33 @@ def list_tools() -> list[ToolListing]:
             description=spec.description,
             input_schema=spec.input_model.model_json_schema(),
             output_schema=spec.output_model.model_json_schema(),
+            output_kind=spec.output_kind,
             annotations=dict(spec.annotations),
         )
         for spec in TOOLS.values()
     ]
 
 
-def call_tool(
+def _serialize_content_block(block: Any) -> dict[str, Any]:
+    dump = getattr(block, "model_dump", None)
+    if callable(dump):
+        return cast(dict[str, Any], dump(mode="json", by_alias=True))
+    raise TypeError(f"unexpected content block type: {type(block).__name__}")
+
+
+def _invoke(spec: ToolSpec, params: Any, *, config_path: Path | None) -> Any:
+    if "config_path" in inspect.signature(spec.handler).parameters:
+        return spec.handler(params, config_path=config_path)
+    return spec.handler(params)
+
+
+def _dispatch_tool_call(
     name: str,
     arguments: dict[str, Any],
     *,
-    config_path: Path | None = None,
-) -> dict[str, Any]:
+    config_path: Path | None,
+) -> dict[str, Any] | tuple[list[Any], Any] | BaseModel:
+    """Error dict, or ``(blocks, meta)`` for content-block tools, or a Pydantic output model."""
     spec = TOOLS.get(name)
     if spec is None:
         return _error_response("UNKNOWN_TOOL", tool=name)
@@ -67,17 +83,32 @@ def call_tool(
         return _error_response("INVALID_INPUT", detail=str(exc))
 
     try:
-        result = _invoke(spec, params, config_path=config_path)
+        raw = _invoke(spec, params, config_path=config_path)
     except NzMcpError as exc:
         return _error_response(exc.code, **exc.context)
 
-    return {"result": result.model_dump(mode="json", by_alias=True)}
+    if spec.output_kind == "content_blocks":
+        blocks, meta = raw
+        return blocks, meta
+    return cast(BaseModel, raw)
 
 
-def _invoke(spec: ToolSpec, params: Any, *, config_path: Path | None) -> Any:
-    if "config_path" in inspect.signature(spec.handler).parameters:
-        return spec.handler(params, config_path=config_path)
-    return spec.handler(params)
+def call_tool(
+    name: str,
+    arguments: dict[str, Any],
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    out = _dispatch_tool_call(name, arguments, config_path=config_path)
+    if isinstance(out, dict):
+        return out
+    if isinstance(out, tuple):
+        blocks, meta = out
+        return {
+            "content": [_serialize_content_block(b) for b in blocks],
+            "meta": meta.model_dump(mode="json", by_alias=True),
+        }
+    return {"result": out.model_dump(mode="json", by_alias=True)}
 
 
 def _mode_allows(profile_mode: str, required: str) -> bool:
@@ -146,8 +177,25 @@ def build_mcp_server(*, config_path: Path | None = None) -> Server[Any, Any]:
         return [_to_mcp_tool(listing) for listing in list_tools()]
 
     @server.call_tool(validate_input=False)  # type: ignore[untyped-decorator]
-    async def _handle_call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        return call_tool(name, arguments, config_path=config_path)
+    async def _handle_call_tool(
+        name: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any] | types.CallToolResult:
+        out = _dispatch_tool_call(name, arguments, config_path=config_path)
+        if isinstance(out, dict):
+            return out
+        if isinstance(out, tuple):
+            blocks, meta = out
+            structured = {
+                "content": [_serialize_content_block(b) for b in blocks],
+                "meta": meta.model_dump(mode="json", by_alias=True),
+            }
+            return types.CallToolResult(
+                content=blocks,
+                structuredContent=structured,
+                isError=False,
+            )
+        return {"result": out.model_dump(mode="json", by_alias=True)}
 
     return server
 
@@ -169,7 +217,7 @@ def _to_mcp_tool(listing: ToolListing) -> types.Tool:
         name=listing.name,
         description=listing.description,
         inputSchema=_inline_refs(listing.input_schema),
-        outputSchema=_tool_output_schema(listing.output_schema),
+        outputSchema=_tool_output_schema(listing.output_schema, output_kind=listing.output_kind),
         annotations=types.ToolAnnotations.model_validate(listing.annotations),
     )
 
@@ -215,24 +263,50 @@ def _inline_refs(schema: dict[str, Any]) -> dict[str, Any]:
     return cast(dict[str, Any], _walk(out, frozenset()))
 
 
-def _tool_output_schema(result_schema: dict[str, Any]) -> dict[str, Any]:
+def _tool_output_schema(
+    result_schema: dict[str, Any],
+    *,
+    output_kind: OutputKind = "model",
+) -> dict[str, Any]:
+    err_block: dict[str, Any] = {
+        "type": "object",
+        "additionalProperties": True,
+        "properties": {
+            "code": {"type": "string"},
+            "message_en": {"type": "string"},
+            "message_es": {"type": "string"},
+            "context": {"type": "object"},
+        },
+        "required": ["code", "message_en", "message_es", "context"],
+    }
+    if output_kind == "content_blocks":
+        inlined = _inline_refs(result_schema)
+        props = inlined.get("properties") or {}
+        content_s = props.get("content")
+        meta_s = props.get("meta")
+        if content_s is None or meta_s is None:
+            raise ValueError("content_blocks tools require output_model with content and meta")
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "content": content_s,
+                "meta": meta_s,
+                "error": err_block,
+            },
+            "oneOf": [
+                {"required": ["content", "meta"]},
+                {"required": ["error"]},
+            ],
+        }
+
     inlined = _inline_refs(result_schema)
     return {
         "type": "object",
         "additionalProperties": False,
         "properties": {
             "result": inlined,
-            "error": {
-                "type": "object",
-                "additionalProperties": True,
-                "properties": {
-                    "code": {"type": "string"},
-                    "message_en": {"type": "string"},
-                    "message_es": {"type": "string"},
-                    "context": {"type": "object"},
-                },
-                "required": ["code", "message_en", "message_es", "context"],
-            },
+            "error": err_block,
         },
         "oneOf": [
             {"required": ["result"]},

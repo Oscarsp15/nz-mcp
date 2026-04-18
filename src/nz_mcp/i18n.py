@@ -130,6 +130,10 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Las cláusulas WITH DATA / STATISTICS pueden diferir del CREATE original.",
         "en": "WITH DATA / STATISTICS clauses may differ from the original CREATE.",
     },
+    "EXPORT_DDL.SUMMARY_LINE": {
+        "es": "DDL exportado: {object_type} {schema}.{name} ({duration_ms} ms). El bloque resource incluye el texto SQL.",
+        "en": "Exported DDL: {object_type} {schema}.{name} ({duration_ms} ms). The resource block holds the SQL text.",
+    },
     # nz-mcp doctor (CLI diagnostics — no secrets)
     "DOCTOR.HEADER": {
         "es": "Diagnóstico local (nz-mcp doctor)",

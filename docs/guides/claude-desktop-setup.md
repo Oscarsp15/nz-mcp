@@ -56,6 +56,10 @@ Point `command` at the **full path** to the `nz-mcp` binary from pipx or venv â€
 
 Restart Claude Desktop after editing the config.
 
+## DDL export (`nz_export_ddl`)
+
+The read tool `nz_export_ddl` returns Netezza DDL as MCP **content blocks**: an embedded **resource** (`text/sql`) with a stable `nz-mcp://ddl/...` URI plus a short **text** summary. In Claude Desktop this typically appears as a copyable SQL card alongside the summaryâ€”use it after resolving object names with the list/describe tools.
+
 ## Global `pip install` (discouraged)
 
 Installing into the system or user site-packages can break other tools that depend on older `typer`/`click`. Prefer pipx or a dedicated venv.
