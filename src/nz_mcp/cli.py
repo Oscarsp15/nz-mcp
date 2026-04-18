@@ -45,6 +45,7 @@ from nz_mcp.errors import (
     ProfileNotFoundError,
 )
 from nz_mcp.i18n import MESSAGES, resolve_locale, t
+from nz_mcp.logging_config import configure_logging_for_stdio
 from nz_mcp.logging_utils import sanitize
 from nz_mcp.server import run_stdio_server
 
@@ -257,6 +258,7 @@ def test_connection_cmd(
 @app.command("serve")
 def serve_cmd() -> None:
     """Run the MCP server over stdio."""
+    configure_logging_for_stdio()
     run_stdio_server()
 
 
