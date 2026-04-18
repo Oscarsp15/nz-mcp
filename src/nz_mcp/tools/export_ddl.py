@@ -7,7 +7,7 @@ from typing import Literal
 from urllib.parse import quote
 
 from mcp import types
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AnyUrl, BaseModel, ConfigDict, Field
 
 from nz_mcp.catalog.procedures import get_procedure_ddl
 from nz_mcp.catalog.tables import get_table_ddl
@@ -74,10 +74,7 @@ def _ddl_resource_uri(
     name: str,
     signature: str | None,
 ) -> str:
-    path = "/".join(
-        quote(part, safe="")
-        for part in (database, schema, object_type, name)
-    )
+    path = "/".join(quote(part, safe="") for part in (database, schema, object_type, name))
     base = f"nz-mcp://ddl/{path}"
     if signature:
         return f"{base}?signature={quote(signature, safe='')}"
@@ -103,7 +100,7 @@ def _build_blocks_and_meta(
     embedded = types.EmbeddedResource(
         type="resource",
         resource=types.TextResourceContents(
-            uri=uri,
+            uri=AnyUrl(uri),
             mimeType="text/sql",
             text=ddl,
         ),
@@ -126,7 +123,7 @@ def _build_blocks_and_meta(
     meta = ExportDdlMeta(
         object_type=object_type,
         database=database,
-        schema=schema,
+        object_schema=schema,
         name=name,
         duration_ms=duration_ms,
         resource_uri=uri,

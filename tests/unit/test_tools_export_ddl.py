@@ -80,9 +80,8 @@ def test_nz_export_ddl_direct_returns_mcp_blocks(
         "nz_mcp.tools.export_ddl.get_view_ddl",
         lambda *_a, **_k: "CREATE VIEW v AS SELECT 1;",
     )
-    params = ExportDdlInput(object_type="view", database="DB", schema="S", name="V")
+    params = ExportDdlInput(object_type="view", database="DB", object_schema="S", name="V")
     blocks, meta = nz_export_ddl(params, config_path=two_profiles)
     assert isinstance(blocks[0], types.EmbeddedResource)
     assert isinstance(blocks[1], types.TextContent)
     assert meta.object_schema == "S"
-

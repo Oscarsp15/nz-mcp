@@ -18,7 +18,7 @@ OutputKind = Literal["model", "content_blocks"]
 ToolHandler = Callable[..., Any]
 
 P = ParamSpec("P")
-R = TypeVar("R", bound=BaseModel)
+R = TypeVar("R")
 
 
 @dataclass(frozen=True, slots=True)

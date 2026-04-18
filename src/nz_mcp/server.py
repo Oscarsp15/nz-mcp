@@ -90,7 +90,7 @@ def _dispatch_tool_call(
     if spec.output_kind == "content_blocks":
         blocks, meta = raw
         return blocks, meta
-    return raw
+    return cast(BaseModel, raw)
 
 
 def call_tool(
