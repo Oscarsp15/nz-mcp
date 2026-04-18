@@ -6,7 +6,12 @@ from typing import Any, Literal
 
 import pytest
 
-from nz_mcp.catalog.clone import _wrap_nzplsql_body, clone_procedure
+from nz_mcp.catalog.clone import (
+    _normalize_returns_for_netezza,
+    _parse_first_procedure_line,
+    _wrap_nzplsql_body,
+    clone_procedure,
+)
 from nz_mcp.config import Profile
 from nz_mcp.errors import InvalidInputError, NetezzaError, ProcedureAlreadyExistsError
 
@@ -69,6 +74,63 @@ def test_clone_dry_run_real_shaped_nzplsql_body(monkeypatch: pytest.MonkeyPatch)
     assert "DECLARE" in out["ddl_to_execute"]
     assert "BEGIN_PROC" in out["ddl_to_execute"]
     assert "END_PROC" in out["ddl_to_execute"]
+
+
+def test_parse_first_procedure_line_parametrized_types() -> None:
+    sch, proc, sig = _parse_first_procedure_line(
+        "CREATE OR REPLACE PROCEDURE DBO.P(CHARACTER(8))",
+    )
+    assert sch == "DBO"
+    assert proc == "P"
+    assert sig == "(CHARACTER(8))"
+    _a, _b, sig2 = _parse_first_procedure_line(
+        "CREATE PROCEDURE SCH.X(DATE, VARCHAR(20))",
+    )
+    assert sig2 == "(DATE, VARCHAR(20))"
+
+
+def test_normalize_returns_varchar_no_size_appends_max_length() -> None:
+    line, w = _normalize_returns_for_netezza("RETURNS VARCHAR")
+    assert line is not None
+    assert "VARCHAR(4000)" in line
+    assert any("4000" in x for x in w)
+    line2, w2 = _normalize_returns_for_netezza("RETURNS CHARACTER VARYING")
+    assert line2 is not None
+    assert "CHARACTER VARYING(4000)" in line2
+    assert w2
+
+
+def test_clone_dry_run_varchar_return_no_size_gets_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ddl = (
+        "CREATE OR REPLACE PROCEDURE DBO.P(CHARACTER(8))\n"
+        "RETURNS VARCHAR\n"
+        "LANGUAGE NZPLSQL AS\n"
+        "BEGIN NULL; END;\n"
+    )
+    monkeypatch.setattr(
+        "nz_mcp.catalog.clone.get_procedure_ddl",
+        lambda *_a, **_k: ddl,
+    )
+    monkeypatch.setattr("nz_mcp.catalog.clone.list_procedures", lambda *_a, **_k: [])
+
+    out = clone_procedure(
+        _profile(),
+        source_database="DEV",
+        source_schema="DBO",
+        source_procedure="P",
+        source_signature=None,
+        target_database="DEV",
+        target_schema="DBO",
+        target_procedure="P2",
+        replace_if_exists=False,
+        transformations=None,
+        dry_run=True,
+        confirm=False,
+    )
+    assert "VARCHAR(4000)" in out["ddl_to_execute"]
+    assert any("catalog DDL" in m.lower() or "4000" in m for m in out["warnings"])
 
 
 def test_wrap_nzplsql_body_idempotent_and_adds_markers() -> None:

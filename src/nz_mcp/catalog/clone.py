@@ -17,6 +17,7 @@ from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
 from nz_mcp.errors import InvalidInputError, NetezzaError, ProcedureAlreadyExistsError
 from nz_mcp.logging_utils import sanitize
+from nz_mcp.procedure_head_pattern import PROCEDURE_PARAM_LIST_PATTERN
 from nz_mcp.sql_guard import StatementKind
 from nz_mcp.sql_guard import validate as guard_validate
 
@@ -24,6 +25,7 @@ _LOG = structlog.get_logger(__name__)
 _MARKER: Final[str] = "\nLANGUAGE NZPLSQL AS\n"
 _MAX_TRANSFORMS: Final[int] = 20
 _MIN_LINES_FOR_RETURNS: Final[int] = 2
+_DEFAULT_STRING_TYPE_LENGTH: Final[int] = 4000
 
 # Heuristic: ``OTHERDB..OBJECT`` cross-database references in procedure body.
 _CROSS_DB: Final[re.Pattern[str]] = re.compile(
@@ -56,7 +58,7 @@ def _parse_first_procedure_line(line: str) -> tuple[str, str, str]:
     m = re.match(
         r"^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\s+"
         r"(?P<sch>[A-Z][A-Z0-9_]*)\.(?P<proc>[A-Z][A-Z0-9_]*)"
-        r"(?P<sig>\([^)]*\))\s*$",
+        rf"(?P<sig>{PROCEDURE_PARAM_LIST_PATTERN})\s*$",
         line.strip(),
         re.I,
     )
@@ -89,6 +91,32 @@ def _extract_returns(head_block: str) -> str | None:
         if ln.strip().upper().startswith("RETURNS"):
             return ln.strip()
     return None
+
+
+def _normalize_returns_for_netezza(returns_line: str | None) -> tuple[str | None, list[str]]:
+    """Append default max length when catalog string types lack ``(n)`` (Netezza requires)."""
+    if returns_line is None:
+        return None, []
+    warnings: list[str] = []
+    stripped = returns_line.strip()
+    n = _DEFAULT_STRING_TYPE_LENGTH
+    if re.match(r"^RETURNS\s+VARCHAR\s*$", stripped, re.IGNORECASE):
+        warnings.append(
+            "RETURNS VARCHAR had no length in catalog DDL; "
+            f"appended default ({n}) for Netezza execution.",
+        )
+        return f"RETURNS VARCHAR({n})", warnings
+    if re.match(r"^RETURNS\s+CHARACTER\s+VARYING\s*$", stripped, re.IGNORECASE):
+        warnings.append(
+            f"RETURNS CHARACTER VARYING had no length in catalog DDL; appended default ({n}).",
+        )
+        return f"RETURNS CHARACTER VARYING({n})", warnings
+    if re.match(r"^RETURNS\s+CHAR\s+VARYING\s*$", stripped, re.IGNORECASE):
+        warnings.append(
+            f"RETURNS CHAR VARYING had no length in catalog DDL; appended default ({n}).",
+        )
+        return f"RETURNS CHAR VARYING({n})", warnings
+    return returns_line, []
 
 
 def _apply_transformations(
@@ -159,12 +187,13 @@ def _build_target_ddl(
     target_schema: str,
     target_procedure: str,
     replace_if_exists: bool,
-) -> str:
+) -> tuple[str, list[str]]:
     lines = head_block.strip().splitlines()
     if not lines:
         raise InvalidInputError(detail="Empty procedure header.")
     _sch, _proc, sig = _parse_first_procedure_line(lines[0])
     ret = _extract_returns(head_block)
+    ret, ret_warnings = _normalize_returns_for_netezza(ret)
     ts = validate_catalog_identifier(target_schema)
     tp = validate_catalog_identifier(target_procedure)
     kw = "CREATE OR REPLACE PROCEDURE" if replace_if_exists else "CREATE PROCEDURE"
@@ -172,7 +201,7 @@ def _build_target_ddl(
     if ret:
         new_head = f"{new_head}\n{ret}"
     wrapped = _wrap_nzplsql_body(body)
-    return f"{new_head}{_MARKER}{wrapped}"
+    return f"{new_head}{_MARKER}{wrapped}", ret_warnings
 
 
 def clone_procedure(
@@ -209,13 +238,14 @@ def clone_procedure(
     xw = _cross_db_warnings(body, tdb)
     warnings = tw + xw
 
-    target_ddl = _build_target_ddl(
+    target_ddl, ret_warnings = _build_target_ddl(
         head_block=head_block,
         body=body,
         target_schema=tsch,
         target_procedure=tproc,
         replace_if_exists=replace_if_exists,
     )
+    warnings = warnings + ret_warnings
 
     parsed = guard_validate(target_ddl, mode="admin")
     if parsed.kind is not StatementKind.CREATE:
