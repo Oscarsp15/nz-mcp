@@ -6,6 +6,7 @@ See docs/architecture/security-model.md for the full matrix.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
@@ -13,8 +14,9 @@ from typing import Final
 import sqlglot
 from sqlglot import expressions as exp
 
+from nz_mcp.catalog.identifier import validate_catalog_identifier
 from nz_mcp.config import PermissionMode
-from nz_mcp.errors import GuardRejectedError
+from nz_mcp.errors import GuardRejectedError, InvalidInputError, PermissionDeniedError
 
 
 class StatementKind(StrEnum):
@@ -43,6 +45,18 @@ _DDL_KINDS: Final[frozenset[StatementKind]] = frozenset(
     {StatementKind.CREATE, StatementKind.TRUNCATE, StatementKind.DROP}
 )
 
+_NZPLSQL_MARKER: Final[re.Pattern[str]] = re.compile(
+    r"\bLANGUAGE\s+NZPLSQL\s+AS\b",
+    re.IGNORECASE,
+)
+_NZPLSQL_PROC_HEAD: Final[re.Pattern[str]] = re.compile(
+    r"^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\s+"
+    r"(?P<sch>[A-Za-z][A-Za-z0-9_]*)\s*\.\s*(?P<proc>[A-Za-z][A-Za-z0-9_]*)"
+    r"\s*\([^)]*\)"
+    r"(?:\s+RETURNS\b[\s\S]*)?\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ParsedStatement:
@@ -58,6 +72,9 @@ def validate(sql: str, *, mode: PermissionMode) -> ParsedStatement:
     """
     if not sql or not sql.strip():
         raise GuardRejectedError(code="EMPTY_STATEMENT")
+
+    if _NZPLSQL_MARKER.search(sql):
+        return _validate_nzplsql_procedure(sql, mode=mode)
 
     try:
         parsed_list = sqlglot.parse(sql, read="postgres")
@@ -90,6 +107,44 @@ def validate(sql: str, *, mode: PermissionMode) -> ParsedStatement:
     _enforce(kind=kind, has_where=has_where, mode=mode)
 
     return ParsedStatement(kind=kind, has_where=has_where, raw=sql)
+
+
+def _validate_nzplsql_procedure(sql: str, *, mode: PermissionMode) -> ParsedStatement:
+    """Validate ``CREATE ... PROCEDURE ... LANGUAGE NZPLSQL AS`` without parsing the body.
+
+    ``sqlglot`` cannot classify NZPLSQL procedure bodies; the header is validated with
+    regex and catalog identifier rules. The body is treated as opaque (trusted when
+    sourced from server catalog DDL, e.g. clone).
+    """
+    if mode != "admin":
+        raise PermissionDeniedError(required="admin", actual=mode)
+
+    parts = _NZPLSQL_MARKER.split(sql, maxsplit=1)
+    expected_segments = 2
+    if len(parts) != expected_segments or not parts[1].strip():
+        raise GuardRejectedError(
+            code="UNKNOWN_STATEMENT",
+            detail="Malformed NZPLSQL procedure (missing body after LANGUAGE NZPLSQL AS).",
+        )
+
+    head = parts[0].strip()
+    if ";" in head:
+        raise GuardRejectedError(code="STACKED_NOT_ALLOWED", count=2)
+
+    m = _NZPLSQL_PROC_HEAD.fullmatch(head)
+    if not m:
+        raise GuardRejectedError(code="UNKNOWN_STATEMENT", detail="Malformed procedure header.")
+
+    try:
+        validate_catalog_identifier(m.group("sch"))
+        validate_catalog_identifier(m.group("proc"))
+    except InvalidInputError as exc:
+        raise GuardRejectedError(
+            code="UNKNOWN_STATEMENT",
+            detail="Invalid procedure identifier.",
+        ) from exc
+
+    return ParsedStatement(kind=StatementKind.CREATE, has_where=False, raw=sql)
 
 
 _SIMPLE_KIND_MAP: Final[tuple[tuple[type[exp.Expr], StatementKind], ...]] = (

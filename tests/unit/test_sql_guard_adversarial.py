@@ -81,3 +81,19 @@ def test_show_stacked_with_select_blocked() -> None:
     with pytest.raises(GuardRejectedError) as exc:
         validate("SHOW DATABASES; SELECT 1", mode="read")
     assert exc.value.code == "STACKED_NOT_ALLOWED"
+
+
+@pytest.mark.adversarial
+def test_nzplsql_procedure_header_stacked_blocked() -> None:
+    sql = "CREATE PROCEDURE A.B(); DROP TABLE t; LANGUAGE NZPLSQL AS\nBEGIN NULL; END;\n"
+    with pytest.raises(GuardRejectedError) as exc:
+        validate(sql, mode="admin")
+    assert exc.value.code == "STACKED_NOT_ALLOWED"
+
+
+@pytest.mark.adversarial
+def test_nzplsql_procedure_invalid_identifier_blocked() -> None:
+    sql = "CREATE PROCEDURE 1A.B()\nLANGUAGE NZPLSQL AS\nBEGIN NULL; END;\n"
+    with pytest.raises(GuardRejectedError) as exc:
+        validate(sql, mode="admin")
+    assert exc.value.code == "UNKNOWN_STATEMENT"

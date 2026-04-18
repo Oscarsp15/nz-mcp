@@ -55,6 +55,10 @@
 - Retorna un `ParsedStatement` tipado: `{ kind: Enum, tables: list, has_where: bool, raw: str }`.
 - Lanza `GuardRejectedError` con `code` y `hint` i18n.
 
+#### Procedimientos `CREATE ... LANGUAGE NZPLSQL AS`
+
+`sqlglot` no clasifica cuerpos NZPLSQL reales (`DECLARE`, `BEGIN`/`END`, cursores, etc.). Para sentencias que contienen el marcador `LANGUAGE NZPLSQL AS`, el guard **no** intenta parsear el cuerpo: valida la cabecera con regex (firma `schema.procedimiento`, sin `;` en la cabecera) y los identificadores con las mismas reglas que el catálogo. El cuerpo se trata como **opaco**; no es texto libre arbitrario del LLM en los flujos soportados (p. ej. clonado desde DDL ya obtenido del catálogo del propio servidor). El riesgo de inyección se concentra en la cabecera; ahí se exige `admin` y se rechazan cabeceras malformadas o apiladas.
+
 ### Reglas por modo
 
 | Statement kind | `read` | `write` | `admin` |
