@@ -19,6 +19,7 @@ from nz_mcp import __version__
 from nz_mcp.config import Profile, get_active_profile
 from nz_mcp.errors import InvalidInputError, NzMcpError, PermissionDeniedError
 from nz_mcp.i18n import MESSAGES, both
+from nz_mcp.logging_config import configure_logging_for_stdio
 from nz_mcp.tools.registry import TOOLS, OutputKind, ToolSpec
 
 _MODE_RANK = {"read": 0, "write": 1, "admin": 2}
@@ -202,6 +203,7 @@ def build_mcp_server(*, config_path: Path | None = None) -> Server[Any, Any]:
 
 def run_stdio_server(*, config_path: Path | None = None) -> None:
     """Run the MCP server on stdio using the official MCP SDK transport."""
+    configure_logging_for_stdio()
     anyio.run(_run_stdio_server_async, config_path)
 
 

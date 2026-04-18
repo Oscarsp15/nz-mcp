@@ -37,6 +37,8 @@ Cada entrada se documenta en **español** y **english**.
 - EN: CLI command ``nz-mcp edit-profile`` to update mode/limits on an existing profile (``tomli-w`` dependency).
 
 ### Fixed
+- ES: servidor MCP stdio — ``structlog`` y logging estándar se configuran hacia ``stderr`` al arrancar ``serve`` / ``run_stdio_server``, evitando que Claude Desktop falle al parsear JSON-RPC por texto no JSON en ``stdout`` (issue #86).
+- EN: MCP stdio server — ``structlog`` and stdlib logging are configured to ``stderr`` when starting ``serve`` / ``run_stdio_server``, preventing Claude Desktop JSON-RPC parse errors from non-JSON text on ``stdout`` (issue #86).
 - ES: ``nz_table_stats`` — ya no usa ``_V_STATISTIC.LASTUPDATETIMESTAMP`` (columna inexistente en NPS 11.2.x); ``stats_last_analyzed`` queda siempre ``null``.
 - EN: ``nz_table_stats`` — no longer references ``_V_STATISTIC.LASTUPDATETIMESTAMP`` (missing on NPS 11.2.x); ``stats_last_analyzed`` is always ``null``.
 - ES: ``nz_clone_procedure`` — envuelve el cuerpo NZPLSQL con ``BEGIN_PROC``/``END_PROC`` para ejecución en Netezza.
