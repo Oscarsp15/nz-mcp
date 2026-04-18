@@ -68,6 +68,8 @@ def test_nz_table_stats_happy_path(monkeypatch: pytest.MonkeyPatch, two_profiles
             "size_bytes_allocated": 2048,
             "size_allocated_human": "2.0 KiB",
             "skew": 1.2,
+            "skew_class": "moderate",
+            "stats_last_analyzed": None,
             "table_created": "2026-01-01",
         }
 
@@ -79,6 +81,9 @@ def test_nz_table_stats_happy_path(monkeypatch: pytest.MonkeyPatch, two_profiles
     )
     assert out.row_count == 100
     assert out.skew == 1.2
+    assert out.skew_class == "moderate"
+    assert out.stats_last_analyzed is None
+    assert out.duration_ms >= 0
 
 
 def test_nz_get_table_ddl_notes(monkeypatch: pytest.MonkeyPatch, two_profiles: Path) -> None:
@@ -102,5 +107,7 @@ def test_nz_get_table_ddl_notes(monkeypatch: pytest.MonkeyPatch, two_profiles: P
         config_path=two_profiles,
     )
     assert out.reconstructed is True
-    assert len(out.notes) == 1
-    assert "SHOW TABLE" in out.notes[0]
+    assert len(out.notes) == 3
+    assert any("SHOW TABLE" in n for n in out.notes)
+    assert any("_v_relation_column" in n for n in out.notes)
+    assert out.duration_ms >= 0

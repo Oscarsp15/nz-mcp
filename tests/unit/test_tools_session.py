@@ -35,11 +35,15 @@ def test_switch_profile_to_known(two_profiles: Path) -> None:
     out = nz_switch_profile(SwitchProfileInput(profile="prod"), config_path=two_profiles)
     assert out.switched_to == "prod"
     assert out.mode == "read"
+    text = two_profiles.read_text(encoding="utf-8")
+    assert 'active = "prod"' in text
 
 
 def test_switch_profile_unknown_raises(two_profiles: Path) -> None:
-    with pytest.raises(ProfileNotFoundError):
+    with pytest.raises(ProfileNotFoundError) as ei:
         nz_switch_profile(SwitchProfileInput(profile="ghost"), config_path=two_profiles)
+    assert ei.value.context.get("available_profiles") == ["dev", "prod"]
+    assert "dev" in (ei.value.context.get("hint_en") or "")
 
 
 def test_switch_profile_does_not_elevate_mode(tmp_profiles: Path) -> None:

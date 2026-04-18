@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from nz_mcp.tools.procedures import (
+    PROC_DDL_LARGE_WARNING,
+    PROC_DDL_WARN_BYTES,
     DescribeProcedureInput,
     GetProcedureDdlInput,
     GetProcedureSectionInput,
@@ -50,6 +52,7 @@ def test_nz_list_procedures_happy(monkeypatch: pytest.MonkeyPatch, two_profiles:
     )
     assert len(out.procedures) == 1
     assert out.procedures[0].name == "SP1"
+    assert out.duration_ms >= 0
 
 
 def test_nz_describe_procedure_happy(monkeypatch: pytest.MonkeyPatch, two_profiles: Path) -> None:
@@ -75,6 +78,7 @@ def test_nz_describe_procedure_happy(monkeypatch: pytest.MonkeyPatch, two_profil
     )
     assert out.name == "SP"
     assert out.arguments[0].name == "x"
+    assert out.duration_ms >= 0
 
 
 def test_nz_get_procedure_ddl_happy(monkeypatch: pytest.MonkeyPatch, two_profiles: Path) -> None:
@@ -87,6 +91,26 @@ def test_nz_get_procedure_ddl_happy(monkeypatch: pytest.MonkeyPatch, two_profile
         config_path=two_profiles,
     )
     assert "CREATE OR REPLACE" in out.ddl
+    assert out.size_bytes == len(out.ddl.encode("utf-8"))
+    assert out.warning is None
+    assert out.duration_ms >= 0
+
+
+def test_nz_get_procedure_ddl_large_emits_warning(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    big = "P" * (PROC_DDL_WARN_BYTES + 1)
+
+    def _fake_ddl(*_a: object, **_k: object) -> str:
+        return big
+
+    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl", _fake_ddl)
+    out = nz_get_procedure_ddl(
+        GetProcedureDdlInput(database="D", procedure_schema="PUBLIC", procedure="SP"),
+        config_path=two_profiles,
+    )
+    assert out.warning == PROC_DDL_LARGE_WARNING
+    assert out.size_bytes == len(big.encode("utf-8"))
 
 
 def test_nz_get_procedure_section_happy(
@@ -113,3 +137,4 @@ def test_nz_get_procedure_section_happy(
     )
     assert out.section == "body"
     assert out.from_line == 2
+    assert out.duration_ms >= 0

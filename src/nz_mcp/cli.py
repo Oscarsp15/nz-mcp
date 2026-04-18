@@ -4,6 +4,7 @@ Commands:
 - ``init``               first-time wizard: creates the first profile.
 - ``add-profile``        add another profile.
 - ``list-profiles``      list configured profiles.
+- ``edit-profile``       update an existing profile (mode, database, limits).
 - ``doctor``             print local diagnostics (no Netezza connection).
 - ``probe-catalog``      execute every catalog query with dummy parameters (validates overrides).
 - ``test-connection``    verify the active profile (opens Netezza, runs ``VERSION()``).
@@ -32,6 +33,7 @@ from nz_mcp.config import (
     get_profile,
     list_profile_names,
     profiles_path,
+    update_profile_fields,
 )
 from nz_mcp.connection import open_connection
 from nz_mcp.diagnostic import collect_diagnostic, format_diagnostic_report
@@ -42,7 +44,7 @@ from nz_mcp.errors import (
     KeyringUnavailableError,
     ProfileNotFoundError,
 )
-from nz_mcp.i18n import resolve_locale, t
+from nz_mcp.i18n import MESSAGES, resolve_locale, t
 from nz_mcp.logging_utils import sanitize
 from nz_mcp.server import run_stdio_server
 
@@ -93,6 +95,41 @@ def list_profiles_cmd() -> None:
         typer.echo(n)
 
 
+@app.command("edit-profile")
+def edit_profile_cmd(
+    name: str = typer.Argument(..., help="Existing profile name"),
+    mode: str | None = typer.Option(None, "--mode", help="read | write | admin"),
+    database: str | None = typer.Option(None, "--database", help="Default database"),
+    max_rows_default: int | None = typer.Option(None, "--max-rows-default"),
+    timeout_s_default: int | None = typer.Option(None, "--timeout-s-default"),
+) -> None:
+    """Update fields of an existing profile (password stays in the OS keyring)."""
+    locale = resolve_locale()
+    if mode is not None and mode.strip().lower() not in ("read", "write", "admin"):
+        typer.secho("Invalid --mode: use read | write | admin.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+    pm: PermissionMode | None = cast(PermissionMode, mode.strip().lower()) if mode else None
+    try:
+        result = update_profile_fields(
+            name,
+            mode=pm,
+            database=database,
+            max_rows_default=max_rows_default,
+            timeout_s_default=timeout_s_default,
+        )
+    except ProfileNotFoundError as exc:
+        typer.secho(_format_profile_not_found_cli(locale, exc), err=True)
+        raise typer.Exit(code=1) from exc
+    if result is None:
+        typer.echo(
+            "No changes: pass at least one of --mode, --database, "
+            "--max-rows-default, --timeout-s-default.",
+        )
+        raise typer.Exit(code=0)
+    typer.secho(f"Updated profile '{result.name}' (mode={result.mode}).", fg=typer.colors.GREEN)
+    raise typer.Exit(code=0)
+
+
 @app.command("doctor")
 def doctor_cmd() -> None:
     """Print local diagnostics (package, Python, profiles metadata, keyring) — no Netezza."""
@@ -117,7 +154,7 @@ def probe_catalog_cmd(
     try:
         prof = get_profile(profile) if profile is not None else get_active_profile()
     except ProfileNotFoundError as exc:
-        typer.secho(t("PROFILE_NOT_FOUND", locale, profile=exc.context["profile"]), err=True)
+        typer.secho(_format_profile_not_found_cli(locale, exc), err=True)
         raise typer.Exit(code=1) from exc
     except InvalidProfileError as exc:
         typer.secho(t("INVALID_CONFIG", locale, detail=str(exc)), err=True)
@@ -178,7 +215,7 @@ def test_connection_cmd(
     try:
         prof = get_profile(profile) if profile is not None else get_active_profile()
     except ProfileNotFoundError as exc:
-        typer.secho(t("PROFILE_NOT_FOUND", locale, profile=exc.context["profile"]), err=True)
+        typer.secho(_format_profile_not_found_cli(locale, exc), err=True)
         raise typer.Exit(code=1) from exc
     except InvalidProfileError as exc:
         typer.secho(t("INVALID_CONFIG", locale, detail=str(exc)), err=True)
@@ -224,6 +261,19 @@ def serve_cmd() -> None:
 
 
 # --- helpers ------------------------------------------------------------------
+
+
+def _format_profile_not_found_cli(locale: str, exc: ProfileNotFoundError) -> str:
+    pnf = MESSAGES["PROFILE_NOT_FOUND"]
+    if locale == "es":
+        return pnf["es"].format(
+            profile=exc.context["profile"],
+            hint_es=str(exc.context.get("hint_es", "")),
+        )
+    return pnf["en"].format(
+        profile=exc.context["profile"],
+        hint_en=str(exc.context.get("hint_en", "")),
+    )
 
 
 def _add_profile_interactive(*, name: str, set_active: bool) -> None:

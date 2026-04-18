@@ -15,6 +15,13 @@ from nz_mcp.catalog.procedures import (
 )
 from nz_mcp.config import get_active_profile
 from nz_mcp.tools.registry import tool
+from nz_mcp.tools.timing import monotonic_duration_ms, monotonic_start
+
+# UX: warn when procedure DDL may overwhelm LLM context (do not truncate DDL).
+PROC_DDL_WARN_BYTES: int = 100 * 1024
+PROC_DDL_LARGE_WARNING: str = (
+    "DDL is very large (>100 KB); consider fetching sections with nz_get_procedure_section."
+)
 
 
 class ListProceduresInput(BaseModel):
@@ -40,6 +47,7 @@ class ProcedureListItem(BaseModel):
 class ListProceduresOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     procedures: list[ProcedureListItem]
+    duration_ms: int = Field(ge=0, description="Wall time to run the catalog query (milliseconds).")
 
 
 class DescribeProcedureInput(BaseModel):
@@ -70,6 +78,9 @@ class DescribeProcedureOutput(BaseModel):
     created_at: str | None = None
     lines: int
     sections_detected: list[str]
+    duration_ms: int = Field(
+        ge=0, description="Wall time to describe the procedure (milliseconds)."
+    )
 
 
 class GetProcedureDdlInput(BaseModel):
@@ -87,6 +98,12 @@ class GetProcedureDdlInput(BaseModel):
 class GetProcedureDdlOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ddl: str
+    size_bytes: int = Field(ge=0, description="Byte length of ``ddl`` encoded as UTF-8.")
+    warning: str | None = Field(
+        default=None,
+        description="Set when DDL exceeds ~100 KB; prefer nz_get_procedure_section.",
+    )
+    duration_ms: int = Field(ge=0, description="Wall time to build DDL (milliseconds).")
 
 
 class GetProcedureSectionInput(BaseModel):
@@ -111,6 +128,7 @@ class GetProcedureSectionOutput(BaseModel):
     to_line: int
     content: str
     truncated: bool
+    duration_ms: int = Field(ge=0, description="Wall time to extract the section (milliseconds).")
 
 
 @tool(
@@ -129,6 +147,7 @@ def nz_list_procedures(
     *,
     config_path: Path | None = None,
 ) -> ListProceduresOutput:
+    start = monotonic_start()
     profile = get_active_profile(path=config_path)
     rows = list_procedures(
         profile,
@@ -147,6 +166,7 @@ def nz_list_procedures(
             )
             for r in rows
         ],
+        duration_ms=monotonic_duration_ms(start),
     )
 
 
@@ -166,6 +186,7 @@ def nz_describe_procedure(
     *,
     config_path: Path | None = None,
 ) -> DescribeProcedureOutput:
+    start = monotonic_start()
     profile = get_active_profile(path=config_path)
     raw = describe_procedure(
         profile,
@@ -184,6 +205,7 @@ def nz_describe_procedure(
         created_at=raw.get("created_at"),
         lines=int(raw["lines"]),
         sections_detected=list(raw["sections_detected"]),
+        duration_ms=monotonic_duration_ms(start),
     )
 
 
@@ -191,7 +213,8 @@ def nz_describe_procedure(
     name="nz_get_procedure_ddl",
     description=(
         "Return reconstructed CREATE OR REPLACE PROCEDURE DDL from catalog source "
-        "and signature metadata."
+        "and signature metadata. For very large procedures prefer "
+        "nz_get_procedure_section(section='body')."
     ),
     mode="read",
     input_model=GetProcedureDdlInput,
@@ -203,6 +226,7 @@ def nz_get_procedure_ddl(
     *,
     config_path: Path | None = None,
 ) -> GetProcedureDdlOutput:
+    start = monotonic_start()
     profile = get_active_profile(path=config_path)
     ddl = get_procedure_ddl(
         profile,
@@ -211,7 +235,14 @@ def nz_get_procedure_ddl(
         procedure=params.procedure,
         signature=params.signature,
     )
-    return GetProcedureDdlOutput(ddl=ddl)
+    size_b = len(ddl.encode("utf-8"))
+    warn = PROC_DDL_LARGE_WARNING if size_b > PROC_DDL_WARN_BYTES else None
+    return GetProcedureDdlOutput(
+        ddl=ddl,
+        size_bytes=size_b,
+        warning=warn,
+        duration_ms=monotonic_duration_ms(start),
+    )
 
 
 @tool(
@@ -230,6 +261,7 @@ def nz_get_procedure_section(
     *,
     config_path: Path | None = None,
 ) -> GetProcedureSectionOutput:
+    start = monotonic_start()
     profile = get_active_profile(path=config_path)
     raw = get_procedure_section(
         profile,
@@ -247,4 +279,5 @@ def nz_get_procedure_section(
         to_line=int(raw["to_line"]),
         content=raw["content"],
         truncated=bool(raw["truncated"]),
+        duration_ms=monotonic_duration_ms(start),
     )

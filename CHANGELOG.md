@@ -8,6 +8,20 @@ Cada entrada se documenta en **español** y **english**.
 
 ## [Unreleased]
 
+### Added
+- ES: ``duration_ms`` en outputs de tools de lectura que consultan Netezza (listados, describe, DDL de tabla/vista/procedimiento, secciones).
+- EN: ``duration_ms`` on read-tool outputs that hit Netezza (list/describe/table-view-procedure DDL and sections).
+- ES: ``nz_table_stats`` — ``skew_class`` (balanced/moderate/severe) y ``stats_last_analyzed`` vía ``_v_statistic`` cuando aplica.
+- EN: ``nz_table_stats`` — ``skew_class`` (balanced/moderate/severe) and ``stats_last_analyzed`` via ``_v_statistic`` when available.
+- ES: ``nz_get_procedure_ddl`` — ``size_bytes`` y ``warning`` si el DDL supera ~100 KB (sin truncar).
+- EN: ``nz_get_procedure_ddl`` — ``size_bytes`` and ``warning`` when DDL exceeds ~100 KB (not truncated).
+- ES: ``nz_get_table_ddl`` — ``notes`` ampliadas (reconstrucción desde catálogo y caveats); campo ``reconstructed`` documentado en el schema.
+- EN: ``nz_get_table_ddl`` — expanded ``notes`` (catalog reconstruction and caveats); ``reconstructed`` documented on the schema.
+- ES: error ``PROFILE_NOT_FOUND`` en ``nz_switch_profile`` con ``available_profiles`` en el contexto; persistencia de ``active`` en ``profiles.toml``.
+- EN: ``PROFILE_NOT_FOUND`` from ``nz_switch_profile`` includes ``available_profiles`` in context; persists ``active`` in ``profiles.toml``.
+- ES: comando CLI ``nz-mcp edit-profile`` para actualizar modo/límites de un perfil existente (dependencia ``tomli-w``).
+- EN: CLI command ``nz-mcp edit-profile`` to update mode/limits on an existing profile (``tomli-w`` dependency).
+
 ### Fixed
 - ES: ``list_tools`` / ``outputSchema`` — los ``$ref`` a ``#/$defs/...`` se inlinean antes de envolver ``result``, para que clientes MCP (p. ej. Claude Desktop) no fallen con ``PointerToNowhere``.
 - EN: ``list_tools`` / ``outputSchema`` — ``$ref`` targets under ``#/$defs/...`` are inlined before wrapping ``result``, so MCP clients (e.g. Claude Desktop) do not hit ``PointerToNowhere``.

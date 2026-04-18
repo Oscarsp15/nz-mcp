@@ -11,6 +11,7 @@ from nz_mcp.config import (
     get_profile,
     list_profile_names,
     load_profiles_file,
+    update_profile_fields,
 )
 from nz_mcp.errors import InvalidProfileError, ProfileNotFoundError
 
@@ -59,3 +60,19 @@ def test_single_profile_inferred_as_active(tmp_profiles: Path) -> None:
     )
     profile = get_active_profile(path=tmp_profiles)
     assert profile.name == "only"
+
+
+def test_update_profile_fields_changes_mode(two_profiles: Path) -> None:
+    updated = update_profile_fields("dev", two_profiles, mode="write")
+    assert updated is not None
+    assert updated.mode == "write"
+    assert get_profile("dev", path=two_profiles).mode == "write"
+
+
+def test_update_profile_fields_noop_returns_none(two_profiles: Path) -> None:
+    assert update_profile_fields("dev", two_profiles) is None
+
+
+def test_update_profile_fields_unknown_profile(two_profiles: Path) -> None:
+    with pytest.raises(ProfileNotFoundError):
+        update_profile_fields("nope", two_profiles, mode="read")

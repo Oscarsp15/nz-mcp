@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from nz_mcp.catalog.tables import describe_table
 from nz_mcp.config import get_active_profile
 from nz_mcp.tools.registry import tool
+from nz_mcp.tools.timing import monotonic_duration_ms, monotonic_start
 
 
 class DescribeTableInput(BaseModel):
@@ -61,6 +62,7 @@ class DescribeTableOutput(BaseModel):
     organized_on: list[str] = Field(default_factory=list)
     primary_key: list[str]
     foreign_keys: list[ForeignKeyItem]
+    duration_ms: int = Field(ge=0, description="Wall time to query catalogs (milliseconds).")
 
 
 @tool(
@@ -80,6 +82,7 @@ def nz_describe_table(
     *,
     config_path: Path | None = None,
 ) -> DescribeTableOutput:
+    start = monotonic_start()
     profile = get_active_profile(path=config_path)
     payload = describe_table(
         profile,
@@ -87,4 +90,6 @@ def nz_describe_table(
         schema=params.table_schema,
         table=params.table,
     )
-    return DescribeTableOutput.model_validate(payload)
+    return DescribeTableOutput.model_validate(
+        {**payload, "duration_ms": monotonic_duration_ms(start)},
+    )

@@ -18,7 +18,7 @@ import nz_mcp.tools  # noqa: F401  (side effect: register tools)
 from nz_mcp import __version__
 from nz_mcp.config import Profile, get_active_profile
 from nz_mcp.errors import InvalidInputError, NzMcpError, PermissionDeniedError
-from nz_mcp.i18n import both
+from nz_mcp.i18n import MESSAGES, both
 from nz_mcp.tools.registry import TOOLS, ToolSpec
 
 _MODE_RANK = {"read": 0, "write": 1, "admin": 2}
@@ -86,7 +86,22 @@ def _mode_allows(profile_mode: str, required: str) -> bool:
 
 def _error_response(code: str, **context: Any) -> dict[str, Any]:
     key = _i18n_key_for(code)
-    messages = both(key, **context) if key else {"es": code, "en": code}
+    if key == "PROFILE_NOT_FOUND":
+        pnf = MESSAGES["PROFILE_NOT_FOUND"]
+        messages = {
+            "es": pnf["es"].format(
+                profile=context.get("profile", ""),
+                hint_es=str(context.get("hint_es", "")),
+            ),
+            "en": pnf["en"].format(
+                profile=context.get("profile", ""),
+                hint_en=str(context.get("hint_en", "")),
+            ),
+        }
+    elif key:
+        messages = both(key, **context)
+    else:
+        messages = {"es": code, "en": code}
     return {
         "error": {
             "code": code,

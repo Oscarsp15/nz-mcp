@@ -7,6 +7,14 @@
 
 **Una tool, una operación.** No existen tools "multitool" que acepten SQL arbitrario de cualquier tipo. Cada tool valida internamente que el SQL recibido sea del tipo esperado.
 
+## Campos de diagnóstico (timing y UX)
+
+- **`duration_ms`**: entero ≥ 0; tiempo de pared en milisegundos para la mayoría de tools de lectura que abren sesión a Netezza (`nz_list_*`, `nz_describe_*`, `nz_get_*_ddl`, `nz_get_procedure_*`, etc.; también `nz_query_select` / `nz_table_sample`).
+- **`nz_table_stats`**: `skew_class` (`balanced` \| `moderate` \| `severe`) según umbrales documentados en código; `stats_last_analyzed` desde `_v_statistic` cuando exista fila/columna.
+- **`nz_get_procedure_ddl`**: `size_bytes` (UTF-8), `warning` si el DDL supera ~100 KB (sin truncar).
+- **`nz_get_table_ddl`**: `notes` lista de cadenas i18n; `reconstructed` indica reconstrucción desde catálogo.
+- **CLI**: `nz-mcp edit-profile` actualiza campos de un perfil existente (sin password).
+
 ## Modos de permiso (recordatorio)
 
 Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mode` otorgado. Si el perfil no alcanza, la tool falla con `PermissionDeniedError`.
@@ -72,7 +80,7 @@ Lista bases de datos visibles para el usuario del perfil.
 
 **Output**:
 ```json
-{ "databases": [{"name": "DEV", "owner": "ADMIN"}] }
+{ "databases": [{"name": "DEV", "owner": "ADMIN"}], "duration_ms": 42 }
 ```
 
 ---
@@ -84,7 +92,7 @@ Lista bases de datos visibles para el usuario del perfil.
 | `database` | string (required) | BD a inspeccionar (identificador validado para interpolación `<BD>..`). |
 | `pattern` | string (optional) | Filtro tipo `LIKE` sobre el nombre de schema. |
 
-**Output**: `{ "schemas": [{"name": "PUBLIC", "owner": "ADMIN"}] }`
+**Output**: `{ "schemas": [{"name": "PUBLIC", "owner": "ADMIN"}], "duration_ms": 35 }`
 
 ---
 
@@ -104,7 +112,8 @@ Lista **solo tablas** (no vistas, no procedimientos). Para vistas usar `nz_list_
 {
   "tables": [
     {"name": "CUSTOMERS", "kind": "TABLE"}
-  ]
+  ],
+  "duration_ms": 28
 }
 ```
 
@@ -129,7 +138,8 @@ Lista **solo tablas** (no vistas, no procedimientos). Para vistas usar `nz_list_
   "distribution": {"type": "HASH", "columns": ["ID"]},
   "organized_on": [],
   "primary_key": ["ID"],
-  "foreign_keys": []
+  "foreign_keys": [],
+  "duration_ms": 2100
 }
 ```
 
@@ -169,7 +179,10 @@ Estadísticas agregadas desde `_V_TABLE` y `_V_TABLE_STORAGE_STAT` (reltuples, b
   "size_bytes_allocated": 800000000,
   "size_allocated_human": "762.9 MiB",
   "skew": 1.02,
-  "table_created": "2025-01-10T00:00:00+00:00"
+  "skew_class": "moderate",
+  "stats_last_analyzed": "2024-03-12T10:00:00+00:00",
+  "table_created": "2025-01-10T00:00:00+00:00",
+  "duration_ms": 4000
 }
 ```
 
@@ -191,7 +204,8 @@ Devuelve el DDL `CREATE TABLE` reconstruido (columnas, tipos, distribución, con
 {
   "ddl": "CREATE TABLE PUBLIC.CUSTOMERS (\n  ID INTEGER NOT NULL,\n  ...\n)\nDISTRIBUTE ON HASH (ID);",
   "reconstructed": true,
-  "notes": ["DDL reconstruido desde catálogo …"]
+  "notes": ["…", "…", "…"],
+  "duration_ms": 120
 }
 ```
 
@@ -212,7 +226,8 @@ Lista vistas (solo vistas) en un schema.
 **Output**:
 ```json
 {
-  "views": [{"name": "VW_ACTIVE_CUSTOMERS", "owner": "ADMIN"}]
+  "views": [{"name": "VW_ACTIVE_CUSTOMERS", "owner": "ADMIN"}],
+  "duration_ms": 31
 }
 ```
 
@@ -231,7 +246,8 @@ Source: `_v_view`.
 **Output**:
 ```json
 {
-  "ddl": "CREATE VIEW PUBLIC.VW_X AS SELECT ... FROM ..."
+  "ddl": "CREATE VIEW PUBLIC.VW_X AS SELECT ... FROM ...",
+  "duration_ms": 55
 }
 ```
 
@@ -507,7 +523,9 @@ No incluye password ni secretos.
 |---|---|---|
 | `profile` | string (required) | Nombre del perfil definido en `profiles.toml`. |
 
-**Output**: `{ "switched_to": "dev", "mode": "read" }`
+**Output**: `{ "switched_to": "dev", "mode": "read" }` — también persiste `active = …` en `profiles.toml` para procesos nuevos.
+
+**Errores**: si el perfil no existe, `PROFILE_NOT_FOUND` con `context.available_profiles` (y mensajes i18n con la lista).
 
 **Regla crítica**: cambiar de perfil **nunca** eleva el `mode` por encima del configurado en `profiles.toml`. La IA no puede subir privilegios; solo puede moverse entre perfiles preconfigurados por el humano.
 

@@ -134,12 +134,14 @@ TABLE_STATS: Final[CatalogQuery] = CatalogQuery(
     sql=(
         "SELECT t.RELTUPLES AS ROW_COUNT, ts.USED_BYTES AS SIZE_BYTES_USED, "
         "ts.ALLOCATED_BYTES AS SIZE_BYTES_ALLOCATED, ts.SKEW, "
-        "t.CREATEDATE AS TABLE_CREATED FROM <BD>.._V_TABLE t "
+        "t.CREATEDATE AS TABLE_CREATED, stat.LASTUPDATETIMESTAMP AS STATS_LAST_ANALYZED "
+        "FROM <BD>.._V_TABLE t "
         "JOIN <BD>.._V_TABLE_STORAGE_STAT ts ON t.OBJID = ts.OBJID "
+        "LEFT JOIN <BD>.._V_STATISTIC stat ON t.OBJID = stat.OBJID "
         "WHERE t.SCHEMA = UPPER(?) AND t.TABLENAME = UPPER(?)"
     ),
-    catalog_views=("_V_TABLE", "_V_TABLE_STORAGE_STAT"),
-    description="Returns row estimate and storage metrics for one table.",
+    catalog_views=("_V_TABLE", "_V_TABLE_STORAGE_STAT", "_V_STATISTIC"),
+    description="Returns row estimate, storage metrics, and last stats timestamp when present.",
     tested_versions=(NPS_112_IF1,),
     cross_database=True,
 )

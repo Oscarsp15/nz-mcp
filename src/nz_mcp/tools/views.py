@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from nz_mcp.catalog.views import get_view_ddl, list_views
 from nz_mcp.config import get_active_profile
 from nz_mcp.tools.registry import tool
+from nz_mcp.tools.timing import monotonic_duration_ms, monotonic_start
 
 
 class ListViewsInput(BaseModel):
@@ -31,6 +32,7 @@ class ViewItem(BaseModel):
 class ListViewsOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     views: list[ViewItem]
+    duration_ms: int = Field(ge=0, description="Wall time to run the catalog query (milliseconds).")
 
 
 class GetViewDdlInput(BaseModel):
@@ -47,6 +49,7 @@ class GetViewDdlInput(BaseModel):
 class GetViewDdlOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ddl: str
+    duration_ms: int = Field(ge=0, description="Wall time to fetch DDL (milliseconds).")
 
 
 @tool(
@@ -66,6 +69,7 @@ def nz_list_views(
     *,
     config_path: Path | None = None,
 ) -> ListViewsOutput:
+    start = monotonic_start()
     profile = get_active_profile(path=config_path)
     rows = list_views(
         profile,
@@ -73,7 +77,10 @@ def nz_list_views(
         schema=params.view_schema,
         pattern=params.pattern,
     )
-    return ListViewsOutput(views=[ViewItem(name=r["name"], owner=r["owner"]) for r in rows])
+    return ListViewsOutput(
+        views=[ViewItem(name=r["name"], owner=r["owner"]) for r in rows],
+        duration_ms=monotonic_duration_ms(start),
+    )
 
 
 @tool(
@@ -93,6 +100,7 @@ def nz_get_view_ddl(
     *,
     config_path: Path | None = None,
 ) -> GetViewDdlOutput:
+    start = monotonic_start()
     profile = get_active_profile(path=config_path)
     ddl = get_view_ddl(
         profile,
@@ -100,4 +108,4 @@ def nz_get_view_ddl(
         schema=params.view_schema,
         view=params.view,
     )
-    return GetViewDdlOutput(ddl=ddl)
+    return GetViewDdlOutput(ddl=ddl, duration_ms=monotonic_duration_ms(start))
