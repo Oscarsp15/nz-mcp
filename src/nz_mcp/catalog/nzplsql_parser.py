@@ -12,9 +12,7 @@ _EXCEPTION: Final[re.Pattern[str]] = re.compile(r"(?i)\bEXCEPTION\b")
 _END_PROC: Final[re.Pattern[str]] = re.compile(r"(?i)\bEND_PROC\b")
 _BEGIN_NOT_PROC: Final[re.Pattern[str]] = re.compile(r"(?i)\bBEGIN\b")
 _END_STMT: Final[re.Pattern[str]] = re.compile(r"(?i)^\s*END\s*;\s*$")
-_END_LOOP_IF_CASE: Final[re.Pattern[str]] = re.compile(
-    r"(?i)^\s*END\s+(LOOP|IF|CASE)\b"
-)
+_END_LOOP_IF_CASE: Final[re.Pattern[str]] = re.compile(r"(?i)^\s*END\s+(LOOP|IF|CASE)\b")
 
 
 def mask_single_quoted_strings(source: str) -> str:
@@ -47,7 +45,7 @@ def mask_single_quoted_strings(source: str) -> str:
     return "".join(out)
 
 
-def parse_sections(source: str) -> dict[str, tuple[int, int]]:  # noqa: PLR0912
+def parse_sections(source: str) -> dict[str, tuple[int, int]]:
     """Return 1-indexed inclusive line ranges per detected section.
 
     Keys may include: ``header``, ``declare``, ``body``, ``exception``.
@@ -70,7 +68,7 @@ def parse_sections(source: str) -> dict[str, tuple[int, int]]:  # noqa: PLR0912
     if begin_proc_line is not None:
         return _parse_sections_begin_proc_markers(masked_lines, lines, n, begin_proc_line)
 
-    return _parse_sections_plain_nzplsql(masked_lines, lines, n)
+    return _parse_sections_plain_nzplsql(masked_lines, n)
 
 
 def _parse_sections_begin_proc_markers(
@@ -131,7 +129,6 @@ def _parse_sections_begin_proc_markers(
 
 def _parse_sections_plain_nzplsql(
     masked_lines: list[str],
-    lines: list[str],
     n: int,
 ) -> dict[str, tuple[int, int]]:
     declare_line = _first_line_matching(masked_lines, _DECLARE)

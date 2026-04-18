@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from nz_mcp.errors import GuardRejectedError
-from nz_mcp.tools.query import QuerySelectInput, nz_query_select, hint_from_execute_payload
+from nz_mcp.tools.query import QuerySelectInput, hint_from_execute_payload, nz_query_select
 
 
 def test_query_select_rejects_insert(two_profiles: Path) -> None:
@@ -85,7 +85,7 @@ def test_hint_from_execute_payload_bytes_truncation() -> None:
     assert h is not None and "100" in h
 
 
-def test_query_select_surfaces_truncation_hint(monkeypatch: pytest.MonkeyPatch, two_profiles: Path) -> None:
+def test_query_select_truncation_hint(monkeypatch: pytest.MonkeyPatch, two_profiles: Path) -> None:
     def _exec(_p: object, _sql: str, *, max_rows: int, timeout_s: int) -> dict[str, object]:
         return {
             "columns": [{"name": "x", "type": "int"}],
