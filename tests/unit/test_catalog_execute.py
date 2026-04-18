@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from itertools import chain, repeat
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from nzpy import ProgrammingError
@@ -314,7 +314,7 @@ def test_column_meta_maps_oid_int_to_name() -> None:
     class _C:
         description = (("c", 1043),)
 
-    meta = _column_meta_from_cursor(_C())
+    meta = _column_meta_from_cursor(cast(Any, _C()))
     assert meta == [{"name": "c", "type": "varchar"}]
 
 
@@ -322,14 +322,14 @@ def test_column_meta_empty_description() -> None:
     class _C:
         description = None
 
-    assert _column_meta_from_cursor(_C()) == []
+    assert _column_meta_from_cursor(cast(Any, _C())) == []
 
 
 def test_column_meta_non_sequence_and_single_part_descriptors() -> None:
     class _C:
         description = (123, ("only",))
 
-    meta = _column_meta_from_cursor(_C())
+    meta = _column_meta_from_cursor(cast(Any, _C()))
     assert meta == [{"name": "123", "type": "unknown"}, {"name": "only", "type": "unknown"}]
 
 
@@ -337,7 +337,7 @@ def test_column_meta_string_oid_and_unknown_int() -> None:
     class _C:
         description = (("a", "23"), ("b", 99999))
 
-    meta = _column_meta_from_cursor(_C())
+    meta = _column_meta_from_cursor(cast(Any, _C()))
     assert meta == [{"name": "a", "type": "integer"}, {"name": "b", "type": "99999"}]
 
 
@@ -345,7 +345,7 @@ def test_column_meta_null_type_cell() -> None:
     class _C:
         description = (("n", None),)
 
-    meta = _column_meta_from_cursor(_C())
+    meta = _column_meta_from_cursor(cast(Any, _C()))
     assert meta == [{"name": "n", "type": "unknown"}]
 
 
