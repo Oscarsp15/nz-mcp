@@ -37,7 +37,7 @@ _STATS_ROW_MIN: Final[int] = 5
 
 
 class _DescribeCursorLike(Protocol):
-    def execute(self, sql: str, params: tuple[str, str]) -> None: ...
+    def execute(self, sql: str, params: tuple[str, ...]) -> None: ...
     def fetchall(self) -> list[Any]: ...
     def close(self) -> None: ...
 
@@ -117,7 +117,11 @@ def describe_table(
     table: str,
 ) -> dict[str, Any]:
     """Return columns, distribution, PK, and FK metadata for one base table via catalog views."""
-    params: tuple[str, str] = (schema, table)
+    db_ident = validate_database_identifier(database)
+    sch_ident = validate_catalog_identifier(schema)
+    tab_ident = validate_catalog_identifier(table)
+    params: tuple[str, str] = (sch_ident, tab_ident)
+    dist_params: tuple[str, str, str] = (db_ident, sch_ident, tab_ident)
     password = get_password(profile.name)
     connection = cast(_DescribeConnectionLike, open_connection(profile, password))
     try:
@@ -141,7 +145,7 @@ def describe_table(
                 resolve_query("describe_table_distribution", profile),
                 database=database,
             )
-            cursor.execute(dist_sql, params)
+            cursor.execute(dist_sql, dist_params)
             dist_rows = cursor.fetchall()
 
             pk_sql = render_cross_db(
@@ -170,7 +174,7 @@ def describe_table(
 
     dist = _distribution_from_rows(dist_rows)
     return {
-        "name": table.upper(),
+        "name": tab_ident,
         "kind": _TABLE_KIND,
         "columns": [_column_descriptor(r) for r in column_rows],
         "distribution": dist,

@@ -17,6 +17,7 @@ from nz_mcp.errors import ConnectionError as NzConnectionError
 from nz_mcp.errors import CredentialNotFoundError, InvalidInputError, InvalidProfileError
 from nz_mcp.logging_utils import sanitize
 
+_DUMMY_DATABASE: Final[str] = "D"
 _DUMMY_SCHEMA: Final[str] = "DBO"
 _DUMMY_OBJECT: Final[str] = "__NZ_MCP_PROBE_DUMMY__"
 
@@ -68,7 +69,7 @@ def dummy_params_for_query_id(query_id: str) -> tuple[Any, ...]:
         "list_views": (_DUMMY_SCHEMA, None, None),
         "get_view_ddl": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
         "describe_table_columns": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
-        "describe_table_distribution": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
+        "describe_table_distribution": (_DUMMY_DATABASE, _DUMMY_SCHEMA, _DUMMY_OBJECT),
         "describe_table_pk": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
         "describe_table_fk": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
         "table_stats": (_DUMMY_SCHEMA, _DUMMY_OBJECT),

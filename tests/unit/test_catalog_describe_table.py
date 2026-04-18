@@ -18,10 +18,10 @@ class _RoutingCursor:
     def __init__(self, buckets: dict[str, Any]) -> None:
         self._buckets = buckets
         self.executed_sql: list[str] = []
-        self.executed_params: list[tuple[str, str]] = []
+        self.executed_params: list[tuple[str, ...]] = []
         self.closed = False
 
-    def execute(self, sql: str, params: tuple[str, str]) -> None:
+    def execute(self, sql: str, params: tuple[str, ...]) -> None:
         self.executed_sql.append(sql)
         self.executed_params.append(params)
 
@@ -96,7 +96,10 @@ def test_describe_table_one_connection_four_queries(monkeypatch: pytest.MonkeyPa
     out = describe_table(_profile(), database="DB", schema="PUBLIC", table="T")
 
     assert len(cursor.executed_sql) == 4
-    assert all(p == ("PUBLIC", "T") for p in cursor.executed_params)
+    assert cursor.executed_params[0] == ("PUBLIC", "T")
+    assert cursor.executed_params[1] == ("DB", "PUBLIC", "T")
+    assert cursor.executed_params[2] == ("PUBLIC", "T")
+    assert cursor.executed_params[3] == ("PUBLIC", "T")
     assert out["name"] == "T"
     assert out["kind"] == "TABLE"
     assert len(out["columns"]) == 2
@@ -107,6 +110,31 @@ def test_describe_table_one_connection_four_queries(monkeypatch: pytest.MonkeyPa
     assert out["primary_key"] == ["ID"]
     assert out["foreign_keys"] == []
     assert conn.closed is True
+
+
+def test_describe_table_orders_hash_columns_by_distseq(monkeypatch: pytest.MonkeyPatch) -> None:
+    buckets = {
+        "columns": [("ID", "INT", True, None, 1)],
+        "dist": [("B", 2), ("A", 1)],
+        "pk": [],
+        "fk": [],
+    }
+    cursor = _RoutingCursor(buckets)
+    monkeypatch.setattr(tables_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(tables_mod, "open_connection", lambda *_a, **_k: _FakeConn(cursor))
+    monkeypatch.setattr(
+        tables_mod,
+        "resolve_query",
+        lambda qid, _p: {
+            "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_distribution": "_V_TABLE_DIST_MAP",
+            "describe_table_pk": "CONTYPE = 'p'",
+            "describe_table_fk": "CONTYPE = 'f'",
+        }[qid],
+    )
+
+    out = describe_table(_profile(), database="DB", schema="S", table="T")
+    assert out["distribution"] == {"type": "HASH", "columns": ["A", "B"]}
 
 
 def test_describe_table_random_distribution(monkeypatch: pytest.MonkeyPatch) -> None:

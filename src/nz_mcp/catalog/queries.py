@@ -93,7 +93,8 @@ DESCRIBE_TABLE_DISTRIBUTION: Final[CatalogQuery] = CatalogQuery(
     id="describe_table_distribution",
     sql=(
         "SELECT ATTNAME, DISTSEQNO FROM <BD>.._V_TABLE_DIST_MAP "
-        "WHERE SCHEMA = UPPER(?) AND TABLENAME = UPPER(?) ORDER BY DISTSEQNO"
+        "WHERE DATABASE = UPPER(?) AND SCHEMA = UPPER(?) AND TABLENAME = UPPER(?) "
+        "ORDER BY DISTSEQNO"
     ),
     catalog_views=("_V_TABLE_DIST_MAP",),
     description="Returns distribution keys used to infer HASH vs RANDOM.",
