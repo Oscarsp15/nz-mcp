@@ -25,6 +25,10 @@ Cada entrada se documenta en **español** y **english**.
 - EN: CLI command ``nz-mcp edit-profile`` to update mode/limits on an existing profile (``tomli-w`` dependency).
 
 ### Fixed
+- ES: ``nz_create_table`` / ``execute_create_table`` — columna con ``default`` omitido o ``null`` en JSON ya no falla; se omite la cláusula ``DEFAULT`` (equivalente a sin default). Rechazo explícito de ``default`` string con ``;`` (inyección).
+- EN: ``nz_create_table`` / ``execute_create_table`` — column with omitted or JSON ``null`` ``default`` no longer errors; the ``DEFAULT`` clause is omitted (same as no default). String defaults containing ``;`` are rejected (injection).
+- ES: ``sql_guard`` — ``CREATE PROCEDURE ... LANGUAGE NZPLSQL AS`` se valida por cabecera (modo ``admin``); el cuerpo NZPLSQL no se parsea con ``sqlglot``, desbloqueando ``nz_clone_procedure`` con DDL real.
+- EN: ``sql_guard`` — ``CREATE PROCEDURE ... LANGUAGE NZPLSQL AS`` is header-validated (``admin`` mode); the NZPLSQL body is not parsed with ``sqlglot``, unblocking ``nz_clone_procedure`` with real DDL.
 - ES: ``list_tools`` / ``outputSchema`` — los ``$ref`` a ``#/$defs/...`` se inlinean antes de envolver ``result``, para que clientes MCP (p. ej. Claude Desktop) no fallen con ``PointerToNowhere``.
 - EN: ``list_tools`` / ``outputSchema`` — ``$ref`` targets under ``#/$defs/...`` are inlined before wrapping ``result``, so MCP clients (e.g. Claude Desktop) do not hit ``PointerToNowhere``.
 - ES: el catálogo acepta filas devueltas como ``list`` (nzpy) además de ``tuple``; helper compartido ``is_sequence_row`` en consultas a ``_v_*``.
