@@ -8,6 +8,20 @@ Cada entrada se documenta en **español** y **english**.
 
 ## [Unreleased]
 
+### Fixed
+- ES: el catálogo acepta filas devueltas como ``list`` (nzpy) además de ``tuple``; helper compartido ``is_sequence_row`` en consultas a ``_v_*``.
+- EN: catalog parsing accepts nzpy ``list`` rows as well as ``tuple`` rows; shared ``is_sequence_row`` helper for ``_v_*`` queries.
+- ES: dependencia ``typer>=0.15`` para compatibilidad con **click 8.2** (CLI sin errores de import).
+- EN: bumped **typer** to ``>=0.15`` for **click 8.2** compatibility (CLI import errors fixed).
+- ES: ``nz_explain`` / ``fetch_explain_text`` — si no hay result set y nzpy lanza ``ProgrammingError``, se concatena el plan desde ``cursor.notices``.
+- EN: ``nz_explain`` / ``fetch_explain_text`` — when there is no rowset and nzpy raises ``ProgrammingError``, plan text is taken from ``cursor.notices``.
+- ES: metadatos de columnas en ``execute_select`` mapean OIDs comunes a nombres legibles (p. ej. ``integer``, ``varchar``).
+- EN: ``execute_select`` column metadata maps common type OIDs to readable names (e.g. ``integer``, ``varchar``).
+- ES: ``resolve_locale()`` usa también ``locale.getdefaultlocale()`` cuando faltan ``LANG`` / ``NZ_MCP_LANG`` (útil en Windows).
+- EN: ``resolve_locale()`` also consults ``locale.getdefaultlocale()`` when ``LANG`` / ``NZ_MCP_LANG`` are unset (helps on Windows).
+- ES: textos de ``help=`` en CLI (p. ej. ``add-profile``, ``test-connection``) unificados en inglés.
+- EN: CLI ``help=`` strings (e.g. ``add-profile``, ``test-connection``) standardized to English.
+
 ### Security
 - ES: los mensajes de error del driver en `open_connection`, `list_databases` y `probe-catalog` pasan por `sanitize()` con `known_secrets` para no filtrar contraseñas en el `detail` expuesto al cliente MCP.
 - EN: driver error messages in `open_connection`, `list_databases`, and `probe-catalog` are passed through `sanitize()` with `known_secrets` so passwords are not leaked in MCP-exposed `detail` fields.
