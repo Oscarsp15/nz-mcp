@@ -191,10 +191,21 @@ _SIMPLE_KIND_MAP: Final[tuple[tuple[type[exp.Expr], StatementKind], ...]] = (
 )
 
 
+def _is_select_only_union_tree(expr: exp.Expr) -> bool:
+    """True if ``expr`` is a ``SELECT`` or a ``UNION`` / ``UNION ALL`` tree of only ``SELECT``s."""
+    if isinstance(expr, exp.Select):
+        return True
+    if isinstance(expr, exp.Union):
+        return _is_select_only_union_tree(expr.this) and _is_select_only_union_tree(expr.expression)
+    return False
+
+
 def _classify(expr: exp.Expr) -> StatementKind:
     for cls, kind in _SIMPLE_KIND_MAP:
         if isinstance(expr, cls):
             return kind
+    if isinstance(expr, exp.Union) and _is_select_only_union_tree(expr):
+        return StatementKind.SELECT
     if isinstance(expr, exp.Command):
         cmd = str(expr.name).upper()
         if cmd == "EXPLAIN":

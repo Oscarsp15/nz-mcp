@@ -106,7 +106,7 @@ Cambios a esta tabla requieren un **ADR** en `docs/adr/`.
 | Clientes soportados | Claude Desktop, Claude Code, Cursor, Windsurf, VS Code MCP |
 | Credenciales | `keyring` OS-native + `~/.nz-mcp/profiles.toml` |
 | Perfiles | Multi-perfil, modos `read` / `write` / `admin` |
-| Tools v0.1 | 24 (ver [tools-contract.md](docs/architecture/tools-contract.md)) |
+| Tools v0.1 | 27 (ver [tools-contract.md](docs/architecture/tools-contract.md); expansión documentada en [adr/0009-tool-catalog-bulk-ctas.md](docs/adr/0009-tool-catalog-bulk-ctas.md)) |
 | Default `max_rows` | 100 |
 | Cap respuesta | ~100 KB (≈25 k tokens) |
 | Timeout default | 30 s |

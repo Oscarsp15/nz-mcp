@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from contextlib import closing
 from typing import Any, Final, Protocol, cast
@@ -10,12 +11,13 @@ from nz_mcp.auth import get_password
 from nz_mcp.catalog.identifier import validate_catalog_identifier, validate_database_identifier
 from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
-from nz_mcp.errors import InvalidInputError, NetezzaError
+from nz_mcp.errors import GuardRejectedError, InvalidInputError, NetezzaError
 from nz_mcp.logging_utils import sanitize
 from nz_mcp.sql_guard import StatementKind
 from nz_mcp.sql_guard import validate as guard_validate
 
 _MAX_INSERT_ROWS: Final[int] = 500
+_MAX_INSERT_SELECT_SQL: Final[int] = 65536
 
 
 class _CursorLike(Protocol):
@@ -49,6 +51,16 @@ def _qualified_table(schema: str, table: str) -> str:
 
 def _validate_column_name(name: str) -> str:
     return validate_catalog_identifier(name)
+
+
+def _insert_select_warnings(select_sql: str, target_columns: list[str] | None) -> list[str]:
+    warnings: list[str] = []
+    if target_columns is None and re.search(r"\bSELECT\s+\*", select_sql, re.IGNORECASE):
+        warnings.append(
+            "Column order follows the SELECT projection when target_columns is omitted; "
+            "consider explicit target_columns.",
+        )
+    return warnings
 
 
 def _is_duplicate_row_error(exc: BaseException) -> bool:
@@ -158,6 +170,119 @@ def execute_insert(  # noqa: PLR0912, PLR0915
 
     duration_ms = int((time.monotonic() - start) * 1000)
     return {"inserted": inserted, "duration_ms": duration_ms, "dry_run": False}
+
+
+def execute_insert_select(  # noqa: PLR0912, PLR0915
+    profile: Profile,
+    database: str,
+    schema: str,
+    table: str,
+    select_sql: str,
+    target_columns: list[str] | None,
+    *,
+    dry_run: bool,
+    confirm: bool,
+    estimate_rows: bool = False,
+) -> dict[str, Any]:
+    """Build ``INSERT INTO ... SELECT ...``; optional dry-run and row estimate via ``COUNT``."""
+    _ensure_session_database(profile, database)
+    sel = select_sql.strip()
+    if not sel:
+        raise InvalidInputError(detail="select_sql must be non-empty.")
+    if len(sel) > _MAX_INSERT_SELECT_SQL:
+        raise InvalidInputError(detail="select_sql exceeds maximum length.")
+
+    parsed_sel = guard_validate(sel, mode="write")
+    if parsed_sel.kind is not StatementKind.SELECT:
+        raise GuardRejectedError(
+            code="WRONG_STATEMENT_FOR_TOOL",
+            tool="nz_insert_select",
+            kind=str(parsed_sel.kind),
+        )
+
+    qual = _qualified_table(schema, table)
+    if target_columns:
+        cols_sql = ", ".join(_validate_column_name(c) for c in target_columns)
+        insert_prefix = f"INSERT INTO {qual} ({cols_sql}) "
+    else:
+        insert_prefix = f"INSERT INTO {qual} "
+
+    insert_sql = f"{insert_prefix}{sel}"
+
+    parsed_ins = guard_validate(insert_sql, mode="write")
+    if parsed_ins.kind is not StatementKind.INSERT:
+        raise NetezzaError(
+            operation="execute_insert_select",
+            detail=f"Unexpected statement kind after validation: {parsed_ins.kind}",
+        )
+
+    warnings = _insert_select_warnings(sel, target_columns)
+
+    if dry_run:
+        duration_ms = 0
+        would_insert: int | None = None
+        if estimate_rows:
+            count_sql = f"SELECT COUNT(*) AS C FROM ({sel}) AS nz_mcp_t"  # noqa: S608
+            count_parsed = guard_validate(count_sql, mode="read")
+            if count_parsed.kind is not StatementKind.SELECT:
+                raise NetezzaError(
+                    operation="execute_insert_select",
+                    detail=f"Unexpected statement kind for row estimate: {count_parsed.kind}",
+                )
+            password = get_password(profile.name)
+            start = time.monotonic()
+            would_insert = _run_scalar_count(
+                profile,
+                password,
+                count_parsed.raw,
+                (),
+                operation="execute_insert_select",
+            )
+            duration_ms = int((time.monotonic() - start) * 1000)
+        return {
+            "dry_run": True,
+            "sql_to_execute": insert_sql,
+            "would_insert": would_insert,
+            "executed": False,
+            "inserted": None,
+            "duration_ms": duration_ms,
+            "warnings": warnings,
+        }
+
+    if not confirm:
+        raise InvalidInputError(
+            code="CONFIRM_REQUIRED",
+            detail="confirm=true is required when dry_run=false for nz_insert_select.",
+        )
+
+    password = get_password(profile.name)
+    start = time.monotonic()
+    connection = cast(_ConnectionLike, open_connection(profile, password))
+    try:
+        with closing(connection.cursor()) as cursor:
+            cursor.execute(parsed_ins.raw, ())
+            affected = cursor.rowcount if cursor.rowcount is not None else 0
+    except NetezzaError:
+        raise
+    except Exception as exc:  # noqa: BLE001, RUF100
+        raise NetezzaError(
+            operation="execute_insert_select",
+            database=database,
+            detail=sanitize(str(exc), known_secrets={password}),
+        ) from exc
+    finally:
+        connection.close()
+
+    duration_ms = int((time.monotonic() - start) * 1000)
+    return {
+        "dry_run": False,
+        "sql_to_execute": insert_sql,
+        "would_insert": None,
+        "executed": True,
+        "inserted": int(affected),
+        "duration_ms": duration_ms,
+        "warnings": warnings,
+    }
 
 
 def execute_update(
@@ -322,6 +447,8 @@ def _run_scalar_count(
     password: str,
     sql: str,
     params: tuple[Any, ...],
+    *,
+    operation: str = "execute_update",
 ) -> int:
     connection = cast(_ConnectionLike, open_connection(profile, password))
     try:
@@ -330,7 +457,7 @@ def _run_scalar_count(
             row = cursor.fetchone()
     except Exception as exc:  # noqa: BLE001, RUF100
         raise NetezzaError(
-            operation="execute_update",
+            operation=operation,
             database=profile.database,
             detail=sanitize(str(exc), known_secrets={password}),
         ) from exc

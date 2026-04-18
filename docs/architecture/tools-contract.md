@@ -563,6 +563,49 @@ Unifica la obtención de DDL de **tabla**, **vista** o **procedimiento** y lo de
 
 ---
 
+#### 26. `nz_insert_select`
+
+`INSERT INTO schema.target [(columns)] SELECT ...` — copia masiva o multi-fila vía `UNION ALL`. El sub-`select_sql` se valida con `sql_guard` en modo `write` (solo `SELECT`); los literales van en el texto del SELECT (no parametrizados).
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | |
+| `target_schema` | string (required) | |
+| `target_table` | string (required) | |
+| `target_columns` | array of string (optional) | Si se omite, el orden de columnas sigue la proyección del SELECT. |
+| `select_sql` | string (required, max 65536) | Cuerpo `SELECT` (puede incluir `UNION ALL`). |
+| `dry_run` | bool (default **true**) | Si `true`, no ejecuta; devuelve `sql_to_execute`. |
+| `estimate_rows` | bool (default **false**) | Si `true` y `dry_run=true`, ejecuta `COUNT(*)` sobre el subquery (puede ser costoso). |
+| `confirm` | bool (**required if** `dry_run=false`) | |
+
+**Output (dry-run)**: `dry_run`, `sql_to_execute`, `would_insert` (solo si `estimate_rows`), `executed: false`, `duration_ms`, `warnings`, `confirm_required` cuando aplica.
+
+**Output (ejecución)**: `dry_run: false`, `executed: true`, `inserted`, `duration_ms`, `warnings`.
+
+---
+
+#### 27. `nz_create_table_as`
+
+`CREATE TABLE schema.target AS SELECT ...` con `DISTRIBUTE ON` / `ORGANIZE ON` (modo `admin`). Rechaza si el destino ya existe (catálogo). El `select_sql` se valida como `SELECT`; el núcleo `CREATE TABLE ... AS` se valida con `sql_guard`; los sufijos Netezza se añaden como plantillas con identificadores validados (igual que `nz_create_table`).
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | |
+| `target_schema` | string (required) | |
+| `target_table` | string (required) | No debe existir. |
+| `select_sql` | string (required, max 65536) | |
+| `distribution` | object (optional) | `{type: HASH\|RANDOM, columns: [...]}`; default `RANDOM`. |
+| `organized_on` | array (optional) | |
+| `dry_run` | bool (default **true**) | |
+| `estimate_rows` | bool (default **false**) | Si `true` y `dry_run=true`, ejecuta `COUNT(*)` del subquery (puede ser costoso). |
+| `confirm` | bool (**required if** `dry_run=false`) | |
+
+**Output (dry-run)**: `dry_run`, `ddl_to_execute`, `would_create_rows` (solo si `estimate_rows`), `executed: false`, `duration_ms`.
+
+**Output (ejecución)**: `dry_run: false`, `ddl_to_execute`, `executed: true`, `duration_ms`.
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -573,8 +616,10 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 |---|---|---|---|
 | `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_export_ddl`, `nz_get_procedure_section`, `nz_current_profile` | true | false | true |
 | `nz_insert` | false | false | false |
+| `nz_insert_select` | false | false | false |
 | `nz_update`, `nz_delete` | false | true | false |
 | `nz_create_table` | false | false | true |
+| `nz_create_table_as` | false | false | false |
 | `nz_clone_procedure` | false | false | true |
 | `nz_truncate`, `nz_drop_table` | false | **true** | true |
 | `nz_switch_profile` | false | false | true |

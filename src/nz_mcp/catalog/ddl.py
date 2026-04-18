@@ -9,9 +9,10 @@ from typing import Any, Final, Protocol, cast
 
 from nz_mcp.auth import get_password
 from nz_mcp.catalog.identifier import validate_catalog_identifier, validate_database_identifier
+from nz_mcp.catalog.tables import table_exists
 from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
-from nz_mcp.errors import InvalidInputError, NetezzaError
+from nz_mcp.errors import GuardRejectedError, InvalidInputError, NetezzaError
 from nz_mcp.logging_utils import sanitize
 from nz_mcp.sql_guard import StatementKind
 from nz_mcp.sql_guard import validate as guard_validate
@@ -23,10 +24,12 @@ _TYPE_SAFE: Final[re.Pattern[str]] = re.compile(
     r"^[A-Za-z][A-Za-z0-9_]*(?:\(\s*\d+(?:\s*,\s*\d+)?\s*\))?$",
 )
 _MAX_TYPE_LEN: Final[int] = 200
+_MAX_CTAS_SELECT_SQL: Final[int] = 65536
 
 
 class _CursorLike(Protocol):
     def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None: ...
+    def fetchone(self) -> Any: ...
     @property
     def rowcount(self) -> int: ...
     def close(self) -> None: ...
@@ -190,6 +193,154 @@ def execute_create_table(
     return {
         "dry_run": False,
         "ddl_to_execute": full_sql,
+        "executed": True,
+        "duration_ms": duration_ms,
+    }
+
+
+def _run_scalar_count(
+    profile: Profile,
+    password: str,
+    sql: str,
+    params: tuple[Any, ...],
+    *,
+    operation: str,
+    database: str,
+) -> int:
+    connection = cast(_ConnectionLike, open_connection(profile, password))
+    try:
+        with closing(connection.cursor()) as cursor:
+            cursor.execute(sql, params)
+            row = cursor.fetchone()
+    except Exception as exc:  # noqa: BLE001, RUF100
+        raise NetezzaError(
+            operation=operation,
+            database=database,
+            detail=sanitize(str(exc), known_secrets={password}),
+        ) from exc
+    finally:
+        connection.close()
+
+    if row is None:
+        return 0
+    if isinstance(row, dict):
+        v = next(iter(row.values()))
+        return int(v)
+    if isinstance(row, (tuple, list)) and len(row) >= 1:
+        return int(row[0])
+    return int(row)
+
+
+def execute_create_table_as(
+    profile: Profile,
+    database: str,
+    schema: str,
+    table: str,
+    select_sql: str,
+    *,
+    distribution: dict[str, Any] | None,
+    organized_on: list[str] | None,
+    dry_run: bool,
+    confirm: bool,
+    estimate_rows: bool = False,
+) -> dict[str, Any]:
+    """Build Netezza ``CREATE TABLE ... AS SELECT ...`` with validated identifiers-only tail."""
+    _ensure_session_database(profile, database)
+    if table_exists(profile, database, schema, table):
+        raise InvalidInputError(
+            detail=(
+                f"Target table {schema}.{table} already exists; "
+                "nz_create_table_as requires a name that is not in use."
+            ),
+        )
+
+    sel = select_sql.strip()
+    if not sel:
+        raise InvalidInputError(detail="select_sql must be non-empty.")
+    if len(sel) > _MAX_CTAS_SELECT_SQL:
+        raise InvalidInputError(detail="select_sql exceeds maximum length.")
+
+    parsed_sel = guard_validate(sel, mode="admin")
+    if parsed_sel.kind is not StatementKind.SELECT:
+        raise GuardRejectedError(
+            code="WRONG_STATEMENT_FOR_TOOL",
+            tool="nz_create_table_as",
+            kind=str(parsed_sel.kind),
+        )
+
+    qual = _qualified_table(schema, table)
+    core_sql = f"CREATE TABLE {qual} AS\n{sel}"
+    parsed_core = guard_validate(core_sql, mode="admin")
+    if parsed_core.kind is not StatementKind.CREATE:
+        raise NetezzaError(
+            operation="execute_create_table_as",
+            detail=f"Unexpected statement kind after validation: {parsed_core.kind}",
+        )
+
+    org_clause = _build_organize_clause(organized_on)
+    dist_clause = _build_distribution_clause(distribution)
+    pieces: list[str] = [parsed_core.raw.rstrip()]
+    if org_clause:
+        pieces.append(org_clause)
+    pieces.append(dist_clause)
+    full_sql = "\n".join(pieces)
+
+    if dry_run:
+        duration_ms = 0
+        would_rows: int | None = None
+        if estimate_rows:
+            count_sql = f"SELECT COUNT(*) AS C FROM ({sel}) AS nz_mcp_ctas_t"  # noqa: S608
+            count_parsed = guard_validate(count_sql, mode="read")
+            if count_parsed.kind is not StatementKind.SELECT:
+                raise NetezzaError(
+                    operation="execute_create_table_as",
+                    detail=f"Unexpected statement kind for row estimate: {count_parsed.kind}",
+                )
+            password = get_password(profile.name)
+            start = time.monotonic()
+            would_rows = _run_scalar_count(
+                profile,
+                password,
+                count_parsed.raw,
+                (),
+                operation="execute_create_table_as",
+                database=database,
+            )
+            duration_ms = int((time.monotonic() - start) * 1000)
+        return {
+            "dry_run": True,
+            "ddl_to_execute": full_sql,
+            "would_create_rows": would_rows,
+            "executed": False,
+            "duration_ms": duration_ms,
+        }
+
+    if confirm is not True:
+        raise InvalidInputError(
+            code="CONFIRM_REQUIRED",
+            detail="confirm=true is required when dry_run=false for nz_create_table_as.",
+        )
+
+    password = get_password(profile.name)
+    start = time.monotonic()
+    connection = cast(_ConnectionLike, open_connection(profile, password))
+    try:
+        with closing(connection.cursor()) as cursor:
+            cursor.execute(full_sql, ())
+    except Exception as exc:  # noqa: BLE001, RUF100
+        raise NetezzaError(
+            operation="execute_create_table_as",
+            database=database,
+            detail=sanitize(str(exc), known_secrets={password}),
+        ) from exc
+    finally:
+        connection.close()
+
+    duration_ms = int((time.monotonic() - start) * 1000)
+    return {
+        "dry_run": False,
+        "ddl_to_execute": full_sql,
+        "would_create_rows": None,
         "executed": True,
         "duration_ms": duration_ms,
     }
