@@ -8,6 +8,7 @@ from typing import Any, Final, Protocol, cast
 from nz_mcp.auth import get_password
 from nz_mcp.catalog.identifier import render_cross_db
 from nz_mcp.catalog.resolver import resolve_query
+from nz_mcp.catalog.row_shape import is_sequence_row
 from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
 from nz_mcp.errors import NetezzaError
@@ -63,6 +64,6 @@ def _row_to_schema(row: Any) -> dict[str, str]:
                 detail="Catalog query must return SCHEMA and OWNER columns.",
             )
         return {"name": str(row["SCHEMA"]), "owner": str(row["OWNER"])}
-    if isinstance(row, tuple) and len(row) >= _SCHEMA_ROW_MIN_ITEMS:
+    if is_sequence_row(row, _SCHEMA_ROW_MIN_ITEMS):
         return {"name": str(row[0]), "owner": str(row[1])}
     raise NetezzaError(operation="list_schemas", detail="Unexpected row shape from _v_schema")

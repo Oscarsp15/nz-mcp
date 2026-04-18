@@ -8,6 +8,7 @@ from typing import Any, Final, Protocol, cast
 from nz_mcp.auth import get_password
 from nz_mcp.catalog.identifier import render_cross_db
 from nz_mcp.catalog.resolver import resolve_query
+from nz_mcp.catalog.row_shape import is_sequence_row
 from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
 from nz_mcp.errors import NetezzaError
@@ -124,7 +125,7 @@ def _row_to_view_list_item(row: Any) -> dict[str, str]:
                 detail="Catalog query must return NAME (or VIEWNAME) and OWNER columns.",
             )
         return {"name": str(row[name_key]), "owner": str(row["OWNER"])}
-    if isinstance(row, tuple) and len(row) >= _VIEW_LIST_MIN_ITEMS:
+    if is_sequence_row(row, _VIEW_LIST_MIN_ITEMS):
         return {"name": str(row[0]), "owner": str(row[1])}
     raise NetezzaError(operation="list_views", detail="Unexpected row shape from _v_view")
 
@@ -138,7 +139,7 @@ def _row_to_definition(row: Any) -> str:
             )
         text = row["DEFINITION"]
         return "" if text is None else str(text)
-    if isinstance(row, tuple) and len(row) >= 1:
+    if is_sequence_row(row, 1):
         cell = row[0]
         return "" if cell is None else str(cell)
     raise NetezzaError(operation="get_view_ddl", detail="Unexpected row shape from _v_view")

@@ -6,7 +6,7 @@ from collections.abc import Sequence
 
 import pytest
 
-from nz_mcp.catalog.databases import list_databases
+from nz_mcp.catalog.databases import _row_to_database, list_databases
 from nz_mcp.config import Profile
 from nz_mcp.errors import NetezzaError
 
@@ -52,6 +52,11 @@ def _profile() -> Profile:
     )
 
 
+def test_row_to_database_accepts_tuple_or_list() -> None:
+    assert _row_to_database(("DEV", "ADMIN")) == {"name": "DEV", "owner": "ADMIN"}
+    assert _row_to_database(["DEV", "ADMIN"]) == {"name": "DEV", "owner": "ADMIN"}
+
+
 def test_list_databases_queries_catalog_with_optional_like(monkeypatch: pytest.MonkeyPatch) -> None:
     cursor = _FakeCursor(rows=[("DEV", "ADMIN"), ("DATA", "DBA")])
     connection = _FakeConnection(cursor)
@@ -69,8 +74,27 @@ def test_list_databases_queries_catalog_with_optional_like(monkeypatch: pytest.M
     out = list_databases(_profile(), pattern="D%")
 
     assert out == [{"name": "DEV", "owner": "ADMIN"}, {"name": "DATA", "owner": "DBA"}]
+
+
+def test_list_databases_accepts_list_rows_from_nzpy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """nzpy may return ``tuple[list[Any], ...]`` from ``fetchall()`` — not tuple rows."""
+    cursor = _FakeCursor(rows=[["DEV", "ADMIN"], ["DATA", "DBA"]])
+    connection = _FakeConnection(cursor)
+
+    monkeypatch.setattr("nz_mcp.catalog.databases.get_password", lambda _name: "pw")
+    monkeypatch.setattr(
+        "nz_mcp.catalog.databases.open_connection",
+        lambda *_args, **_kwargs: connection,
+    )
+    monkeypatch.setattr(
+        "nz_mcp.catalog.databases.resolve_query",
+        lambda _query_id, _profile: "SELECT DATABASE, OWNER FROM _V_DATABASE",
+    )
+
+    out = list_databases(_profile(), pattern=None)
+    assert out == [{"name": "DEV", "owner": "ADMIN"}, {"name": "DATA", "owner": "DBA"}]
     assert cursor.executed_sql is not None and "_v_database" in cursor.executed_sql.lower()
-    assert cursor.executed_params == ("D%", "D%")
+    assert cursor.executed_params == (None, None)
     assert cursor.closed is True
     assert connection.closed is True
 
