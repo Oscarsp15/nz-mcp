@@ -31,6 +31,43 @@ _SAMPLE_DDL = (
     "END_PROC\n"
 )
 
+_REAL_NZPLSQL_BODY_DDL = (
+    "CREATE OR REPLACE PROCEDURE DBO.TGT(DATE)\n"
+    "RETURNS INTEGER\n"
+    "LANGUAGE NZPLSQL AS\n"
+    "DECLARE\n"
+    "  v_campo VARCHAR(10000);\n"
+    "BEGIN\n"
+    "  RETURN 0;\n"
+    "END;\n"
+)
+
+
+def test_clone_dry_run_real_shaped_nzplsql_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "nz_mcp.catalog.clone.get_procedure_ddl",
+        lambda *_a, **_k: _REAL_NZPLSQL_BODY_DDL,
+    )
+    monkeypatch.setattr("nz_mcp.catalog.clone.list_procedures", lambda *_a, **_k: [])
+
+    out = clone_procedure(
+        _profile(),
+        source_database="DEV",
+        source_schema="DBO",
+        source_procedure="TGT",
+        source_signature=None,
+        target_database="DEV",
+        target_schema="DBO",
+        target_procedure="TGT_CLONE",
+        replace_if_exists=False,
+        transformations=None,
+        dry_run=True,
+        confirm=False,
+    )
+    assert out["dry_run"] is True
+    assert "VARCHAR(10000)" in out["ddl_to_execute"]
+    assert "DECLARE" in out["ddl_to_execute"]
+
 
 def test_clone_dry_run_returns_ddl_and_warnings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
