@@ -34,6 +34,31 @@ def test_list_profiles_with_two(two_profiles: Path) -> None:
     assert "prod" in result.stdout
 
 
+def test_edit_profile_updates_mode(two_profiles: Path) -> None:
+    result = runner.invoke(app, ["edit-profile", "dev", "--mode", "write"])
+    assert result.exit_code == 0
+    assert "Updated" in result.stdout
+    from nz_mcp.config import get_profile
+
+    assert get_profile("dev", path=two_profiles).mode == "write"
+
+
+def test_edit_profile_unknown_exits_1(two_profiles: Path) -> None:
+    result = runner.invoke(app, ["edit-profile", "nope", "--mode", "read"])
+    assert result.exit_code == 1
+
+
+def test_edit_profile_invalid_mode_exits_2(two_profiles: Path) -> None:
+    result = runner.invoke(app, ["edit-profile", "dev", "--mode", "invalid"])
+    assert result.exit_code == 2
+
+
+def test_edit_profile_no_flags_noop(two_profiles: Path) -> None:
+    result = runner.invoke(app, ["edit-profile", "dev"])
+    assert result.exit_code == 0
+    assert "No changes" in result.stdout
+
+
 def test_serve_runs_stdio_server(monkeypatch: pytest.MonkeyPatch) -> None:
     called = False
 

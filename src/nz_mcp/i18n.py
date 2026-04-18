@@ -55,8 +55,8 @@ MESSAGES: Final[dict[str, Message]] = {
     },
     # Profile / config
     "PROFILE_NOT_FOUND": {
-        "es": "No existe el perfil '{profile}'. Crea uno con: nz-mcp add-profile.",
-        "en": "Profile '{profile}' does not exist. Create one with: nz-mcp add-profile.",
+        "es": "No existe el perfil '{profile}'.{hint_es} Crea uno con: nz-mcp add-profile.",
+        "en": "Profile '{profile}' does not exist.{hint_en} Create one with: nz-mcp add-profile.",
     },
     "INVALID_CONFIG": {
         "es": "El archivo de configuración es inválido: {detail}",
@@ -121,6 +121,14 @@ MESSAGES: Final[dict[str, Message]] = {
     "NOTE.DDL_RECONSTRUCTED": {
         "es": "DDL reconstruido desde catálogo (SHOW TABLE no disponible en este servidor).",
         "en": "DDL reconstructed from catalogs (SHOW TABLE not available on this server).",
+    },
+    "NOTE.DDL_RECONSTRUCTED_DETAIL": {
+        "es": "DDL reconstruido desde _v_relation_column + _v_table_dist_map + restricciones de catálogo.",
+        "en": "DDL reconstructed from _v_relation_column + _v_table_dist_map + catalog constraints.",
+    },
+    "NOTE.DDL_WITH_DATA_CAVEAT": {
+        "es": "Las cláusulas WITH DATA / STATISTICS pueden diferir del CREATE original.",
+        "en": "WITH DATA / STATISTICS clauses may differ from the original CREATE.",
     },
     # nz-mcp doctor (CLI diagnostics — no secrets)
     "DOCTOR.HEADER": {

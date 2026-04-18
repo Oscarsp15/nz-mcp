@@ -12,6 +12,7 @@ from nz_mcp.catalog.tables import (
     get_table_ddl,
     get_table_sample,
     get_table_stats,
+    skew_class,
 )
 from nz_mcp.config import Profile
 from nz_mcp.errors import InvalidInputError, ObjectNotFoundError
@@ -84,6 +85,21 @@ def test_parse_table_stats_tuple() -> None:
     assert p["size_bytes_allocated"] == 2048
     assert p["skew"] == 2.5
     assert p["table_created"] is None
+    assert p.get("stats_last_analyzed") is None
+
+
+def test_parse_table_stats_six_tuple_with_analyzed() -> None:
+    p = _parse_table_stats_row((10, 100, 200, 0.05, None, "2024-03-12"))
+    assert p["stats_last_analyzed"] == "2024-03-12"
+
+
+def test_skew_class_bands() -> None:
+    assert skew_class(None) is None
+    assert skew_class(0.05) == "balanced"
+    assert skew_class(0.1) == "moderate"
+    assert skew_class(0.2) == "moderate"
+    assert skew_class(0.3) == "moderate"
+    assert skew_class(0.31) == "severe"
 
 
 def test_parse_table_stats_dict_datetime() -> None:

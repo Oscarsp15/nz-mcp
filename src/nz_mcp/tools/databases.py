@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from nz_mcp.catalog.databases import list_databases
 from nz_mcp.config import get_active_profile
 from nz_mcp.tools.registry import tool
+from nz_mcp.tools.timing import monotonic_duration_ms, monotonic_start
 
 
 class ListDatabasesInput(BaseModel):
@@ -25,6 +26,7 @@ class DatabaseItem(BaseModel):
 class ListDatabasesOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     databases: list[DatabaseItem]
+    duration_ms: int = Field(ge=0, description="Wall time to run the catalog query (milliseconds).")
 
 
 @tool(
@@ -44,6 +46,10 @@ def nz_list_databases(
     *,
     config_path: Path | None = None,
 ) -> ListDatabasesOutput:
+    start = monotonic_start()
     profile = get_active_profile(path=config_path)
     rows = list_databases(profile, pattern=params.pattern)
-    return ListDatabasesOutput(databases=[DatabaseItem(**row) for row in rows])
+    return ListDatabasesOutput(
+        databases=[DatabaseItem(**row) for row in rows],
+        duration_ms=monotonic_duration_ms(start),
+    )

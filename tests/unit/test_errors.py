@@ -35,7 +35,7 @@ def test_subclass_codes_are_distinct() -> None:
 
 
 def test_context_appears_in_str() -> None:
-    err = ProfileNotFoundError(profile="ghost")
+    err = ProfileNotFoundError(profile="ghost", hint_es="", hint_en="")
     rendered = str(err)
     assert "ghost" in rendered
     assert "PROFILE_NOT_FOUND" in rendered

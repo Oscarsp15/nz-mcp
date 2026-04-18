@@ -18,7 +18,9 @@ from nz_mcp.config import (
     get_active_profile,
     get_profile,
     list_profile_names,
+    set_active_profile,
 )
+from nz_mcp.errors import ProfileNotFoundError
 from nz_mcp.tools.registry import tool
 
 # --- nz_current_profile -------------------------------------------------------
@@ -86,8 +88,10 @@ class SwitchProfileOutput(BaseModel):
     name="nz_switch_profile",
     description=(
         "Switch the active session to a different pre-configured profile. "
-        "Use to change between e.g. dev and prod profiles. "
-        "Cannot elevate permissions: the new mode is always what profiles.toml declares."
+        "This updates profiles.toml (active=...) and affects new nz-mcp processes; the running "
+        "MCP session uses the switched profile immediately. "
+        "Cannot elevate permissions: the new mode is always what profiles.toml declares. "
+        "Call nz_current_profile first if you need to see available profiles."
     ),
     mode="read",
     input_model=SwitchProfileInput,
@@ -100,7 +104,20 @@ def nz_switch_profile(
     config_path: Path | None = None,
     on_switch: Callable[[Profile], None] | None = None,
 ) -> SwitchProfileOutput:
-    target = get_profile(params.profile, path=config_path)
+    try:
+        target = get_profile(params.profile, path=config_path)
+    except ProfileNotFoundError:
+        names = list_profile_names(path=config_path)
+        joined = ", ".join(names)
+        hint_es = f" Perfiles existentes: {joined}." if joined else ""
+        hint_en = f" Existing profiles: {joined}." if joined else ""
+        raise ProfileNotFoundError(
+            profile=params.profile,
+            hint_es=hint_es,
+            hint_en=hint_en,
+            available_profiles=names,
+        ) from None
+    set_active_profile(target.name, path=config_path)
     if on_switch is not None:
         on_switch(target)
     return SwitchProfileOutput(switched_to=target.name, mode=target.mode)

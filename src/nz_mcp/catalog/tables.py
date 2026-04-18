@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from contextlib import closing
-from typing import Any, Final, Protocol, cast
+from typing import Any, Final, Literal, Protocol, cast
 
 from nz_mcp.auth import get_password
 from nz_mcp.catalog.ddl_builder import build_create_table_ddl
@@ -34,6 +34,22 @@ _FK_SCHEMA_MIN: Final[int] = 5
 _FK_REL_MIN: Final[int] = 6
 _FK_ATT_MIN: Final[int] = 7
 _STATS_ROW_MIN: Final[int] = 5
+_STATS_ROW_WITH_ANALYZED: Final[int] = 6
+
+# Rule-of-thumb skew bands (Netezza): document-only, not policy thresholds.
+_SKEW_BALANCED_LT: Final[float] = 0.1
+_SKEW_MODERATE_LE: Final[float] = 0.3
+
+
+def skew_class(skew: float | None) -> Literal["balanced", "moderate", "severe"] | None:
+    """Classify storage skew: `<0.1` balanced, `≤0.3` moderate, else severe."""
+    if skew is None:
+        return None
+    if skew < _SKEW_BALANCED_LT:
+        return "balanced"
+    if skew <= _SKEW_MODERATE_LE:
+        return "moderate"
+    return "severe"
 
 
 class _DescribeCursorLike(Protocol):
@@ -461,13 +477,16 @@ def get_table_stats(
     payload = _parse_table_stats_row(fetched[0])
     used = int(payload["size_bytes_used"])
     allocated = int(payload["size_bytes_allocated"])
+    sk = payload["skew"]
     return {
         "row_count": int(payload["row_count"]),
         "size_bytes_used": used,
         "size_used_human": format_bytes_iec(used),
         "size_bytes_allocated": allocated,
         "size_allocated_human": format_bytes_iec(allocated),
-        "skew": payload["skew"],
+        "skew": sk,
+        "skew_class": skew_class(sk),
+        "stats_last_analyzed": payload.get("stats_last_analyzed"),
         "table_created": payload["table_created"],
     }
 
@@ -488,6 +507,16 @@ def _parse_table_stats_row(row: Any) -> dict[str, Any]:
         alloc = pick("SIZE_BYTES_ALLOCATED")
         skew = pick("SKEW")
         created = pick("TABLE_CREATED")
+        analyzed = pick("STATS_LAST_ANALYZED", "LASTUPDATETIMESTAMP")
+    elif is_sequence_row(row, _STATS_ROW_WITH_ANALYZED):
+        rc, used, alloc, skew, created, analyzed = (
+            row[0],
+            row[1],
+            row[2],
+            row[3],
+            row[4],
+            row[5],
+        )
     elif is_sequence_row(row, _STATS_ROW_MIN):
         rc, used, alloc, skew, created = (
             row[0],
@@ -496,6 +525,7 @@ def _parse_table_stats_row(row: Any) -> dict[str, Any]:
             row[3],
             row[4],
         )
+        analyzed = None
     else:
         raise NetezzaError(
             operation="get_table_stats",
@@ -511,13 +541,22 @@ def _parse_table_stats_row(row: Any) -> dict[str, Any]:
         iso = getattr(created, "isoformat", None)
         created_out = iso() if callable(iso) else str(created)
 
-    return {
+    analyzed_out: str | None
+    if analyzed is None:
+        analyzed_out = None
+    else:
+        iso_a = getattr(analyzed, "isoformat", None)
+        analyzed_out = iso_a() if callable(iso_a) else str(analyzed)
+
+    out: dict[str, Any] = {
         "row_count": 0 if rc is None else int(rc),
         "size_bytes_used": 0 if used is None else int(used),
         "size_bytes_allocated": 0 if alloc is None else int(alloc),
         "skew": skew_out,
         "table_created": created_out,
     }
+    out["stats_last_analyzed"] = analyzed_out
+    return out
 
 
 def get_table_ddl(
