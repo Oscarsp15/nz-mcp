@@ -97,3 +97,26 @@ def test_nzplsql_procedure_invalid_identifier_blocked() -> None:
     with pytest.raises(GuardRejectedError) as exc:
         validate(sql, mode="admin")
     assert exc.value.code == "UNKNOWN_STATEMENT"
+
+
+@pytest.mark.adversarial
+def test_union_all_followed_by_stacked_select_blocked() -> None:
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("SELECT 1 UNION ALL SELECT 2; SELECT 3", mode="read")
+    assert exc.value.code == "STACKED_NOT_ALLOWED"
+
+
+@pytest.mark.adversarial
+def test_intersect_blocked_as_unknown_statement() -> None:
+    """INTERSECT is not classified as SELECT (only UNION / UNION ALL trees are)."""
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("SELECT 1 INTERSECT SELECT 1", mode="read")
+    assert exc.value.code == "UNKNOWN_STATEMENT"
+
+
+@pytest.mark.adversarial
+def test_except_blocked_as_unknown_statement() -> None:
+    """EXCEPT is not classified as SELECT."""
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("SELECT 1 EXCEPT SELECT 1", mode="read")
+    assert exc.value.code == "UNKNOWN_STATEMENT"
