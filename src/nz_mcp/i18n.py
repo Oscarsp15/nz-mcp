@@ -102,7 +102,7 @@ MESSAGES: Final[dict[str, Message]] = {
         "en": "confirm=true is required to run the mutation with dry_run=false.",
     },
     # Hints
-    "HINT.RESULT_TRUNCATED": {
+    "HINT.RESULT_TRUNCATED_BY_ROWS": {
         "es": "Resultado truncado en {n} filas. Añade WHERE o LIMIT para refinar.",
         "en": "Result truncated at {n} rows. Add WHERE or LIMIT to refine.",
     },
@@ -110,11 +110,11 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "La query tardó {ms}ms, cerca del timeout. Considera filtrar más.",
         "en": "Query took {ms}ms, near timeout. Consider filtering further.",
     },
-    "HINT.BYTES_CAP_REACHED": {
-        "es": "Resultado truncado por tamaño de salida (~{max_kb} KB). Reduzca columnas o filtre.",
-        "en": "Result truncated by output size (~{max_kb} KB). Narrow columns or add filters.",
+    "HINT.RESULT_TRUNCATED_BY_BYTES": {
+        "es": "Resultado truncado por tamaño de salida (~{max_kb} KB). Use SELECT con menos columnas o filtre.",
+        "en": "Result truncated by output size (~{max_kb} KB). Use an explicit SELECT with fewer columns or add filters.",
     },
-    "HINT.EXECUTION_DEADLINE": {
+    "HINT.RESULT_TRUNCATED_BY_TIMEOUT": {
         "es": "Se alcanzó el límite de tiempo ({timeout_s}s). El resultado puede estar incompleto.",
         "en": "Execution time limit ({timeout_s}s) was reached. The result may be incomplete.",
     },

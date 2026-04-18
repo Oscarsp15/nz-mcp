@@ -132,7 +132,7 @@ def test_execute_select_respects_max_rows(monkeypatch: pytest.MonkeyPatch) -> No
     out = execute_select(profile, "SELECT 1", max_rows=2, timeout_s=30)
     assert out["row_count"] == 2
     assert out["truncated"] is True
-    assert out["hint_key"] == "HINT.RESULT_TRUNCATED"
+    assert out["hint_key"] == "HINT.RESULT_TRUNCATED_BY_ROWS"
 
 
 def test_execute_select_bytes_cap(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -177,7 +177,7 @@ def test_execute_select_bytes_cap(monkeypatch: pytest.MonkeyPatch) -> None:
 
     out = execute_select(profile, "SELECT 1", max_rows=50, timeout_s=30)
     assert out["truncated"] is True
-    assert out["hint_key"] == "HINT.BYTES_CAP_REACHED"
+    assert out["hint_key"] == "HINT.RESULT_TRUNCATED_BY_BYTES"
 
 
 def test_execute_select_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -221,7 +221,7 @@ def test_execute_select_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
 
     out = execute_select(profile, "SELECT 1", max_rows=10, timeout_s=1)
     assert out["truncated"] is True
-    assert out["hint_key"] == "HINT.EXECUTION_DEADLINE"
+    assert out["hint_key"] == "HINT.RESULT_TRUNCATED_BY_TIMEOUT"
 
 
 def test_fetch_explain_text_concatenates_lines(monkeypatch: pytest.MonkeyPatch) -> None:
