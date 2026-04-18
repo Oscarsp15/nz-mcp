@@ -9,6 +9,8 @@ Cada entrada se documenta en **español** y **english**.
 ## [Unreleased]
 
 ### Fixed
+- ES: ``list_tools`` / ``outputSchema`` — los ``$ref`` a ``#/$defs/...`` se inlinean antes de envolver ``result``, para que clientes MCP (p. ej. Claude Desktop) no fallen con ``PointerToNowhere``.
+- EN: ``list_tools`` / ``outputSchema`` — ``$ref`` targets under ``#/$defs/...`` are inlined before wrapping ``result``, so MCP clients (e.g. Claude Desktop) do not hit ``PointerToNowhere``.
 - ES: el catálogo acepta filas devueltas como ``list`` (nzpy) además de ``tuple``; helper compartido ``is_sequence_row`` en consultas a ``_v_*``.
 - EN: catalog parsing accepts nzpy ``list`` rows as well as ``tuple`` rows; shared ``is_sequence_row`` helper for ``_v_*`` queries.
 - ES: dependencia ``typer>=0.15`` para compatibilidad con **click 8.2** (CLI sin errores de import).
