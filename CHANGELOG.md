@@ -9,6 +9,8 @@ Cada entrada se documenta en **español** y **english**.
 ## [Unreleased]
 
 ### Changed
+- ES: ``nz_insert`` — por defecto ``dry_run=true`` y ``confirm`` obligatorio para ejecutar (mismo patrón que update/delete).
+- EN: ``nz_insert`` — defaults to ``dry_run=true`` and requires ``confirm`` to execute (same pattern as update/delete).
 - ES: ``nz_create_table`` — por defecto ``dry_run=true``; para ejecutar en el servidor hace falta ``dry_run=false`` y ``confirm=true``. Salida alineada con otras tools DDL: ``ddl_to_execute``, ``executed``, ``duration_ms``.
 - EN: ``nz_create_table`` — defaults to ``dry_run=true``; execution requires ``dry_run=false`` and ``confirm=true``. Output aligned with other DDL tools: ``ddl_to_execute``, ``executed``, ``duration_ms``.
 
@@ -17,8 +19,8 @@ Cada entrada se documenta en **español** y **english**.
 - EN: ``nz_export_ddl`` tool — table/view/procedure DDL as MCP content blocks (``text/sql`` embedded resource + summary text) and ``meta`` with ``nz-mcp://ddl/...`` URI; intended for native copy UX in clients such as Claude Desktop.
 - ES: ``duration_ms`` en outputs de tools de lectura que consultan Netezza (listados, describe, DDL de tabla/vista/procedimiento, secciones).
 - EN: ``duration_ms`` on read-tool outputs that hit Netezza (list/describe/table-view-procedure DDL and sections).
-- ES: ``nz_table_stats`` — ``skew_class`` (balanced/moderate/severe) y ``stats_last_analyzed`` vía ``_v_statistic`` cuando aplica.
-- EN: ``nz_table_stats`` — ``skew_class`` (balanced/moderate/severe) and ``stats_last_analyzed`` via ``_v_statistic`` when available.
+- ES: ``nz_table_stats`` — ``skew_class`` (balanced/moderate/severe) con bandas de sesgo.
+- EN: ``nz_table_stats`` — ``skew_class`` (balanced/moderate/severe) skew bands.
 - ES: ``nz_get_procedure_ddl`` — ``size_bytes`` y ``warning`` si el DDL supera ~100 KB (sin truncar).
 - EN: ``nz_get_procedure_ddl`` — ``size_bytes`` and ``warning`` when DDL exceeds ~100 KB (not truncated).
 - ES: ``nz_get_table_ddl`` — ``notes`` ampliadas (reconstrucción desde catálogo y caveats); campo ``reconstructed`` documentado en el schema.
@@ -29,6 +31,10 @@ Cada entrada se documenta en **español** y **english**.
 - EN: CLI command ``nz-mcp edit-profile`` to update mode/limits on an existing profile (``tomli-w`` dependency).
 
 ### Fixed
+- ES: ``nz_table_stats`` — ya no usa ``_V_STATISTIC.LASTUPDATETIMESTAMP`` (columna inexistente en NPS 11.2.x); ``stats_last_analyzed`` queda siempre ``null``.
+- EN: ``nz_table_stats`` — no longer references ``_V_STATISTIC.LASTUPDATETIMESTAMP`` (missing on NPS 11.2.x); ``stats_last_analyzed`` is always ``null``.
+- ES: ``nz_clone_procedure`` — envuelve el cuerpo NZPLSQL con ``BEGIN_PROC``/``END_PROC`` para ejecución en Netezza.
+- EN: ``nz_clone_procedure`` — wraps NZPLSQL body with ``BEGIN_PROC``/``END_PROC`` for Netezza execution.
 - ES: ``nz_drop_table`` con ``if_exists=true`` — emite ``DROP TABLE esquema.tabla IF EXISTS`` (sintaxis Netezza NPS 11.x), no ``DROP TABLE IF EXISTS ...`` (error de parser en el servidor).
 - EN: ``nz_drop_table`` with ``if_exists=true`` — emits ``DROP TABLE schema.table IF EXISTS`` (Netezza NPS 11.x syntax), not ``DROP TABLE IF EXISTS ...`` (server parse error).
 - ES: ``nz_create_table`` / ``execute_create_table`` — columna con ``default`` omitido o ``null`` en JSON ya no falla; se omite la cláusula ``DEFAULT`` (equivalente a sin default). Rechazo explícito de ``default`` string con ``;`` (inyección).

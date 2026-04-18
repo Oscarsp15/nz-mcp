@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 import pytest
 
-from nz_mcp.catalog.clone import clone_procedure
+from nz_mcp.catalog.clone import _wrap_nzplsql_body, clone_procedure
 from nz_mcp.config import Profile
 from nz_mcp.errors import InvalidInputError, NetezzaError, ProcedureAlreadyExistsError
 
@@ -67,6 +67,16 @@ def test_clone_dry_run_real_shaped_nzplsql_body(monkeypatch: pytest.MonkeyPatch)
     assert out["dry_run"] is True
     assert "VARCHAR(10000)" in out["ddl_to_execute"]
     assert "DECLARE" in out["ddl_to_execute"]
+    assert "BEGIN_PROC" in out["ddl_to_execute"]
+    assert "END_PROC" in out["ddl_to_execute"]
+
+
+def test_wrap_nzplsql_body_idempotent_and_adds_markers() -> None:
+    raw = "DECLARE x INT;\nBEGIN\n  NULL;\nEND;"
+    wrapped = _wrap_nzplsql_body(raw)
+    assert wrapped.startswith("BEGIN_PROC")
+    assert "END_PROC" in wrapped
+    assert _wrap_nzplsql_body(wrapped) == wrapped
 
 
 def test_clone_dry_run_returns_ddl_and_warnings(monkeypatch: pytest.MonkeyPatch) -> None:

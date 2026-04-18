@@ -64,6 +64,8 @@ def execute_insert(  # noqa: PLR0912, PLR0915
     rows: list[dict[str, Any]],
     *,
     on_conflict: str,
+    dry_run: bool = False,
+    confirm: bool = False,
 ) -> dict[str, Any]:
     """Run ``INSERT`` with ``?`` placeholders; ``on_conflict`` is ``error`` or ``skip``."""
     _ensure_session_database(profile, database)
@@ -103,6 +105,21 @@ def execute_insert(  # noqa: PLR0912, PLR0915
             detail=f"Unexpected statement kind after validation: {parsed.kind}",
         )
 
+    if dry_run:
+        return {
+            "inserted": 0,
+            "would_insert": len(rows),
+            "dry_run": True,
+            "confirm_required": True,
+            "duration_ms": 0,
+        }
+
+    if not confirm:
+        raise InvalidInputError(
+            code="CONFIRM_REQUIRED",
+            detail="confirm=true is required when dry_run=false for nz_insert.",
+        )
+
     password = get_password(profile.name)
     connection = cast(_ConnectionLike, open_connection(profile, password))
     start = time.monotonic()
@@ -140,7 +157,7 @@ def execute_insert(  # noqa: PLR0912, PLR0915
         connection.close()
 
     duration_ms = int((time.monotonic() - start) * 1000)
-    return {"inserted": inserted, "duration_ms": duration_ms}
+    return {"inserted": inserted, "duration_ms": duration_ms, "dry_run": False}
 
 
 def execute_update(

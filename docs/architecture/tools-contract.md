@@ -376,8 +376,14 @@ Implementación: parser ligero NZPLSQL en `catalog/procedures.py` (basado en mar
 | `table` | string (required) | |
 | `rows` | array of objects (required) | Cada objeto es `{columna: valor}`. |
 | `on_conflict` | enum: `error` \| `skip` (default `error`) | |
+| `dry_run` | bool (default **true**) | Valida el `INSERT` sin ejecutarlo; devuelve `would_insert`. |
+| `confirm` | bool (**required if** `dry_run=false`) | Debe ser `true` para ejecutar cuando `dry_run=false`. |
 
-**Output**: `{ "inserted": N, "duration_ms": T }`
+**Output** (dry-run `true`): `{ "inserted": 0, "would_insert": N, "dry_run": true, "confirm_required": true, "duration_ms": 0 }`
+
+**Output** (ejecución real): `{ "inserted": N, "duration_ms": T, "dry_run": false }`
+
+Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 
 Implementación: `INSERT INTO ... VALUES (...)` parametrizado. **Prohibido** construir SQL por concatenación de strings de valores (identificadores validados con el validador de catálogo).
 

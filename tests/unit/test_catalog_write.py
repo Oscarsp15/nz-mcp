@@ -63,8 +63,18 @@ def test_execute_insert_batch_error_path(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr("nz_mcp.catalog.write.get_password", lambda _n: "pw")
     monkeypatch.setattr("nz_mcp.catalog.write.open_connection", lambda *_a, **_k: conn)
     rows = [{"A": 1, "B": 2}]
-    out = execute_insert(_PROFILE, "DEV", "PUBLIC", "TAB", rows, on_conflict="error")
+    out = execute_insert(
+        _PROFILE,
+        "DEV",
+        "PUBLIC",
+        "TAB",
+        rows,
+        on_conflict="error",
+        dry_run=False,
+        confirm=True,
+    )
     assert out["inserted"] == 1
+    assert out["dry_run"] is False
     cursor.execute.assert_called_once()
     assert "INSERT INTO PUBLIC.TAB" in cursor.execute.call_args[0][0]
 
@@ -210,5 +220,47 @@ def test_execute_insert_skip_ignores_duplicate(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr("nz_mcp.catalog.write.get_password", lambda _n: "pw")
     monkeypatch.setattr("nz_mcp.catalog.write.open_connection", lambda *_a, **_k: conn)
     rows = [{"A": 1}, {"A": 2}]
-    out = execute_insert(_PROFILE, "DEV", "PUBLIC", "TAB", rows, on_conflict="skip")
+    out = execute_insert(
+        _PROFILE,
+        "DEV",
+        "PUBLIC",
+        "TAB",
+        rows,
+        on_conflict="skip",
+        dry_run=False,
+        confirm=True,
+    )
     assert out["inserted"] == 1
+
+
+def test_execute_insert_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("nz_mcp.catalog.write.get_password", lambda _n: "pw")
+    out = execute_insert(
+        _PROFILE,
+        "DEV",
+        "PUBLIC",
+        "TAB",
+        [{"A": 1}],
+        on_conflict="error",
+        dry_run=True,
+        confirm=False,
+    )
+    assert out["dry_run"] is True
+    assert out["would_insert"] == 1
+    assert out["inserted"] == 0
+
+
+def test_execute_insert_confirm_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("nz_mcp.catalog.write.get_password", lambda _n: "pw")
+    with pytest.raises(InvalidInputError) as ei:
+        execute_insert(
+            _PROFILE,
+            "DEV",
+            "PUBLIC",
+            "TAB",
+            [{"A": 1}],
+            on_conflict="error",
+            dry_run=False,
+            confirm=False,
+        )
+    assert ei.value.code == "CONFIRM_REQUIRED"
