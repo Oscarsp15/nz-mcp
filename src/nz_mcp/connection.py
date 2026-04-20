@@ -14,6 +14,12 @@ if TYPE_CHECKING:
 
 APPLICATION_NAME: Final[str] = "nz-mcp"
 
+# nzpy's per-Connection logger gets explicit setLevel in its __init__, bypassing
+# parent-logger filtering. ``logLevel=2`` maps to WARNING (0=DEBUG, 1=INFO, 2=WARNING
+# in nzpy's convention); anything lower floods stderr with per-packet traffic and
+# breaks client UIs that render on stderr.
+_NZPY_LOG_LEVEL_WARNING: Final[int] = 2
+
 
 def open_connection(profile: Profile, password: str) -> object:
     """Open a Netezza connection with bounded timeout and fixed app name."""
@@ -27,6 +33,7 @@ def open_connection(profile: Profile, password: str) -> object:
             timeout=profile.timeout_s_default,
             application_name=APPLICATION_NAME,
             securityLevel=1,
+            logLevel=_NZPY_LOG_LEVEL_WARNING,
         )
     except Exception as exc:  # noqa: BLE001, RUF100
         # nzpy may raise unchecked driver errors; we surface them as typed ConnectionError for MCP.
