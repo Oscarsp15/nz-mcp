@@ -11,6 +11,8 @@ Cada entrada se documenta en **español** y **english**.
 ### Changed
 - ES: ``configure_logging_for_stdio`` eleva el logger ``nzpy`` a ``WARNING`` bajo stdio para silenciar el DEBUG/INFO por paquete que rompe la UI de los clientes que renderizan en stderr (p.ej. la barra de progreso de ``nz-workbench kb-bootstrap``).
 - EN: ``configure_logging_for_stdio`` raises the ``nzpy`` logger to ``WARNING`` under stdio so the per-packet DEBUG/INFO noise no longer shreds client UIs that render on stderr (e.g. the ``nz-workbench kb-bootstrap`` progress bar).
+- ES: ``open_connection`` pasa ``logLevel=2`` (WARNING en la convención de nzpy) a ``nzpy.connect``. nzpy hace ``setLevel(logLevel)`` sobre el logger hijo ``nzpy.Connection[<db>}]`` en cada conexión, bypasseando el nivel del padre; sin este flag el silenciado del logger padre no tenía efecto real.
+- EN: ``open_connection`` passes ``logLevel=2`` (WARNING in nzpy's convention) to ``nzpy.connect``. nzpy calls ``setLevel(logLevel)`` on the per-connection child logger ``nzpy.Connection[<db>}]``, bypassing parent-level filtering; without this flag the parent-logger silencing had no effect in practice.
 - ES: ``nz_insert`` — por defecto ``dry_run=true`` y ``confirm`` obligatorio para ejecutar (mismo patrón que update/delete).
 - EN: ``nz_insert`` — defaults to ``dry_run=true`` and requires ``confirm`` to execute (same pattern as update/delete).
 - ES: ``nz_create_table`` — por defecto ``dry_run=true``; para ejecutar en el servidor hace falta ``dry_run=false`` y ``confirm=true``. Salida alineada con otras tools DDL: ``ddl_to_execute``, ``executed``, ``duration_ms``.

@@ -44,6 +44,9 @@ def test_open_connection_calls_nzpy_with_expected_parameters(
     assert captured["timeout"] == 45
     assert captured["application_name"] == APPLICATION_NAME
     assert captured["securityLevel"] == 1
+    # Maps to WARNING inside nzpy; lower values flood stderr with per-packet DEBUG
+    # that shreds client UIs rendering on stderr (e.g. nz-workbench progress bar).
+    assert captured["logLevel"] == 2
 
 
 def test_open_connection_sanitizes_known_password_in_driver_detail(
