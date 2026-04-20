@@ -11,6 +11,11 @@ import structlog
 
 _state: dict[str, bool] = {"configured": False}
 
+# Third-party loggers that flood stderr with per-packet DEBUG/INFO noise when
+# left at default levels. Clients that wrap nz-mcp (e.g. nz-workbench) render
+# UI on stderr, so this noise breaks their output.
+_NOISY_LOGGERS: Final[tuple[str, ...]] = ("nzpy",)
+
 
 def configure_logging_for_stdio() -> None:
     """Route stdlib logging and structlog to stderr so stdout stays JSON-RPC only.
@@ -30,6 +35,9 @@ def configure_logging_for_stdio() -> None:
             format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         )
     logging.captureWarnings(True)
+
+    for name in _NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
 
     warnings.filterwarnings(
         "ignore",
