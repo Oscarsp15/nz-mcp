@@ -84,3 +84,26 @@ for i in range(2):
         if not line.strip():
             continue
         json.loads(line)
+
+
+def test_nzpy_logger_is_silenced_to_warning() -> None:
+    """nzpy's per-packet DEBUG/INFO noise must not reach stderr under stdio.
+
+    Clients that wrap nz-mcp render UI on stderr (e.g. nz-workbench's
+    kb-bootstrap progress bar) — leaving nzpy at its default level shreds
+    that UI.
+    """
+    code = """
+import logging
+from nz_mcp.logging_config import configure_logging_for_stdio
+configure_logging_for_stdio()
+lvl = logging.getLogger("nzpy").getEffectiveLevel()
+assert lvl >= logging.WARNING, f"expected >=WARNING, got {lvl}"
+# Child loggers inherit the level.
+child = logging.getLogger("nzpy.Connection")
+assert child.getEffectiveLevel() >= logging.WARNING
+print("ok")
+"""
+    proc = _run_isolated(code)
+    assert proc.returncode == 0, proc.stderr
+    assert "ok" in proc.stdout
