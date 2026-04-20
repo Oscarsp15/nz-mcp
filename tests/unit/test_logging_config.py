@@ -107,3 +107,20 @@ print("ok")
     proc = _run_isolated(code)
     assert proc.returncode == 0, proc.stderr
     assert "ok" in proc.stdout
+
+
+def test_mcp_sdk_logger_is_silenced_to_warning() -> None:
+    """The MCP SDK emits one INFO per tool call; silence it under stdio."""
+    code = """
+import logging
+from nz_mcp.logging_config import configure_logging_for_stdio
+configure_logging_for_stdio()
+# Parent and the concrete child the SDK uses.
+for name in ("mcp", "mcp.server.lowlevel.server"):
+    lvl = logging.getLogger(name).getEffectiveLevel()
+    assert lvl >= logging.WARNING, f"{name}: expected >=WARNING, got {lvl}"
+print("ok")
+"""
+    proc = _run_isolated(code)
+    assert proc.returncode == 0, proc.stderr
+    assert "ok" in proc.stdout
