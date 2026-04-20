@@ -11,10 +11,12 @@ import structlog
 
 _state: dict[str, bool] = {"configured": False}
 
-# Third-party loggers that flood stderr with per-packet DEBUG/INFO noise when
-# left at default levels. Clients that wrap nz-mcp (e.g. nz-workbench) render
-# UI on stderr, so this noise breaks their output.
-_NOISY_LOGGERS: Final[tuple[str, ...]] = ("nzpy",)
+# Third-party loggers that flood stderr with per-packet or per-request
+# DEBUG/INFO noise when left at default levels. Clients that wrap nz-mcp
+# (e.g. nz-workbench) render UI on stderr, so this noise breaks their output.
+# ``mcp`` covers ``mcp.server.lowlevel.server`` (one INFO line per tool call)
+# and any other SDK children.
+_NOISY_LOGGERS: Final[tuple[str, ...]] = ("nzpy", "mcp")
 
 
 def configure_logging_for_stdio() -> None:
