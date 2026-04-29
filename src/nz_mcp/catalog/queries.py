@@ -185,6 +185,20 @@ GET_PROCEDURE_SECTION: Final[CatalogQuery] = CatalogQuery(
     cross_database=True,
 )
 
+GET_ALL_PROCEDURES_DDL: Final[CatalogQuery] = CatalogQuery(
+    id="get_all_procedures_ddl",
+    sql=(
+        "SELECT PROCEDURE, OWNER, ARGUMENTS, RETURNS, PROCEDURESOURCE, "
+        "PROCEDURESIGNATURE, LASTALTERTIME "
+        "FROM <BD>.._V_PROCEDURE WHERE SCHEMA = UPPER(?) "
+        "AND (? IS NULL OR PROCEDURE LIKE ?) ORDER BY PROCEDURE"
+    ),
+    catalog_views=("_V_PROCEDURE",),
+    description="Returns all procedure DDLs for a schema with an optional name filter.",
+    tested_versions=(NPS_112_IF1,),
+    cross_database=True,
+)
+
 ALL_QUERIES: Final[tuple[CatalogQuery, ...]] = (
     LIST_DATABASES,
     LIST_SCHEMAS,
@@ -199,6 +213,7 @@ ALL_QUERIES: Final[tuple[CatalogQuery, ...]] = (
     LIST_PROCEDURES,
     GET_PROCEDURE_DDL,
     GET_PROCEDURE_SECTION,
+    GET_ALL_PROCEDURES_DDL,
 )
 
 CATALOG_QUERY_MAP: Final[dict[str, CatalogQuery]] = {query.id: query for query in ALL_QUERIES}

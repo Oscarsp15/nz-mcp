@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from nz_mcp.catalog.procedures import (
     describe_procedure,
+    get_all_procedures_ddl,
     get_procedure_ddl,
     get_procedure_section,
     list_procedures,
@@ -129,6 +130,41 @@ class GetProcedureSectionOutput(BaseModel):
     content: str
     truncated: bool
     duration_ms: int = Field(ge=0, description="Wall time to extract the section (milliseconds).")
+
+
+class GetProceduresDdlBatchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    database: str = Field(min_length=1, max_length=128)
+    procedure_schema: str = Field(
+        alias="schema",
+        min_length=1,
+        max_length=128,
+    )
+    pattern: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class ProcedureBatchItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    owner: str
+    arguments: str
+    returns: str
+    ddl: str
+    signature: str
+    last_altered: str
+    size_bytes: int
+
+
+class GetProceduresDdlBatchOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    procedures: list[ProcedureBatchItem]
+    count: int
+    total_size_bytes: int
+    warning: str | None = Field(
+        default=None,
+        description="Set when any single DDL > 100 KB or total > 1 MB.",
+    )
+    duration_ms: int = Field(ge=0, description="Wall time to batch build DDLs (milliseconds).")
 
 
 @tool(
@@ -279,5 +315,48 @@ def nz_get_procedure_section(
         to_line=int(raw["to_line"]),
         content=raw["content"],
         truncated=bool(raw["truncated"]),
+        duration_ms=monotonic_duration_ms(start),
+    )
+
+
+@tool(
+    name="nz_get_procedures_ddl_batch",
+    description=(
+        "Batch fetch the DDL for all stored procedures in a schema. "
+        "Useful for bulk indexing without hitting Netezza with hundreds of queries."
+    ),
+    mode="read",
+    input_model=GetProceduresDdlBatchInput,
+    output_model=GetProceduresDdlBatchOutput,
+    annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
+)
+def nz_get_procedures_ddl_batch(
+    params: GetProceduresDdlBatchInput,
+    *,
+    config_path: Path | None = None,
+) -> GetProceduresDdlBatchOutput:
+    start = monotonic_start()
+    profile = get_active_profile(path=config_path)
+    res = get_all_procedures_ddl(
+        profile,
+        database=params.database,
+        schema=params.procedure_schema,
+        pattern=params.pattern,
+    )
+
+    total_size = res["total_size_bytes"]
+    procs = res["procedures"]
+
+    warning = None
+    if total_size > 1024 * 1024:
+        warning = "Total DDL size exceeds ~1 MB."
+    elif any(p["size_bytes"] > PROC_DDL_WARN_BYTES for p in procs):
+        warning = "One or more procedures exceed ~100 KB in DDL size."
+
+    return GetProceduresDdlBatchOutput(
+        procedures=[ProcedureBatchItem(**p) for p in procs],
+        count=len(procs),
+        total_size_bytes=total_size,
+        warning=warning,
         duration_ms=monotonic_duration_ms(start),
     )

@@ -11,11 +11,13 @@ from nz_mcp.tools.procedures import (
     PROC_DDL_WARN_BYTES,
     DescribeProcedureInput,
     GetProcedureDdlInput,
+    GetProceduresDdlBatchInput,
     GetProcedureSectionInput,
     ListProceduresInput,
     nz_describe_procedure,
     nz_get_procedure_ddl,
     nz_get_procedure_section,
+    nz_get_procedures_ddl_batch,
     nz_list_procedures,
 )
 
@@ -138,3 +140,80 @@ def test_nz_get_procedure_section_happy(
     assert out.section == "body"
     assert out.from_line == 2
     assert out.duration_ms >= 0
+
+
+def test_nz_get_procedures_ddl_batch_happy(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    def _fake_batch(*_a: object, **_k: object) -> dict[str, object]:
+        return {
+            "procedures": [
+                {
+                    "name": "SP1",
+                    "owner": "ADMIN",
+                    "arguments": "()",
+                    "returns": "INT",
+                    "ddl": "CREATE OR REPLACE ...",
+                    "signature": "()",
+                    "last_altered": "2026",
+                    "size_bytes": 100,
+                }
+            ],
+            "total_size_bytes": 100,
+        }
+
+    monkeypatch.setattr("nz_mcp.tools.procedures.get_all_procedures_ddl", _fake_batch)
+    out = nz_get_procedures_ddl_batch(
+        GetProceduresDdlBatchInput(database="D", procedure_schema="PUBLIC"),
+        config_path=two_profiles,
+    )
+    assert out.count == 1
+    assert out.total_size_bytes == 100
+    assert out.procedures[0].name == "SP1"
+    assert out.warning is None
+    assert out.duration_ms >= 0
+
+
+def test_nz_get_procedures_ddl_batch_warning_individual(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    def _fake_batch(*_a: object, **_k: object) -> dict[str, object]:
+        return {
+            "procedures": [
+                {
+                    "name": "SP1",
+                    "owner": "A",
+                    "arguments": "",
+                    "returns": "",
+                    "ddl": "",
+                    "signature": "",
+                    "last_altered": "",
+                    "size_bytes": PROC_DDL_WARN_BYTES + 1,
+                }
+            ],
+            "total_size_bytes": PROC_DDL_WARN_BYTES + 1,
+        }
+
+    monkeypatch.setattr("nz_mcp.tools.procedures.get_all_procedures_ddl", _fake_batch)
+    out = nz_get_procedures_ddl_batch(
+        GetProceduresDdlBatchInput(database="D", procedure_schema="PUBLIC"),
+        config_path=two_profiles,
+    )
+    assert out.warning == "One or more procedures exceed ~100 KB in DDL size."
+
+
+def test_nz_get_procedures_ddl_batch_warning_total(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    def _fake_batch(*_a: object, **_k: object) -> dict[str, object]:
+        return {
+            "procedures": [],
+            "total_size_bytes": 1024 * 1024 + 1,
+        }
+
+    monkeypatch.setattr("nz_mcp.tools.procedures.get_all_procedures_ddl", _fake_batch)
+    out = nz_get_procedures_ddl_batch(
+        GetProceduresDdlBatchInput(database="D", procedure_schema="PUBLIC"),
+        config_path=two_profiles,
+    )
+    assert out.warning == "Total DDL size exceeds ~1 MB."

@@ -203,3 +203,57 @@ def test_build_procedure_ddl() -> None:
     assert "CREATE OR REPLACE PROCEDURE DB1.SP" in ddl
     assert "LANGUAGE NZPLSQL AS" in ddl
     assert "BEGIN_PROC" in ddl
+
+
+def test_get_all_procedures_ddl(monkeypatch: pytest.MonkeyPatch, two_profiles: Path) -> None:
+    profile = get_active_profile(path=two_profiles)
+    monkeypatch.setattr("nz_mcp.catalog.procedures.get_password", lambda _n: "pw")
+
+    row1 = (
+        "SP1",
+        "ADMIN",
+        "(X INT)",
+        "INT",
+        "BEGIN_PROC\nBEGIN\nEND;\nEND_PROC;",
+        "(X INT)",
+        "2026-04-15 10:30:00",
+    )
+    row2 = (
+        "SP2",
+        "ADMIN",
+        "()",
+        "",
+        "BEGIN_PROC\nBEGIN\nEND;\nEND_PROC;",
+        "()",
+        "2026-04-16 10:30:00",
+    )
+
+    class _Conn:
+        def cursor(self) -> _Conn:
+            return self
+
+        def execute(self, *_a: object, **_k: object) -> None:
+            pass
+
+        def fetchall(self) -> list[object]:
+            return [row1, row2]
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(proc, "open_connection", lambda *_a, **_k: _Conn())
+
+    res = proc.get_all_procedures_ddl(profile, "DB1", "SCH")
+    assert len(res["procedures"]) == 2
+
+    p1 = res["procedures"][0]
+    assert p1["name"] == "SP1"
+    assert p1["owner"] == "ADMIN"
+    assert p1["arguments"] == "(X INT)"
+    assert p1["returns"] == "INT"
+    assert p1["signature"] == "(X INT)"
+    assert p1["last_altered"] == "2026-04-15 10:30:00"
+    assert "CREATE OR REPLACE PROCEDURE SCH.SP1" in p1["ddl"]
+    assert p1["size_bytes"] > 0
+
+    assert res["total_size_bytes"] == p1["size_bytes"] + res["procedures"][1]["size_bytes"]
