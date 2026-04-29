@@ -21,6 +21,8 @@ Cada entrada se documenta en **español** y **english**.
 - EN: ``nz_create_table`` — defaults to ``dry_run=true``; execution requires ``dry_run=false`` and ``confirm=true``. Output aligned with other DDL tools: ``ddl_to_execute``, ``executed``, ``duration_ms``.
 
 ### Added
+- ES: tool ``nz_get_procedures_ddl_batch`` para obtener los DDL de todos los procedimientos de un schema en lote, reduciendo la carga en indexación masiva (issue #101).
+- EN: ``nz_get_procedures_ddl_batch`` tool to batch fetch DDLs for all procedures in a schema, reducing load during bulk indexing (issue #101).
 - ES: ``sql_guard`` — ``UNION`` / ``UNION ALL`` entre solo ``SELECT`` se clasifican como ``SELECT`` (desbloquea ``nz_insert_select`` / CTAS con multi-fila vía UNION).
 - EN: ``sql_guard`` — ``UNION`` / ``UNION ALL`` of ``SELECT``-only branches classify as ``SELECT`` (enables ``nz_insert_select`` / CTAS multi-row via UNION).
 - ES: ``nz_insert_select`` — ``INSERT INTO … SELECT …`` con ``select_sql`` validado (modo ``write``); ``dry_run``/``confirm``; ``estimate_rows`` opcional para previsualizar filas con ``COUNT`` (costoso).

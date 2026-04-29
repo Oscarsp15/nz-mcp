@@ -75,6 +75,7 @@ def dummy_params_for_query_id(query_id: str) -> tuple[Any, ...]:
         "table_stats": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
         "list_procedures": (_DUMMY_SCHEMA, None, None),
         "get_procedure_ddl": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
+        "get_all_procedures_ddl": (_DUMMY_SCHEMA, None, None),
         "get_procedure_section": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
     }
     if query_id not in mapping:

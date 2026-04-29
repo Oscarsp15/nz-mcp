@@ -40,6 +40,7 @@ _DDL_TUPLE_INDEX: Final[dict[str, int]] = {
     "RETURNS": 3,
     "PROCEDURESOURCE": 4,
     "PROCEDURESIGNATURE": 5,
+    "LASTALTERTIME": 6,
 }
 
 
@@ -218,6 +219,68 @@ def get_procedure_section(
         "to_line": end,
         "content": content,
         "truncated": False,
+    }
+
+
+def get_all_procedures_ddl(
+    profile: Profile,
+    database: str,
+    schema: str,
+    pattern: str | None = None,
+) -> dict[str, Any]:
+    """Batch fetch all procedure DDLs for a given schema."""
+    validate_catalog_identifier(schema)
+    like_pattern = pattern if pattern else None
+    params: tuple[str, str | None, str | None] = (schema, like_pattern, like_pattern)
+    password = get_password(profile.name)
+    base_sql = resolve_query("get_all_procedures_ddl", profile)
+    sql = render_cross_db(base_sql, database=database)
+
+    connection = cast(_ConnectionList, open_connection(profile, password))
+    try:
+        with closing(connection.cursor()) as cursor:
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+    except Exception as exc:  # noqa: BLE001, RUF100
+        raise NetezzaError(
+            operation="get_all_procedures_ddl",
+            database=database,
+            detail=sanitize(str(exc), known_secrets={password}),
+        ) from exc
+    finally:
+        connection.close()
+
+    procedures: list[dict[str, Any]] = []
+    total_size_bytes = 0
+
+    for row in rows:
+        name = _ddl_get(row, "PROCEDURE").strip()
+        owner = _ddl_get(row, "OWNER").strip()
+        arguments = _ddl_get(row, "ARGUMENTS").strip()
+        returns = _ddl_get(row, "RETURNS").strip()
+        signature = _ddl_get(row, "PROCEDURESIGNATURE").strip()
+        last_altered = _ddl_get(row, "LASTALTERTIME").strip()
+
+        ddl = _build_procedure_ddl(schema, row)
+        size_bytes = len(ddl.encode("utf-8"))
+        total_size_bytes += size_bytes
+
+        procedures.append(
+            {
+                "name": name,
+                "owner": owner,
+                "arguments": arguments,
+                "returns": returns,
+                "ddl": ddl,
+                "signature": signature,
+                "last_altered": last_altered,
+                "size_bytes": size_bytes,
+            }
+        )
+
+    return {
+        "procedures": procedures,
+        "total_size_bytes": total_size_bytes,
     }
 
 
