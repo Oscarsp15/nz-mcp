@@ -40,7 +40,7 @@ _DDL_TUPLE_INDEX: Final[dict[str, int]] = {
     "RETURNS": 3,
     "PROCEDURESOURCE": 4,
     "PROCEDURESIGNATURE": 5,
-    "LASTALTERTIME": 6,
+    "CREATEDATE": 6,
 }
 
 
@@ -259,7 +259,7 @@ def get_all_procedures_ddl(
         arguments = _ddl_get(row, "ARGUMENTS").strip()
         returns = _ddl_get(row, "RETURNS").strip()
         signature = _ddl_get(row, "PROCEDURESIGNATURE").strip()
-        last_altered = _ddl_get(row, "LASTALTERTIME").strip()
+        last_altered = _ddl_get(row, "CREATEDATE").strip()
 
         ddl = _build_procedure_ddl(schema, row)
         size_bytes = len(ddl.encode("utf-8"))
