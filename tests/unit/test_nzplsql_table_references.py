@@ -144,6 +144,22 @@ def test_write_create_temp_table_qualified() -> None:
     assert kinds == ["write"]
 
 
+def test_write_create_temp_table_if_not_exists() -> None:
+    """Both optional groups (TEMP + IF NOT EXISTS) active simultaneously."""
+    kinds = list(
+        iter_table_references_in_statement(
+            "CREATE TEMP TABLE IF NOT EXISTS foo AS SELECT 1;", "foo"
+        )
+    )
+    assert kinds == ["write"]
+
+
+def test_write_create_table_ddl() -> None:
+    """Plain CREATE TABLE (not CTAS) is also classified as write."""
+    kinds = list(iter_table_references_in_statement("CREATE TABLE foo (id INT);", "foo"))
+    assert kinds == ["write"]
+
+
 def test_ctas_token_boundary_no_match() -> None:
     """``CREATE TABLE FooBar`` must not match when searching for ``foo``."""
     kinds = list(iter_table_references_in_statement("CREATE TABLE FooBar AS SELECT 1;", "foo"))
