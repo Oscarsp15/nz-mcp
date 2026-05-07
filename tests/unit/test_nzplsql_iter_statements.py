@@ -129,6 +129,81 @@ def test_classify_unsupported_statement_returns_none() -> None:
     assert classify_target_statement("SELECT * FROM foo;") is None
 
 
+# ── classify_target_statement: block-control prefix tolerance (issue #114) ───
+#
+# Statement chunks yielded by ``iter_statements`` accumulate every character
+# since the previous ``;`` boundary, so a CREATE/INSERT inside a procedure
+# body often arrives prefixed with control-flow tokens (``BEGIN``, ``IF …
+# THEN``, ``ELSE``, ``EXCEPTION``, ``FOR … LOOP``, ``WHILE``, …). The
+# classifier must look past those prefixes; otherwise the tool layer
+# (``nz_get_procedure_table_logic``) reports ``not_found = true`` for SPs
+# whose only INSERT/CREATE for the target table is inside a block.
+
+
+def test_classify_insert_after_begin_prefix() -> None:
+    """Chunk starts with ``BEGIN\\n`` (typical block opener)."""
+    res = classify_target_statement("BEGIN\nINSERT INTO foo VALUES (1);")
+    assert res == ("INSERT INTO", "foo")
+
+
+def test_classify_create_temp_table_after_begin_prefix() -> None:
+    res = classify_target_statement("BEGIN\nCREATE TEMP TABLE foo AS SELECT 1;\n")
+    assert res == ("CREATE TEMP TABLE", "foo")
+
+
+def test_classify_insert_after_if_then_prefix() -> None:
+    """Chunk starts with ``IF cond THEN``; must still classify the INSERT."""
+    res = classify_target_statement("IF cond THEN\nINSERT INTO foo SELECT 1;")
+    assert res == ("INSERT INTO", "foo")
+
+
+def test_classify_first_match_wins_when_chunk_has_delete_and_insert() -> None:
+    """When several verbs coexist, the first CREATE/INSERT in source order wins.
+
+    DELETE is out of scope so it is ignored; the INSERT is the only one we
+    classify, regardless of the DELETE that precedes it in the chunk.
+    """
+    src = "IF cond THEN\nDELETE FROM foo;\nINSERT INTO foo SELECT 1;\nEND IF;"
+    assert classify_target_statement(src) == ("INSERT INTO", "foo")
+
+
+def test_classify_first_match_wins_create_before_insert() -> None:
+    """Two valid CREATE/INSERT verbs — the earlier one wins."""
+    src = "BEGIN\nCREATE TABLE foo AS SELECT 1;\nINSERT INTO bar SELECT 2;\nEND;"
+    assert classify_target_statement(src) == ("CREATE TABLE", "foo")
+
+
+def test_classify_string_literal_does_not_produce_false_positive() -> None:
+    """``'INSERT INTO foo'`` inside a string literal must not match."""
+    src = "BEGIN\nRAISE NOTICE 'INSERT INTO foo';\nEND;"
+    assert classify_target_statement(src) is None
+
+
+def test_classify_string_literal_with_real_insert_after_it() -> None:
+    """Literal text is masked, but a real INSERT after it must still match."""
+    src = "BEGIN\nRAISE NOTICE 'INSERT INTO bar';\nINSERT INTO foo SELECT 1;\nEND;"
+    assert classify_target_statement(src) == ("INSERT INTO", "foo")
+
+
+def test_classify_insert_after_for_loop_prefix() -> None:
+    res = classify_target_statement("FOR rec IN cur LOOP\nINSERT INTO foo VALUES (rec.id);")
+    assert res == ("INSERT INTO", "foo")
+
+
+def test_classify_insert_after_exception_prefix() -> None:
+    res = classify_target_statement("EXCEPTION WHEN OTHERS THEN\nINSERT INTO foo VALUES (1);")
+    assert res == ("INSERT INTO", "foo")
+
+
+def test_classify_word_boundary_blocks_xinsert() -> None:
+    """``XINSERT INTO foo`` must not match because ``INSERT`` is not at a word boundary."""
+    assert classify_target_statement("BEGIN\nXINSERT INTO foo VALUES (1);") is None
+
+
+def test_classify_word_boundary_blocks_xcreate() -> None:
+    assert classify_target_statement("BEGIN\nXCREATE TABLE foo AS SELECT 1;") is None
+
+
 # ── extract_create_or_insert_targeting ───────────────────────────────────────
 
 
