@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from nz_mcp.catalog.nzplsql_parser import StatementKind, strip_comments
 from nz_mcp.catalog.procedures import (
     describe_procedure,
+    find_table_references,
     get_all_procedures_ddl,
     get_procedure_ddl,
     get_procedure_section,
@@ -576,5 +577,102 @@ def nz_get_procedure_table_logic(
         statements=statements,
         count=int(raw["count"]),
         not_found=bool(raw["not_found"]),
+        duration_ms=monotonic_duration_ms(start),
+    )
+
+
+# ── nz_find_table_references (issue #107) ────────────────────────────────────
+
+
+class GetFindTableReferencesInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    database: str = Field(min_length=1, max_length=128)
+    procedure_schema: str = Field(
+        alias="schema",
+        min_length=1,
+        max_length=128,
+    )
+    table: str = Field(
+        min_length=1,
+        max_length=128,
+        description="Table name to look up references for (case-insensitive).",
+    )
+    table_database: str | None = Field(
+        default=None,
+        max_length=128,
+        description=(
+            "Restrict references to those qualified by this database. When omitted, "
+            "any qualifier (or none) is accepted."
+        ),
+    )
+    table_schema: str | None = Field(
+        default=None,
+        max_length=128,
+        description=(
+            "Restrict references to those qualified by this schema. When omitted, "
+            "any qualifier (or none) is accepted."
+        ),
+    )
+    pattern: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        description="Optional LIKE filter on procedure names to narrow the scan universe.",
+    )
+
+
+class TableReferenceItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    procedure_name: str
+    signature: str
+    usage: Literal["read", "write", "both"]
+    occurrences_read: int = Field(ge=0)
+    occurrences_write: int = Field(ge=0)
+    last_altered: str
+
+
+class GetFindTableReferencesOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    references: list[TableReferenceItem]
+    scanned_count: int = Field(ge=0)
+    match_count: int = Field(ge=0)
+    truncated: bool
+    duration_ms: int = Field(ge=0, description="Wall time to scan procedures (milliseconds).")
+
+
+@tool(
+    name="nz_find_table_references",
+    description=(
+        "Find which stored procedures in a schema read or write a given table. "
+        "Returns each procedure with read/write occurrence counts. Use for impact "
+        "analysis before changing a table. Do not use for views, dynamic SQL, or "
+        "column-level analysis."
+    ),
+    mode="read",
+    input_model=GetFindTableReferencesInput,
+    output_model=GetFindTableReferencesOutput,
+    annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
+)
+def nz_find_table_references(
+    params: GetFindTableReferencesInput,
+    *,
+    config_path: Path | None = None,
+) -> GetFindTableReferencesOutput:
+    start = monotonic_start()
+    profile = get_active_profile(path=config_path)
+    raw = find_table_references(
+        profile,
+        database=params.database,
+        schema=params.procedure_schema,
+        table=params.table,
+        table_database=params.table_database,
+        table_schema=params.table_schema,
+        pattern=params.pattern,
+    )
+    return GetFindTableReferencesOutput(
+        references=[TableReferenceItem(**r) for r in raw["references"]],
+        scanned_count=int(raw["scanned_count"]),
+        match_count=int(raw["match_count"]),
+        truncated=bool(raw["truncated"]),
         duration_ms=monotonic_duration_ms(start),
     )

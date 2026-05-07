@@ -93,6 +93,18 @@ class ResponseTooLargeError(NzMcpError):
     code = "RESPONSE_TOO_LARGE"
 
 
+class InputTooBroadError(NzMcpError):
+    """Raised when an input would scan a universe larger than the safety cap.
+
+    Used by catalog-wide scan tools (e.g. ``nz_find_table_references``) when
+    the candidate set after filtering is still wider than the documented hard
+    cap. The error context typically carries ``scanned`` and ``cap``; the
+    caller should narrow with ``pattern`` and retry.
+    """
+
+    code = "INPUT_TOO_BROAD"
+
+
 class NetezzaError(NzMcpError):
     code = "NETEZZA_ERROR"
 

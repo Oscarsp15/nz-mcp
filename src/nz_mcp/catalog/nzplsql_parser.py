@@ -618,3 +618,257 @@ def extract_create_or_insert_targeting(
             )
         )
     return matches
+
+
+# ── table reference detection (issue #107) ───────────────────────────────────
+
+
+ReferenceKind = Literal["read", "write"]
+
+
+# A quoted SQL identifier such as ``"foo"`` is at least two characters long
+# (the surrounding double quotes); we use this constant to keep the magic
+# number out of comparisons.
+_MIN_QUOTED_IDENT_LEN: Final[int] = 2
+
+# A fully qualified Netezza identifier has at most three parts:
+# ``database.schema.table`` (or ``database..table`` with empty middle).
+_MAX_QUALIFIER_PARTS: Final[int] = 3
+_TWO_PARTS: Final[int] = 2
+
+
+# Read verbs: FROM / JOIN (with all OUTER variants) / USING (
+# We explicitly allow LEFT/RIGHT/INNER/FULL/CROSS prefixes plus optional OUTER.
+_READ_PREFIX: Final[re.Pattern[str]] = re.compile(
+    r"""
+    (?<![A-Za-z0-9_])
+    (?:
+        FROM
+      | (?:(?:LEFT|RIGHT|INNER|FULL|CROSS)\s+)?(?:OUTER\s+)?JOIN
+      | USING\s*\(
+    )
+    \s+
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+# A FROM that is part of ``DELETE FROM`` belongs to the write classifier; we
+# detect it post-hoc (matching the prefix that immediately precedes the read
+# match) and skip the read scan for that occurrence.
+_DELETE_FROM_PREFIX: Final[re.Pattern[str]] = re.compile(
+    r"(?:^|[^A-Za-z0-9_])DELETE\s+\Z", re.IGNORECASE
+)
+
+
+# Write verbs we recognize. Each pattern matches the verb head; the table
+# reference that follows is captured by ``_parse_qualified_ref`` separately.
+_WRITE_PREFIX: Final[re.Pattern[str]] = re.compile(
+    r"""
+    (?<![A-Za-z0-9_])
+    (?:
+        INSERT\s+INTO
+      | UPDATE
+      | DELETE\s+FROM
+      | MERGE\s+INTO
+      | TRUNCATE\s+TABLE
+      | DROP\s+TABLE(?:\s+IF\s+EXISTS)?
+      | INTO
+    )
+    \s+
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _strip_quote(token: str | None) -> str | None:
+    if token is None:
+        return None
+    if len(token) >= _MIN_QUOTED_IDENT_LEN and token[0] == '"' and token[-1] == '"':
+        return token[1:-1]
+    return token
+
+
+def _match_ident(text: str, start: int) -> tuple[str, int] | None:
+    """Match an identifier (quoted or unquoted) at ``start``; return ``(token, end)``."""
+    n = len(text)
+    if start >= n:
+        return None
+    ch = text[start]
+    if ch == '"':
+        end = _scan_quoted_token(text, start, '"')
+        return text[start:end], end
+    if ch.isalpha() or ch == "_":
+        i = start + 1
+        while i < n and (text[i].isalnum() or text[i] == "_"):
+            i += 1
+        return text[start:i], i
+    return None
+
+
+def _parse_qualified_ref(text: str, start: int) -> tuple[str | None, str | None, str, int] | None:
+    """Parse a qualified table reference at ``start`` in ``text``.
+
+    Returns ``(database, schema, table, end_index)`` or ``None`` if no
+    identifier is found. Empty middle parts (``bd..table`` Netezza form) are
+    represented as ``None`` for that qualifier slot.
+    """
+    n = len(text)
+    if start >= n:
+        return None
+
+    # Skip leading whitespace.
+    i = start
+    while i < n and text[i] in " \t\r\n":
+        i += 1
+
+    parts: list[str | None] = []
+    first = _match_ident(text, i)
+    if first is None:
+        return None
+    parts.append(first[0])
+    i = first[1]
+
+    while len(parts) < _MAX_QUALIFIER_PARTS and i < n:
+        j = i
+        while j < n and text[j] in " \t":
+            j += 1
+        if j >= n or text[j] != ".":
+            break
+        j += 1
+        while j < n and text[j] in " \t":
+            j += 1
+        nxt = _match_ident(text, j)
+        if nxt is None:
+            # Empty qualifier — only valid as middle slot for ``bd..table``.
+            parts.append(None)
+            i = j
+            continue
+        parts.append(nxt[0])
+        i = nxt[1]
+
+    if len(parts) == 1:
+        return None, None, _strip_quote(parts[0]) or "", i
+    if len(parts) == _TWO_PARTS:
+        return None, _strip_quote(parts[0]), _strip_quote(parts[1]) or "", i
+    # Three parts: db, schema, table; schema may be None for ``db..table``.
+    return _strip_quote(parts[0]), _strip_quote(parts[1]), _strip_quote(parts[2]) or "", i
+
+
+def _qualifier_matches(actual: str | None, requested: str | None) -> bool:
+    """Return True when ``actual`` is acceptable for ``requested``.
+
+    If ``requested`` is None, any ``actual`` (including None) is accepted.
+    If ``requested`` is given, ``actual`` must equal it case-insensitively or
+    be None — interpreted as "current schema/database", which we accept.
+    """
+    if requested is None:
+        return True
+    if actual is None:
+        return True
+    return actual.lower() == requested.lower()
+
+
+def iter_table_references_in_statement(
+    stmt_sql: str,
+    table: str,
+    *,
+    table_database: str | None = None,
+    table_schema: str | None = None,
+) -> Iterator[ReferenceKind]:
+    """Yield ``"read"`` / ``"write"`` for each occurrence of ``table`` in ``stmt_sql``.
+
+    ``stmt_sql`` should be a single statement as produced by
+    :func:`iter_statements`. The caller is responsible for passing text where
+    ``--`` and ``/* */`` comments are no longer present (for example by first
+    running :func:`strip_comments`); single-quoted string literals inside the
+    statement are masked here so ``'DELETE FROM foo'`` does not produce a
+    reference.
+
+    Classification rules:
+
+    * **read** — table follows ``FROM`` / ``JOIN`` (incl. ``LEFT``/``RIGHT``/
+      ``INNER``/``FULL``/``CROSS`` and ``OUTER``) / ``USING (``.
+    * **write** — table follows the leading verb of one of: ``INSERT INTO``,
+      ``UPDATE``, ``DELETE FROM``, ``MERGE INTO``, ``TRUNCATE TABLE``,
+      ``DROP TABLE [IF EXISTS]``, or the trailing ``... INTO <table>`` form
+      (CTAS / SELECT INTO).
+    * Token boundaries are respected — ``Foo`` does not match ``FooBar`` /
+      ``BarFoo``.
+    * ``table_database`` / ``table_schema`` filter qualifiers; missing
+      qualifiers in the source text are treated as "current schema/database"
+      and always accepted.
+    """
+    if not table.strip():
+        return
+    table_norm = table.strip().lower()
+
+    # Mask single-quoted strings so 'DELETE FROM foo' literals are skipped.
+    masked = mask_single_quoted_strings(stmt_sql)
+
+    yield from _scan_prefix(
+        masked, _WRITE_PREFIX, table_norm, table_database, table_schema, "write"
+    )
+    yield from _scan_prefix(masked, _READ_PREFIX, table_norm, table_database, table_schema, "read")
+
+
+def _scan_prefix(
+    text: str,
+    prefix: re.Pattern[str],
+    table_norm: str,
+    table_database: str | None,
+    table_schema: str | None,
+    kind: ReferenceKind,
+) -> Iterator[ReferenceKind]:
+    for match in prefix.finditer(text):
+        # Skip ``FROM`` matches that belong to a ``DELETE FROM`` write verb so
+        # the same occurrence is not classified twice (write + read). We test
+        # by slicing the prefix text up to the read match start; the ``\Z``
+        # anchor in ``_DELETE_FROM_PREFIX`` ensures only an immediately
+        # preceding ``DELETE\s+`` triggers the skip.
+        if kind == "read" and _DELETE_FROM_PREFIX.search(text[: match.start()]):
+            continue
+        ref = _parse_qualified_ref(text, match.end())
+        if ref is None:
+            continue
+        db, schema, name, _end = ref
+        if name.lower() != table_norm:
+            continue
+        if not _qualifier_matches(db, table_database):
+            continue
+        if not _qualifier_matches(schema, table_schema):
+            continue
+        yield kind
+
+
+def count_table_references(
+    source: str,
+    table: str,
+    *,
+    table_database: str | None = None,
+    table_schema: str | None = None,
+) -> tuple[int, int]:
+    """Return ``(read_occurrences, write_occurrences)`` for ``table`` in ``source``.
+
+    ``source`` is the raw procedure body. Comments are stripped per-statement
+    before scanning so commented-out verbs are not counted.
+    """
+    if not table.strip():
+        return 0, 0
+    reads = 0
+    writes = 0
+    for stmt in iter_statements(source):
+        clean = strip_comments(stmt.sql)
+        if not clean.strip():
+            continue
+        for kind in iter_table_references_in_statement(
+            clean,
+            table,
+            table_database=table_database,
+            table_schema=table_schema,
+        ):
+            if kind == "read":
+                reads += 1
+            else:
+                writes += 1
+    return reads, writes
