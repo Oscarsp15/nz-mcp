@@ -125,7 +125,7 @@ class GetProcedureDdlOutput(BaseModel):
         default=None,
         description="Set when the returned DDL exceeds ~100 KB; prefer nz_get_procedure_section.",
     )
-    duration_ms: int = Field(ge=0, description="Wall time to build DDL (milliseconds.)")
+    duration_ms: int = Field(ge=0, description="Wall time to build DDL (milliseconds).")
 
 
 class GetProcedureSectionInput(BaseModel):

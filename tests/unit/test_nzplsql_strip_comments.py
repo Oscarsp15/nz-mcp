@@ -94,6 +94,13 @@ def test_string_followed_by_line_comment() -> None:
 # ── double-quoted identifiers — must be preserved ─────────────────────────────
 
 
+def test_unclosed_string_emitted_as_literal() -> None:
+    """If a string literal lacks a closing quote, it hits EOF and is emitted verbatim."""
+    src = "msg := 'unclosed string without trailing quote"
+    result = strip_comments(src)
+    assert result == "msg := 'unclosed string without trailing quote"
+
+
 def test_line_comment_marker_inside_double_quoted_identifier_preserved() -> None:
     """Double-quoted identifiers can contain virtually any character."""
     src = 'SELECT "col--name" FROM t;\n'
@@ -162,4 +169,4 @@ def test_comment_free_source_unchanged_modulo_trailing_whitespace() -> None:
     src = "BEGIN\n  x := 1;\nEND;\n"
     result = strip_comments(src)
     # No comments — content must be identical (trailing-space stripping is allowed)
-    assert result == src.rstrip("\n") or result == src or "x := 1;" in result
+    assert "".join(result.split()) == "".join(src.split())

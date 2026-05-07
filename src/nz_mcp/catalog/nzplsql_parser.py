@@ -281,6 +281,8 @@ def _scan_quoted_token(source: str, start: int, quote_char: str) -> int:
     """Return the index just past the closing *quote_char*, handling doubled escapes.
 
     Handles ``''`` (escaped single quote) and ``""`` (escaped double quote).
+    If the string is unclosed, returns the length of the string (EOF fallback)
+    so the remainder is emitted verbatim as a literal.
     """
     j = start + 1
     n = len(source)
