@@ -8,6 +8,12 @@ Cada entrada se documenta en **español** y **english**.
 
 ## [Unreleased]
 
+### Added
+- ES: `nz_get_procedure_ddl` — nuevo campo de input `variant` (`"raw"` | `"clean"`, default `"raw"`). `clean` elimina comentarios de línea (`--`) y de bloque (`/* … */`) fuera de literales de cadena e identificadores entrecomillados, reduciendo hasta un 30 % el consumo de tokens en razonamiento IA. Default `raw` preserva back-compat (issue #105).
+- EN: `nz_get_procedure_ddl` — new `variant` input field (`"raw"` | `"clean"`, default `"raw"`). `clean` strips line (`--`) and block (`/* … */`) comments outside string literals and quoted identifiers, cutting token cost by up to 30 % for AI reasoning. Default `raw` preserves back-compat (issue #105).
+- ES: `nz_get_procedure_ddl` — nuevos campos de output `size_bytes_raw` e `size_bytes_clean` (siempre presentes, independientemente del `variant`); permiten al cliente comparar tamaños antes de decidir qué variante cargar (issue #105).
+- EN: `nz_get_procedure_ddl` — new output fields `size_bytes_raw` and `size_bytes_clean` (always present regardless of `variant`); allow the caller to compare sizes before choosing which variant to load (issue #105).
+
 ### Changed
 - ES: ``configure_logging_for_stdio`` eleva el logger ``nzpy`` a ``WARNING`` bajo stdio para silenciar el DEBUG/INFO por paquete que rompe la UI de los clientes que renderizan en stderr (p.ej. la barra de progreso de ``nz-workbench kb-bootstrap``).
 - EN: ``configure_logging_for_stdio`` raises the ``nzpy`` logger to ``WARNING`` under stdio so the per-packet DEBUG/INFO noise no longer shreds client UIs that render on stderr (e.g. the ``nz-workbench kb-bootstrap`` progress bar).

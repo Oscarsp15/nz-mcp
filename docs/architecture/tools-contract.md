@@ -322,13 +322,23 @@ Devuelve el DDL completo (`CREATE OR REPLACE PROCEDURE ...`).
 | `schema` | string (required) | |
 | `procedure` | string (required) | |
 | `signature` | string (optional) | Para overloads. |
+| `variant` | `"raw"` \| `"clean"` (default `"raw"`) | `raw` devuelve el source tal como vive en `_v_procedure` (comentarios incluidos). `clean` elimina comentarios de línea (`--`) y de bloque (`/* … */`) fuera de literales de cadena y de identificadores entrecomillados — optimiza tokens para razonamiento IA. Default `raw` preserva back-compat. |
 
 **Output**:
 ```json
 {
-  "ddl": "CREATE OR REPLACE PROCEDURE PUBLIC.SP_X(...) RETURNS INTEGER LANGUAGE NZPLSQL AS BEGIN_PROC ..."
+  "ddl": "CREATE OR REPLACE PROCEDURE PUBLIC.SP_X(...) ...",
+  "size_bytes": 3800,
+  "size_bytes_raw": 4200,
+  "size_bytes_clean": 3800,
+  "warning": null,
+  "duration_ms": 55
 }
 ```
+
+- `size_bytes` — byte length (UTF-8) del `ddl` devuelto (= `size_bytes_raw` si `variant="raw"`, = `size_bytes_clean` si `variant="clean"`).
+- `size_bytes_raw` y `size_bytes_clean` — siempre presentes en toda llamada, independientemente del `variant`; permiten al cliente decidir la variante antes de cargar el cuerpo completo.
+- `warning` — presente si `size_bytes` > ~100 KB; sugiere usar `nz_get_procedure_section`.
 
 Source: `_v_procedure.PROCEDURESOURCE` + `PROCEDURESIGNATURE`.
 

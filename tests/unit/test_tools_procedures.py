@@ -217,3 +217,100 @@ def test_nz_get_procedures_ddl_batch_warning_total(
         config_path=two_profiles,
     )
     assert out.warning == "Total DDL size exceeds ~1 MB."
+
+
+# ── variant field on nz_get_procedure_ddl ─────────────────────────────────────
+
+
+def test_nz_get_procedure_ddl_default_variant_is_raw(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """Default variant is 'raw' — back-compat: returned ddl must be the raw source."""
+    raw_source = "CREATE OR REPLACE PROCEDURE S.P() RETURNS INT LANGUAGE NZPLSQL AS -- comment\nBEGIN_PROC\n  x := 1; -- assign\nEND_PROC;"
+
+    def _fake_ddl(*_a: object, **_k: object) -> str:
+        return raw_source
+
+    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl", _fake_ddl)
+    out = nz_get_procedure_ddl(
+        GetProcedureDdlInput(database="D", procedure_schema="PUBLIC", procedure="P"),
+        config_path=two_profiles,
+    )
+    # default variant=raw → ddl contains comments
+    assert "-- comment" in out.ddl
+    assert "-- assign" in out.ddl
+    # both sizes always present
+    assert out.size_bytes_raw >= out.size_bytes_clean
+    assert out.size_bytes == out.size_bytes_raw
+
+
+def test_nz_get_procedure_ddl_variant_raw_explicit(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """Explicit variant='raw' behaves identically to the default."""
+    raw_source = "CREATE OR REPLACE PROCEDURE S.P() RETURNS INT LANGUAGE NZPLSQL AS -- comment\nBEGIN_PROC\n  x := 1;\nEND_PROC;"
+
+    def _fake_ddl(*_a: object, **_k: object) -> str:
+        return raw_source
+
+    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl", _fake_ddl)
+    out = nz_get_procedure_ddl(
+        GetProcedureDdlInput(database="D", procedure_schema="PUBLIC", procedure="P", variant="raw"),
+        config_path=two_profiles,
+    )
+    assert "-- comment" in out.ddl
+    assert out.size_bytes == out.size_bytes_raw
+
+
+def test_nz_get_procedure_ddl_variant_clean_strips_comments(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """variant='clean' returns DDL without -- or /* */ comments."""
+    raw_source = (
+        "/* header block */\n"
+        "CREATE OR REPLACE PROCEDURE S.P() RETURNS INT LANGUAGE NZPLSQL AS\n"
+        "BEGIN_PROC\n"
+        "  x := 1; -- assign x\n"
+        "  /* another block */ y := 2;\n"
+        "END_PROC;"
+    )
+
+    def _fake_ddl(*_a: object, **_k: object) -> str:
+        return raw_source
+
+    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl", _fake_ddl)
+    out = nz_get_procedure_ddl(
+        GetProcedureDdlInput(
+            database="D", procedure_schema="PUBLIC", procedure="P", variant="clean"
+        ),
+        config_path=two_profiles,
+    )
+    assert "--" not in out.ddl
+    assert "/*" not in out.ddl
+    assert "x := 1;" in out.ddl
+    assert "y := 2;" in out.ddl
+    # size_bytes reflects the clean variant
+    assert out.size_bytes == out.size_bytes_clean
+    assert out.size_bytes_raw > out.size_bytes_clean
+
+
+def test_nz_get_procedure_ddl_sizes_always_present(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """size_bytes_raw and size_bytes_clean must be present in every response."""
+    raw_source = "CREATE OR REPLACE PROCEDURE S.P() RETURNS INT LANGUAGE NZPLSQL AS\nBEGIN_PROC\n  NULL;\nEND_PROC;"
+
+    def _fake_ddl(*_a: object, **_k: object) -> str:
+        return raw_source
+
+    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl", _fake_ddl)
+    for variant in ("raw", "clean"):
+        out = nz_get_procedure_ddl(
+            GetProcedureDdlInput(
+                database="D", procedure_schema="PUBLIC", procedure="P", variant=variant  # type: ignore[arg-type]
+            ),
+            config_path=two_profiles,
+        )
+        assert out.size_bytes_raw >= 0
+        assert out.size_bytes_clean >= 0
+        assert out.size_bytes_raw >= out.size_bytes_clean
