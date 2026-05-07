@@ -9,6 +9,8 @@ Cada entrada se documenta en **español** y **english**.
 ## [Unreleased]
 
 ### Added
+- ES: tool `nz_get_procedure_size` — permite obtener las métricas de tamaño (líneas y bytes, en variantes `raw` y `clean`) y detectar secciones lógicas de un SP sin retornar su cuerpo completo, ideal para token budgeting previo (issue #106).
+- EN: `nz_get_procedure_size` tool — returns size metrics (lines and bytes, in `raw` and `clean` variants) and detects logical sections of an SP without fetching its full body, ideal for token budgeting before loading DDL (issue #106).
 - ES: `nz_get_procedure_ddl` — nuevo campo de input `variant` (`"raw"` | `"clean"`, default `"raw"`). `clean` elimina comentarios de línea (`--`) y de bloque (`/* … */`) fuera de literales de cadena e identificadores entrecomillados, reduciendo hasta un 30 % el consumo de tokens en razonamiento IA. Default `raw` preserva back-compat (issue #105).
 - EN: `nz_get_procedure_ddl` — new `variant` input field (`"raw"` | `"clean"`, default `"raw"`). `clean` strips line (`--`) and block (`/* … */`) comments outside string literals and quoted identifiers, cutting token cost by up to 30 % for AI reasoning. Default `raw` preserves back-compat (issue #105).
 - ES: `nz_get_procedure_ddl` — nuevos campos de output `size_bytes_raw` e `size_bytes_clean` (siempre presentes, independientemente del `variant`); permiten al cliente comparar tamaños antes de decidir qué variante cargar (issue #105).

@@ -13,6 +13,7 @@ from nz_mcp.catalog.procedures import (
     get_all_procedures_ddl,
     get_procedure_ddl,
     get_procedure_section,
+    get_procedure_size,
     list_procedures,
 )
 from nz_mcp.config import get_active_profile
@@ -126,6 +127,30 @@ class GetProcedureDdlOutput(BaseModel):
         description="Set when the returned DDL exceeds ~100 KB; prefer nz_get_procedure_section.",
     )
     duration_ms: int = Field(ge=0, description="Wall time to build DDL (milliseconds.)")
+
+
+class GetProcedureSizeInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    database: str = Field(min_length=1, max_length=128)
+    procedure_schema: str = Field(
+        alias="schema",
+        min_length=1,
+        max_length=128,
+    )
+    procedure: str = Field(min_length=1, max_length=128)
+    signature: str | None = Field(default=None, max_length=2048)
+
+
+class GetProcedureSizeOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    signature: str
+    size_bytes_raw: int = Field(ge=0)
+    size_bytes_clean: int = Field(ge=0)
+    lines_raw: int = Field(ge=0)
+    lines_clean: int = Field(ge=0)
+    sections_detected: list[str]
+    duration_ms: int = Field(ge=0, description="Wall time to calculate size (milliseconds).")
 
 
 class GetProcedureSectionInput(BaseModel):
@@ -306,6 +331,44 @@ def nz_get_procedure_ddl(
         size_bytes_raw=size_bytes_raw,
         size_bytes_clean=size_bytes_clean,
         warning=warn,
+        duration_ms=monotonic_duration_ms(start),
+    )
+
+
+@tool(
+    name="nz_get_procedure_size",
+    description=(
+        "Return the byte size, line counts (raw and clean variants), and detected sections "
+        "of a procedure without fetching its full body text. Use this for token budgeting "
+        "before deciding whether to fetch the full procedure or fetch it by section."
+    ),
+    mode="read",
+    input_model=GetProcedureSizeInput,
+    output_model=GetProcedureSizeOutput,
+    annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
+)
+def nz_get_procedure_size(
+    params: GetProcedureSizeInput,
+    *,
+    config_path: Path | None = None,
+) -> GetProcedureSizeOutput:
+    start = monotonic_start()
+    profile = get_active_profile(path=config_path)
+    result = get_procedure_size(
+        profile,
+        database=params.database,
+        schema=params.procedure_schema,
+        procedure=params.procedure,
+        signature=params.signature,
+    )
+    return GetProcedureSizeOutput(
+        name=result["name"],
+        signature=result["signature"],
+        size_bytes_raw=result["size_bytes_raw"],
+        size_bytes_clean=result["size_bytes_clean"],
+        lines_raw=result["lines_raw"],
+        lines_clean=result["lines_clean"],
+        sections_detected=result["sections_detected"],
         duration_ms=monotonic_duration_ms(start),
     )
 

@@ -13,6 +13,7 @@ from nz_mcp.catalog.nzplsql_parser import (
     header_content,
     line_slice,
     parse_sections,
+    strip_comments,
 )
 from nz_mcp.catalog.resolver import resolve_query
 from nz_mcp.catalog.row_shape import is_sequence_row
@@ -149,6 +150,42 @@ def get_procedure_ddl(
     rows = _fetch_procedure_rows(profile, database, schema, procedure)
     row = _pick_procedure_row(rows, signature, procedure)
     return _build_procedure_ddl(schema, row)
+
+
+def get_procedure_size(
+    profile: Profile,
+    database: str,
+    schema: str,
+    procedure: str,
+    signature: str | None = None,
+) -> dict[str, Any]:
+    """Return procedure size and line metrics without returning the DDL body."""
+    rows = _fetch_procedure_rows(profile, database, schema, procedure)
+    row = _pick_procedure_row(rows, signature, procedure)
+
+    raw_ddl = _build_procedure_ddl(schema, row)
+    clean_ddl = strip_comments(raw_ddl)
+
+    source = _ddl_get(row, "PROCEDURESOURCE")
+    sections = parse_sections(source)
+
+    detected: list[str] = []
+    for key in ("header", "declare", "body", "exception"):
+        if key in sections:
+            detected.append(key)
+
+    name = _ddl_get(row, "PROCEDURE").strip()
+    sig = _ddl_get(row, "PROCEDURESIGNATURE").strip()
+
+    return {
+        "name": name,
+        "signature": sig,
+        "size_bytes_raw": len(raw_ddl.encode("utf-8")),
+        "size_bytes_clean": len(clean_ddl.encode("utf-8")),
+        "lines_raw": 0 if not raw_ddl else len(raw_ddl.splitlines()),
+        "lines_clean": 0 if not clean_ddl else len(clean_ddl.splitlines()),
+        "sections_detected": detected,
+    }
 
 
 def get_procedure_section(
