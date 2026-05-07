@@ -42,6 +42,8 @@ def test_input_accepts_schema_alias_and_defaults_kinds() -> None:
 def test_input_rejects_unknown_kind() -> None:
     import pydantic
 
+    # ``"update"`` is now a valid kind after issue #120 — use a clearly
+    # unsupported label to assert the schema still rejects unknown values.
     with pytest.raises(pydantic.ValidationError):
         GetProcedureTableLogicInput.model_validate(
             {
@@ -49,9 +51,23 @@ def test_input_rejects_unknown_kind() -> None:
                 "schema": "PUBLIC",
                 "procedure": "SP",
                 "table": "FOO",
-                "kinds": ["update"],
+                "kinds": ["upsert"],
             }
         )
+
+
+def test_input_accepts_extended_kinds() -> None:
+    """All five new UI kinds added in issue #120 must validate cleanly."""
+    inp = GetProcedureTableLogicInput.model_validate(
+        {
+            "database": "D",
+            "schema": "PUBLIC",
+            "procedure": "SP",
+            "table": "FOO",
+            "kinds": ["drop", "truncate", "update", "delete", "merge"],
+        }
+    )
+    assert inp.kinds == ["drop", "truncate", "update", "delete", "merge"]
 
 
 def test_simple_create_temp_table_returns_one_statement(
@@ -313,3 +329,116 @@ def test_string_literal_with_insert_inside_block_does_not_false_positive(
     )
     assert out.count == 0
     assert out.not_found is True
+
+
+# ── extended kinds: drop / truncate / update / delete / merge (issue #120) ──
+
+
+def test_drop_create_insert_same_target_returns_three(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """A SP that DROPs, CREATEs and INSERTs into the same table returns all three."""
+    src = "DROP TABLE IF EXISTS foo;\nCREATE TABLE foo AS SELECT 1;\nINSERT INTO foo SELECT 2;\n"
+    _patch_fetch(monkeypatch, src)
+
+    out = nz_get_procedure_table_logic(
+        GetProcedureTableLogicInput(
+            database="D",
+            procedure_schema="PUBLIC",
+            procedure="SP",
+            table="foo",
+            kinds=["drop", "create", "insert"],
+        ),
+        config_path=two_profiles,
+    )
+    assert out.count == 3
+    assert [s.kind for s in out.statements] == ["DROP TABLE", "CREATE TABLE", "INSERT INTO"]
+
+
+def test_default_kinds_excludes_drop(monkeypatch: pytest.MonkeyPatch, two_profiles: Path) -> None:
+    """The back-compat default still excludes DROP (issue #120 keeps it opt-in)."""
+    src = "DROP TABLE IF EXISTS foo;\nCREATE TABLE foo AS SELECT 1;\n"
+    _patch_fetch(monkeypatch, src)
+
+    out = nz_get_procedure_table_logic(
+        GetProcedureTableLogicInput(
+            database="D", procedure_schema="PUBLIC", procedure="SP", table="foo"
+        ),
+        config_path=two_profiles,
+    )
+    assert out.count == 1
+    assert out.statements[0].kind == "CREATE TABLE"
+
+
+def test_update_kind_is_returned(monkeypatch: pytest.MonkeyPatch, two_profiles: Path) -> None:
+    src = "UPDATE foo SET x = 1 WHERE y = 2;\n"
+    _patch_fetch(monkeypatch, src)
+
+    out = nz_get_procedure_table_logic(
+        GetProcedureTableLogicInput(
+            database="D",
+            procedure_schema="PUBLIC",
+            procedure="SP",
+            table="foo",
+            kinds=["update"],
+        ),
+        config_path=two_profiles,
+    )
+    assert out.count == 1
+    assert out.statements[0].kind == "UPDATE"
+
+
+def test_delete_then_insert_same_target(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    src = "DELETE FROM foo;\nINSERT INTO foo SELECT 1;\n"
+    _patch_fetch(monkeypatch, src)
+
+    out = nz_get_procedure_table_logic(
+        GetProcedureTableLogicInput(
+            database="D",
+            procedure_schema="PUBLIC",
+            procedure="SP",
+            table="foo",
+            kinds=["delete", "insert"],
+        ),
+        config_path=two_profiles,
+    )
+    assert out.count == 2
+    assert [s.kind for s in out.statements] == ["DELETE FROM", "INSERT INTO"]
+
+
+def test_truncate_kind_is_returned(monkeypatch: pytest.MonkeyPatch, two_profiles: Path) -> None:
+    src = "TRUNCATE TABLE foo;\n"
+    _patch_fetch(monkeypatch, src)
+
+    out = nz_get_procedure_table_logic(
+        GetProcedureTableLogicInput(
+            database="D",
+            procedure_schema="PUBLIC",
+            procedure="SP",
+            table="foo",
+            kinds=["truncate"],
+        ),
+        config_path=two_profiles,
+    )
+    assert out.count == 1
+    assert out.statements[0].kind == "TRUNCATE TABLE"
+
+
+def test_merge_kind_is_returned(monkeypatch: pytest.MonkeyPatch, two_profiles: Path) -> None:
+    src = "MERGE INTO foo USING bar ON 1;\n"
+    _patch_fetch(monkeypatch, src)
+
+    out = nz_get_procedure_table_logic(
+        GetProcedureTableLogicInput(
+            database="D",
+            procedure_schema="PUBLIC",
+            procedure="SP",
+            table="foo",
+            kinds=["merge"],
+        ),
+        config_path=two_profiles,
+    )
+    assert out.count == 1
+    assert out.statements[0].kind == "MERGE INTO"

@@ -463,11 +463,22 @@ def nz_get_procedures_ddl_batch(
 # ── nz_get_procedure_table_logic (issue #109) ────────────────────────────────
 
 
-_TableLogicKind = Literal["create", "insert"]
+_TableLogicKind = Literal[
+    "create",
+    "insert",
+    "drop",
+    "truncate",
+    "update",
+    "delete",
+    "merge",
+]
 
 
 def _default_kinds() -> list[_TableLogicKind]:
     """Default for ``GetProcedureTableLogicInput.kinds`` (typed for mypy strict)."""
+    # Keeping the default at ``["create", "insert"]`` preserves back-compat
+    # for existing callers; the five new verbs (drop/truncate/update/delete/
+    # merge) are opt-in via an explicit ``kinds`` request (issue #120).
     return ["create", "insert"]
 
 
@@ -497,7 +508,16 @@ class GetProcedureTableLogicInput(BaseModel):
 
 class StatementItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["CREATE TABLE", "CREATE TEMP TABLE", "INSERT INTO"]
+    kind: Literal[
+        "CREATE TABLE",
+        "CREATE TEMP TABLE",
+        "INSERT INTO",
+        "DROP TABLE",
+        "TRUNCATE TABLE",
+        "UPDATE",
+        "DELETE FROM",
+        "MERGE INTO",
+    ]
     sql: str
     line_start: int = Field(ge=1)
     line_end: int = Field(ge=1)
@@ -519,6 +539,11 @@ class GetProcedureTableLogicOutput(BaseModel):
 _KINDS_MAP: dict[_TableLogicKind, tuple[StatementKind, ...]] = {
     "create": ("CREATE TABLE", "CREATE TEMP TABLE"),
     "insert": ("INSERT INTO",),
+    "drop": ("DROP TABLE",),
+    "truncate": ("TRUNCATE TABLE",),
+    "update": ("UPDATE",),
+    "delete": ("DELETE FROM",),
+    "merge": ("MERGE INTO",),
 }
 
 

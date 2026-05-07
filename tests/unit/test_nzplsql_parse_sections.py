@@ -148,3 +148,76 @@ def test_empty_multiline_string() -> None:
     src = "DECLARE x INT;\nBEGIN\n  v := '\n\n\n';\n  NULL;\nEND;"
     sec = parse_sections(src)
     assert "body" in sec
+
+
+# ── line-alignment with CR inside literals (issue #119) ──────────────────────
+
+
+def test_carriage_return_inside_literal_preserves_section_detection() -> None:
+    """A bare CR inside a literal must not shift the masked-line index.
+
+    Before issue #119's fix, ``mask_single_quoted_strings`` blanked the CR
+    along with every other in-literal byte; ``str.splitlines`` then yielded
+    fewer lines for the masked source than for the raw source. The downstream
+    bound checks acted on the shorter universe and ``parse_sections`` could
+    miss the outer ``END;``, returning ``{}`` for procedures whose body was
+    perfectly well formed.
+    """
+    src = "DECLARE x INT;\nBEGIN\n  v := 'abc\rxyz';\n  NULL;\nEND;"
+    sec = parse_sections(src)
+    assert "declare" in sec
+    assert "body" in sec
+    # The outer END; sits on the last raw line; ``body`` must close just
+    # before it.
+    assert sec["body"][1] == len(src.splitlines()) - 1
+
+
+def test_apostrophe_inside_line_comment_does_not_open_phantom_literal() -> None:
+    """An apostrophe inside a ``--`` comment must not poison subsequent lines.
+
+    Without comment-aware masking, the ``'`` inside ``-- (10.Feb'`` would open
+    a fake literal that stayed open until the next real ``'`` many lines
+    below, blanking the outer ``END;`` and causing ``sections_detected`` to
+    come back empty for real procedures (issue #119 second half).
+    """
+    src = (
+        "DECLARE x INT;\n"
+        "BEGIN\n"
+        "  -- WCA$5 nueva regla parche de modelo (10.Feb'\n"
+        "  v := 'plain literal';\n"
+        "  NULL;\n"
+        "END;"
+    )
+    sec = parse_sections(src)
+    assert "body" in sec
+
+
+def test_apostrophe_inside_block_comment_does_not_open_phantom_literal() -> None:
+    """Same as above for ``/* … */`` block comments."""
+    src = (
+        "DECLARE x INT;\n"
+        "BEGIN\n"
+        "  /* it's a comment\n"
+        "     spanning\n"
+        "     multiple lines */\n"
+        "  NULL;\n"
+        "END;"
+    )
+    sec = parse_sections(src)
+    assert "body" in sec
+    # Body must run from BEGIN+1 to END-1 inclusive.
+    assert sec["body"][0] == 3
+    assert sec["body"][1] == 6
+
+
+def test_many_crs_inside_literal_keep_outer_end_visible() -> None:
+    """Stress test: a literal with many bare CRs across the body.
+
+    ``mask_literals_preserving_lines`` must keep every CR untouched so the
+    masked source splits into the same number of lines as the raw source.
+    """
+    crs = "x\r" * 20
+    src = f"DECLARE x INT;\nBEGIN\n  v := '{crs}';\n  NULL;\nEND;"
+    sec = parse_sections(src)
+    assert "declare" in sec
+    assert "body" in sec

@@ -122,11 +122,60 @@ def test_classify_insert_qualified() -> None:
 
 
 def test_classify_unsupported_statement_returns_none() -> None:
-    assert classify_target_statement("MERGE INTO foo USING bar ON x;") is None
-    assert classify_target_statement("UPDATE foo SET x = 1;") is None
-    assert classify_target_statement("DELETE FROM foo;") is None
-    assert classify_target_statement("TRUNCATE TABLE foo;") is None
+    # SELECT and other read-only verbs remain unsupported; MERGE/UPDATE/
+    # DELETE/TRUNCATE/DROP are now first-class kinds (issue #120) and are
+    # asserted independently below.
     assert classify_target_statement("SELECT * FROM foo;") is None
+    assert classify_target_statement("BEGIN\nNULL;\nEND;") is None
+
+
+def test_classify_merge_into_target() -> None:
+    assert classify_target_statement("MERGE INTO foo USING bar ON x;") == ("MERGE INTO", "foo")
+
+
+def test_classify_update_target() -> None:
+    assert classify_target_statement("UPDATE foo SET x = 1;") == ("UPDATE", "foo")
+
+
+def test_classify_update_qualified_target() -> None:
+    assert classify_target_statement("UPDATE schema.foo SET x = 1;") == ("UPDATE", "foo")
+
+
+def test_classify_delete_from_target() -> None:
+    assert classify_target_statement("DELETE FROM foo;") == ("DELETE FROM", "foo")
+
+
+def test_classify_delete_from_qualified_target() -> None:
+    assert classify_target_statement("DELETE FROM bd..foo;") == ("DELETE FROM", "foo")
+
+
+def test_classify_truncate_table_target() -> None:
+    assert classify_target_statement("TRUNCATE TABLE foo;") == ("TRUNCATE TABLE", "foo")
+
+
+def test_classify_drop_table_target() -> None:
+    assert classify_target_statement("DROP TABLE foo;") == ("DROP TABLE", "foo")
+
+
+def test_classify_drop_table_if_exists_target() -> None:
+    assert classify_target_statement("DROP TABLE IF EXISTS foo;") == ("DROP TABLE", "foo")
+
+
+def test_classify_drop_table_qualified_target() -> None:
+    assert classify_target_statement("DROP TABLE schema.foo;") == ("DROP TABLE", "foo")
+
+
+def test_classify_drop_table_case_insensitive() -> None:
+    assert classify_target_statement("drop table if exists Foo;") == ("DROP TABLE", "Foo")
+
+
+def test_classify_word_boundary_blocks_xupdate() -> None:
+    """``XUPDATE`` is not a verb — must not match ``UPDATE``."""
+    assert classify_target_statement("BEGIN\nXUPDATE foo SET x = 1;") is None
+
+
+def test_classify_word_boundary_blocks_xdelete() -> None:
+    assert classify_target_statement("BEGIN\nXDELETE FROM foo;") is None
 
 
 # ── classify_target_statement: block-control prefix tolerance (issue #114) ───
@@ -158,13 +207,14 @@ def test_classify_insert_after_if_then_prefix() -> None:
 
 
 def test_classify_first_match_wins_when_chunk_has_delete_and_insert() -> None:
-    """When several verbs coexist, the first CREATE/INSERT in source order wins.
+    """When several supported verbs coexist, the earliest in source order wins.
 
-    DELETE is out of scope so it is ignored; the INSERT is the only one we
-    classify, regardless of the DELETE that precedes it in the chunk.
+    DELETE FROM is now a first-class supported verb (issue #120), so when it
+    appears before the INSERT in the same chunk it is the winner. This test
+    pins down the new tiebreak semantics.
     """
     src = "IF cond THEN\nDELETE FROM foo;\nINSERT INTO foo SELECT 1;\nEND IF;"
-    assert classify_target_statement(src) == ("INSERT INTO", "foo")
+    assert classify_target_statement(src) == ("DELETE FROM", "foo")
 
 
 def test_classify_first_match_wins_create_before_insert() -> None:
