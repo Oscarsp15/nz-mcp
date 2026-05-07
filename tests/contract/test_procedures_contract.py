@@ -33,6 +33,14 @@ def test_input_variant_defaults_to_raw() -> None:
 
 
 @pytest.mark.contract
+def test_input_model_dump_default_variant() -> None:
+    """Ensure Pydantic .model_dump() serializes the default variant appropriately."""
+    inp = GetProcedureDdlInput(database="D", procedure_schema="PUBLIC", procedure="SP")
+    dumped = inp.model_dump()
+    assert dumped["variant"] == "raw"
+
+
+@pytest.mark.contract
 def test_input_rejects_unknown_variant() -> None:
     import pydantic
 
