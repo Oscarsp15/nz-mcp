@@ -28,7 +28,7 @@ Crear una tool nueva `nz_find_table_references` (modo `read`, responsabilidad ú
 ### Heurística read vs write
 
 - **read**: tabla precedida por `FROM`, `JOIN` (con variantes `LEFT`/`RIGHT`/`INNER`/`FULL`/`CROSS` y opcional `OUTER`), o `USING (`.
-- **write**: tabla precedida por `INSERT INTO`, `UPDATE`, `DELETE FROM`, `MERGE INTO`, `TRUNCATE TABLE`, `DROP TABLE` (opcional `IF EXISTS`), o `INTO` (cubre `CREATE TABLE … AS SELECT … INTO <table>` y `SELECT … INTO <table>`).
+- **write**: tabla precedida por `INSERT INTO`, `UPDATE`, `DELETE FROM`, `MERGE INTO`, `TRUNCATE TABLE`, `DROP TABLE` (opcional `IF EXISTS`), `CREATE [TEMP|TEMPORARY] TABLE` (opcional `IF NOT EXISTS`) — la forma CTAS estándar —, o `INTO` (cubre `SELECT … INTO <table>`).
 - Match case-insensitive sobre el nombre, con respeto de límites de token (`Foo` no engancha `FooBar`).
 - Acepta tres formas: `tabla`, `schema.tabla`, `bd.schema.tabla`, además de la sintaxis Netezza `bd..tabla` (segmento medio vacío).
 - Si `table_database` o `table_schema` se proveen, solo cuentan referencias cuyo qualifier coincida — un qualifier ausente en la fuente se interpreta como "schema actual" y se acepta.

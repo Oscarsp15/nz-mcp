@@ -122,6 +122,43 @@ def test_write_only_sp_classified_as_write(
     assert out.references[0].occurrences_write == 1
 
 
+def test_ctas_only_sp_classified_as_write(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """SP that only creates a table via standard CTAS (no INSERT INTO) must appear as write."""
+    src = "BEGIN_PROC\nCREATE TEMP TABLE foo AS SELECT 1 FROM bar;\nEND_PROC;"
+    procs = [_proc("SP_CTAS", src)]
+    _patch_get_all(monkeypatch, procs)
+
+    out = nz_find_table_references(
+        GetFindTableReferencesInput(database="D", procedure_schema="PUBLIC", table="foo"),
+        config_path=two_profiles,
+    )
+    assert out.match_count == 1
+    assert out.references[0].procedure_name == "SP_CTAS"
+    assert out.references[0].usage == "write"
+    assert out.references[0].occurrences_write == 1
+    assert out.references[0].occurrences_read == 0
+
+
+def test_ctas_produces_both_read_and_write(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """CTAS writes the target and reads the source; searching for the source yields read."""
+    src = "BEGIN_PROC\nCREATE TABLE foo AS SELECT col FROM bar;\nEND_PROC;"
+    procs = [_proc("SP_CTAS_RW", src)]
+    _patch_get_all(monkeypatch, procs)
+
+    # bar is read by the CTAS
+    out = nz_find_table_references(
+        GetFindTableReferencesInput(database="D", procedure_schema="PUBLIC", table="bar"),
+        config_path=two_profiles,
+    )
+    assert out.match_count == 1
+    assert out.references[0].usage == "read"
+    assert out.references[0].occurrences_read == 1
+
+
 def test_both_when_sp_reads_and_writes(monkeypatch: pytest.MonkeyPatch, two_profiles: Path) -> None:
     src = "BEGIN_PROC\nINSERT INTO foo SELECT 1;\nSELECT * FROM foo;\nEND_PROC;"
     procs = [_proc("SP_BOTH", src)]

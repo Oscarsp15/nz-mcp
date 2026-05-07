@@ -477,7 +477,7 @@ Análisis **inverso** de impacto: dado `(database, schema, table)`, devuelve los
 
 - `usage` ∈ `"read"` | `"write"` | `"both"`. `both` cuando el mismo SP tiene ambas operaciones contra la tabla.
 - **Detección read**: `FROM <tabla>`, `JOIN <tabla>` (incluye `LEFT`/`RIGHT`/`INNER`/`FULL`/`CROSS` y opcional `OUTER`), `USING (<tabla>)`.
-- **Detección write**: `INSERT INTO <tabla>`, `UPDATE <tabla>`, `DELETE FROM <tabla>`, `MERGE INTO <tabla>`, `TRUNCATE TABLE <tabla>`, `DROP TABLE [IF EXISTS] <tabla>`, y `... INTO <tabla>` (cubre CTAS / `SELECT INTO`).
+- **Detección write**: `INSERT INTO <tabla>`, `UPDATE <tabla>`, `DELETE FROM <tabla>`, `MERGE INTO <tabla>`, `TRUNCATE TABLE <tabla>`, `DROP TABLE [IF EXISTS] <tabla>`, `CREATE [TEMP|TEMPORARY] TABLE [IF NOT EXISTS] <tabla>` (CTAS estándar), y `... INTO <tabla>` (cubre `SELECT INTO`).
 - Match case-insensitive sobre el nombre, con respeto de límites de token (`Foo` no engancha `FooBar`). Acepta `tabla`, `schema.tabla`, `bd.schema.tabla` y la sintaxis Netezza `bd..tabla`.
 - Comentarios (`--`, `/* */`) y literales `'…'` se filtran antes del scan.
 - **Caps**:

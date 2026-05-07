@@ -673,6 +673,7 @@ _WRITE_PREFIX: Final[re.Pattern[str]] = re.compile(
       | MERGE\s+INTO
       | TRUNCATE\s+TABLE
       | DROP\s+TABLE(?:\s+IF\s+EXISTS)?
+      | CREATE\s+(?:(?:TEMP|TEMPORARY)\s+)?TABLE(?:\s+IF\s+NOT\s+EXISTS)?
       | INTO
     )
     \s+
@@ -791,8 +792,9 @@ def iter_table_references_in_statement(
       ``INNER``/``FULL``/``CROSS`` and ``OUTER``) / ``USING (``.
     * **write** — table follows the leading verb of one of: ``INSERT INTO``,
       ``UPDATE``, ``DELETE FROM``, ``MERGE INTO``, ``TRUNCATE TABLE``,
-      ``DROP TABLE [IF EXISTS]``, or the trailing ``... INTO <table>`` form
-      (CTAS / SELECT INTO).
+      ``DROP TABLE [IF EXISTS]``,
+      ``CREATE [TEMP|TEMPORARY] TABLE [IF NOT EXISTS]``, or the trailing
+      ``... INTO <table>`` form (CTAS / SELECT INTO).
     * Token boundaries are respected — ``Foo`` does not match ``FooBar`` /
       ``BarFoo``.
     * ``table_database`` / ``table_schema`` filter qualifiers; missing

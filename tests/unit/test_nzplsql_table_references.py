@@ -102,6 +102,59 @@ def test_write_select_into_ctas_form() -> None:
     assert kinds == ["write"]
 
 
+# ── CTAS standard form (CREATE [TEMP] TABLE … AS SELECT) ────────────────────
+
+
+def test_write_create_temp_table_as_select() -> None:
+    kinds = list(iter_table_references_in_statement("CREATE TEMP TABLE foo AS SELECT 1;", "foo"))
+    assert kinds == ["write"]
+
+
+def test_write_create_table_as_select_with_read() -> None:
+    """CTAS writes the target and reads the source table."""
+    kinds = list(
+        iter_table_references_in_statement("CREATE TABLE foo AS SELECT 1 FROM bar;", "foo")
+    )
+    assert kinds == ["write"]
+    kinds = list(
+        iter_table_references_in_statement("CREATE TABLE foo AS SELECT 1 FROM bar;", "bar")
+    )
+    assert kinds == ["read"]
+
+
+def test_write_create_table_if_not_exists() -> None:
+    kinds = list(
+        iter_table_references_in_statement("CREATE TABLE IF NOT EXISTS foo AS SELECT 1;", "foo")
+    )
+    assert kinds == ["write"]
+
+
+def test_write_create_temporary_table() -> None:
+    """``TEMPORARY`` is the long form of ``TEMP``."""
+    kinds = list(
+        iter_table_references_in_statement("CREATE TEMPORARY TABLE foo AS SELECT 1;", "foo")
+    )
+    assert kinds == ["write"]
+
+
+def test_write_create_temp_table_qualified() -> None:
+    kinds = list(
+        iter_table_references_in_statement("CREATE TEMP TABLE schema1.foo AS SELECT 1;", "foo")
+    )
+    assert kinds == ["write"]
+
+
+def test_ctas_token_boundary_no_match() -> None:
+    """``CREATE TABLE FooBar`` must not match when searching for ``foo``."""
+    kinds = list(iter_table_references_in_statement("CREATE TABLE FooBar AS SELECT 1;", "foo"))
+    assert kinds == []
+
+
+def test_ctas_case_insensitive() -> None:
+    kinds = list(iter_table_references_in_statement("create temp table FOO as select 1;", "foo"))
+    assert kinds == ["write"]
+
+
 # ── token boundaries ─────────────────────────────────────────────────────────
 
 
@@ -192,11 +245,9 @@ def test_count_table_references_read_and_write() -> None:
     )
     reads, writes = count_table_references(src, "foo")
     assert reads == 2
-    # Two writes: CREATE TEMP TABLE foo AS… is *not* matched by the read/write
-    # heuristic (no leading INSERT/UPDATE/etc.), but the explicit INSERT INTO
-    # is. SELECT INTO is the only CTAS variant we count as write — and the
-    # source above does not include one.
-    assert writes == 1
+    # Two writes: CREATE TEMP TABLE foo AS… (CTAS standard form) and the
+    # explicit INSERT INTO.
+    assert writes == 2
 
 
 def test_count_table_references_comments_ignored() -> None:
