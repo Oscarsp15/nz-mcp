@@ -70,7 +70,7 @@ def parse_sections(source: str) -> dict[str, tuple[int, int]]:
     if begin_proc_line is not None:
         return _parse_sections_begin_proc_markers(masked_lines, lines, n, begin_proc_line)
 
-    return _parse_sections_plain_nzplsql(masked_lines, n)
+    return _parse_sections_plain_nzplsql(masked_lines)
 
 
 def _parse_sections_begin_proc_markers(
@@ -131,17 +131,16 @@ def _parse_sections_begin_proc_markers(
 
 def _parse_sections_plain_nzplsql(
     masked_lines: list[str],
-    n: int,
 ) -> dict[str, tuple[int, int]]:
     declare_line = _first_line_matching(masked_lines, _DECLARE)
     start_search = 1 if declare_line is None else declare_line + 1
-    main_begin_line = _first_plain_begin(masked_lines, start_search, n)
+    main_begin_line = _first_plain_begin(masked_lines, start_search)
     if main_begin_line is None:
         return {}
 
     exception_line = _first_line_matching_after(masked_lines, _EXCEPTION, main_begin_line + 1)
 
-    closing_end_line = _find_plain_outer_end(masked_lines, main_begin_line, n)
+    closing_end_line = _find_plain_outer_end(masked_lines, main_begin_line)
     if closing_end_line is None:
         return {}
 
@@ -169,8 +168,10 @@ def _parse_sections_plain_nzplsql(
     return sections
 
 
-def _first_plain_begin(masked_lines: list[str], start_line: int, n: int) -> int | None:
-    for i in range(start_line, n + 1):
+def _first_plain_begin(masked_lines: list[str], start_line: int) -> int | None:
+    # Use len(masked_lines) as the bound — *not* the source line count, which
+    # can be larger when multi-line string literals are collapsed by masking.
+    for i in range(start_line, len(masked_lines) + 1):
         line = masked_lines[i - 1]
         if _BEGIN_PROC.search(line):
             continue
@@ -179,11 +180,18 @@ def _first_plain_begin(masked_lines: list[str], start_line: int, n: int) -> int 
     return None
 
 
-def _find_plain_outer_end(masked_lines: list[str], main_begin_line: int, n: int) -> int | None:
-    """Find the ``END;`` that closes the outer ``BEGIN`` at ``main_begin_line``."""
+def _find_plain_outer_end(masked_lines: list[str], main_begin_line: int) -> int | None:
+    """Find the ``END;`` that closes the outer ``BEGIN`` at ``main_begin_line``.
+
+    Uses ``len(masked_lines)`` as the loop bound instead of the source line
+    count.  ``mask_single_quoted_strings`` replaces newlines inside string
+    literals with spaces, so ``masked.splitlines()`` can be shorter than
+    ``source.splitlines()``.  Using the source count caused ``IndexError``
+    for procedures containing multi-line string literals (see issue #113).
+    """
     depth = 1
     i = main_begin_line + 1
-    while i <= n:
+    while i <= len(masked_lines):
         ml = masked_lines[i - 1]
         if _line_is_nested_end_keyword(ml):
             i += 1
