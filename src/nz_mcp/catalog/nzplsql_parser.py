@@ -520,9 +520,17 @@ _QUALIFIED_NAME: Final[str] = (
     rf"{_TABLE_NAME_TOKEN}"
 )
 
+# NOTE: these patterns are intentionally **not anchored** with ``\A``. A
+# statement chunk produced by :func:`iter_statements` may start with leading
+# block-control tokens accumulated since the previous ``;`` boundary —
+# ``BEGIN``, ``IF … THEN``, ``ELSE``, ``ELSIF``, ``EXCEPTION``, ``FOR …
+# LOOP``, ``WHILE … LOOP``, etc. We search-anywhere with a word-boundary
+# lookbehind so the verb is detected regardless of those prefixes, while
+# string literals in the chunk are masked by the caller before searching to
+# prevent false positives like ``'INSERT INTO foo'``.
 _RE_CREATE_TABLE: Final[re.Pattern[str]] = re.compile(
     rf"""
-    \A\s*
+    (?<![A-Za-z0-9_])
     CREATE\s+
     (?P<temp>(?:TEMP|TEMPORARY)\s+)?
     TABLE\s+
@@ -535,7 +543,7 @@ _RE_CREATE_TABLE: Final[re.Pattern[str]] = re.compile(
 
 _RE_INSERT_INTO: Final[re.Pattern[str]] = re.compile(
     rf"""
-    \A\s*
+    (?<![A-Za-z0-9_])
     INSERT\s+INTO\s+
     (?P<name>{_QUALIFIED_NAME})
     \b
@@ -552,21 +560,36 @@ def _last_segment_of_qualified(name: str) -> str:
 
 
 def classify_target_statement(stmt_sql: str) -> tuple[StatementKind, str] | None:
-    """If ``stmt_sql`` is a CREATE [TEMP] TABLE or INSERT INTO, return ``(kind, target)``.
+    """If ``stmt_sql`` contains a CREATE [TEMP] TABLE or INSERT INTO, return ``(kind, target)``.
 
     ``target`` is the last segment of the qualified name (table name as written,
     without surrounding quotes — case preserved). The input must already have
     comments stripped. Returns ``None`` for any other statement kind, including
     out-of-scope verbs (MERGE, UPDATE, DELETE, TRUNCATE).
-    """
-    m = _RE_CREATE_TABLE.match(stmt_sql)
-    if m is not None:
-        kind: StatementKind = "CREATE TEMP TABLE" if m.group("temp") else "CREATE TABLE"
-        return kind, _last_segment_of_qualified(m.group("name"))
 
-    m = _RE_INSERT_INTO.match(stmt_sql)
-    if m is not None:
-        return "INSERT INTO", _last_segment_of_qualified(m.group("name"))
+    The verb is searched anywhere in the chunk, not only at the start, so that
+    statements yielded by :func:`iter_statements` whose prefix is a leading
+    block-control token (``BEGIN``, ``IF … THEN``, ``ELSE``, ``EXCEPTION``,
+    ``FOR … LOOP``, ``WHILE``, etc.) are still classified correctly. Single-
+    quoted string literals are masked before scanning so verbs that appear
+    only inside a literal (``'INSERT INTO foo'``) do not produce a match.
+    When several CREATE/INSERT verbs are present in the same chunk, the one
+    occurring **first** in source order wins, mirroring the previous
+    semantics for chunks that already started at the verb.
+    """
+    masked = mask_single_quoted_strings(stmt_sql)
+
+    create_match = _RE_CREATE_TABLE.search(masked)
+    insert_match = _RE_INSERT_INTO.search(masked)
+
+    if create_match is not None and (
+        insert_match is None or create_match.start() <= insert_match.start()
+    ):
+        kind: StatementKind = "CREATE TEMP TABLE" if create_match.group("temp") else "CREATE TABLE"
+        return kind, _last_segment_of_qualified(create_match.group("name"))
+
+    if insert_match is not None:
+        return "INSERT INTO", _last_segment_of_qualified(insert_match.group("name"))
 
     return None
 
@@ -671,6 +694,9 @@ _DELETE_FROM_PREFIX: Final[re.Pattern[str]] = re.compile(
 
 # Write verbs we recognize. Each pattern matches the verb head; the table
 # reference that follows is captured by ``_parse_qualified_ref`` separately.
+# ``CREATE [TEMP|TEMPORARY] TABLE [IF NOT EXISTS]`` covers the standard CTAS
+# form (``CREATE TABLE foo AS SELECT …``) which lacks the ``INTO`` keyword;
+# it would otherwise slip past the ``INTO`` alternative below.
 _WRITE_PREFIX: Final[re.Pattern[str]] = re.compile(
     r"""
     (?<![A-Za-z0-9_])
@@ -681,6 +707,7 @@ _WRITE_PREFIX: Final[re.Pattern[str]] = re.compile(
       | MERGE\s+INTO
       | TRUNCATE\s+TABLE
       | DROP\s+TABLE(?:\s+IF\s+EXISTS)?
+      | CREATE\s+(?:(?:TEMP|TEMPORARY)\s+)?TABLE(?:\s+IF\s+NOT\s+EXISTS)?
       | INTO
     )
     \s+
@@ -799,8 +826,9 @@ def iter_table_references_in_statement(
       ``INNER``/``FULL``/``CROSS`` and ``OUTER``) / ``USING (``.
     * **write** — table follows the leading verb of one of: ``INSERT INTO``,
       ``UPDATE``, ``DELETE FROM``, ``MERGE INTO``, ``TRUNCATE TABLE``,
-      ``DROP TABLE [IF EXISTS]``, or the trailing ``... INTO <table>`` form
-      (CTAS / SELECT INTO).
+      ``DROP TABLE [IF EXISTS]``,
+      ``CREATE [TEMP|TEMPORARY] TABLE [IF NOT EXISTS]``, or the trailing
+      ``... INTO <table>`` form (CTAS / SELECT INTO).
     * Token boundaries are respected — ``Foo`` does not match ``FooBar`` /
       ``BarFoo``.
     * ``table_database`` / ``table_schema`` filter qualifiers; missing

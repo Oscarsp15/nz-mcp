@@ -237,3 +237,79 @@ def test_size_bytes_matches_utf8_length(
     )
     s = out.statements[0]
     assert s.size_bytes == len(s.sql.encode("utf-8"))
+
+
+# ── block-control prefix tolerance at the tool layer (issue #114) ───────────
+#
+# Real procedure bodies wrap the operative INSERT/CREATE inside ``BEGIN …
+# END;`` or ``IF cond THEN … END IF;`` blocks. The chunk produced by
+# ``iter_statements`` for such an INSERT carries the ``BEGIN``/``IF`` prefix
+# accumulated from the previous ``;``. Before the fix the classifier
+# anchored on the start of the chunk and dropped these statements, causing
+# ``not_found=true`` for the very SPs the tool was meant to introspect.
+
+
+def test_insert_inside_begin_block_is_found(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    src = "DECLARE x INT;\nBEGIN\nINSERT INTO foo SELECT 1;\nEND;\n"
+    _patch_fetch(monkeypatch, src)
+
+    out = nz_get_procedure_table_logic(
+        GetProcedureTableLogicInput(
+            database="D", procedure_schema="PUBLIC", procedure="SP", table="foo"
+        ),
+        config_path=two_profiles,
+    )
+    assert out.count == 1
+    assert out.not_found is False
+    assert out.statements[0].kind == "INSERT INTO"
+
+
+def test_create_temp_table_inside_begin_block_is_found(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    src = "DECLARE x INT;\nBEGIN\nCREATE TEMP TABLE foo AS SELECT 1;\nEND;\n"
+    _patch_fetch(monkeypatch, src)
+
+    out = nz_get_procedure_table_logic(
+        GetProcedureTableLogicInput(
+            database="D", procedure_schema="PUBLIC", procedure="SP", table="foo"
+        ),
+        config_path=two_profiles,
+    )
+    assert out.count == 1
+    assert out.statements[0].kind == "CREATE TEMP TABLE"
+
+
+def test_insert_inside_if_then_block_is_found(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    src = "DECLARE x INT;\nBEGIN\nIF x > 0 THEN\nINSERT INTO foo SELECT 1;\nEND IF;\nEND;\n"
+    _patch_fetch(monkeypatch, src)
+
+    out = nz_get_procedure_table_logic(
+        GetProcedureTableLogicInput(
+            database="D", procedure_schema="PUBLIC", procedure="SP", table="foo"
+        ),
+        config_path=two_profiles,
+    )
+    assert out.count == 1
+    assert out.statements[0].kind == "INSERT INTO"
+
+
+def test_string_literal_with_insert_inside_block_does_not_false_positive(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """``RAISE NOTICE 'INSERT INTO foo'`` inside a block must not be classified."""
+    src = "BEGIN\nRAISE NOTICE 'INSERT INTO foo';\nEND;\n"
+    _patch_fetch(monkeypatch, src)
+
+    out = nz_get_procedure_table_logic(
+        GetProcedureTableLogicInput(
+            database="D", procedure_schema="PUBLIC", procedure="SP", table="foo"
+        ),
+        config_path=two_profiles,
+    )
+    assert out.count == 0
+    assert out.not_found is True

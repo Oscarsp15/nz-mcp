@@ -53,11 +53,23 @@ Crear una tool nueva `nz_get_procedure_table_logic` con responsabilidad única: 
   - ¿Aparecen issues pidiendo `MERGE` / `UPDATE`? Si > 3 en 3 meses, abrir issue para extender `kinds`.
   - ¿El cap de 200 KB se golpea en SPs reales? Si sí, considerar paginación en lugar de subir el cap.
 
+## Refinement — issue #114 (2026-05-07)
+
+`classify_target_statement` se anclaba originalmente con `\A\s*` sobre el chunk entregado por `iter_statements`. Como `iter_statements` segmenta por `;` outside-of-strings/comments, los chunks acumulan tokens de bloque NZPLSQL desde el `;` previo: un `INSERT INTO <tabla>` dentro de `BEGIN … END;` o `IF cond THEN … END IF;` llega al clasificador con prefijo `BEGIN\n`, `IF cond THEN\n`, etc., y el regex anclado retornaba `None`. La tool reportaba `not_found=true` para SPs reales (caso testigo: `PROD_ANALITICA.DBO.PI_BASEREPERFILAMIENTOGENERAL` sobre `BaseReperfilamientoGeneral`). El fix:
+
+- Aplica `mask_single_quoted_strings` al chunk antes de buscar, para que verbos dentro de literales (`'INSERT INTO foo'`) no produzcan falsos positivos.
+- Cambia `_RE_CREATE_TABLE` y `_RE_INSERT_INTO` de anclaje `\A\s*` a búsqueda en cualquier posición con guarda de borde de palabra: `(?<![A-Za-z0-9_])CREATE\s+...` / `(?<![A-Za-z0-9_])INSERT\s+INTO\s+...`. Mantiene `re.IGNORECASE | re.VERBOSE`.
+- Sustituye `re.match` por `re.search` en `classify_target_statement`.
+- Tiebreak: el primer match en orden de aparición gana (CREATE vs INSERT), preservando la semántica anterior cuando el chunk ya empezaba por el verbo.
+
+Sin cambios al contrato público de la tool ni al output schema. La limitación de scope (CREATE/INSERT, sin MERGE/UPDATE/DELETE/TRUNCATE) sigue vigente.
+
 ## References
 
 - Issue #109 (GitHub) — spec original con criterios de aceptación.
 - Issue #105 — `strip_comments` reusado.
 - Issue #106 / ADR 0010 — `nz_get_procedure_size`, precedente más reciente para añadir tools de SP.
 - Issue #107 — `nz_find_table_references` (análisis inverso, no en este PR).
+- Issue #114 — refinement del clasificador para tolerar prefijos de bloque (ver sección dedicada arriba).
 - ADR 0006 — Tools de responsabilidad única.
 - `docs/architecture/tools-contract.md` § 17.
