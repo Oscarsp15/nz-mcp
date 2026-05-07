@@ -511,7 +511,7 @@ def iter_statements(source: str) -> Iterator[StatementInfo]:
 
 # Captures the table name token: optional backticks/quotes, allowing
 # ``schema.table``, ``bd.schema.table`` and ``bd..table`` (Netezza double-dot).
-_TABLE_NAME_TOKEN: Final[str] = r'(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_]*)'
+_TABLE_NAME_TOKEN: Final[str] = r'(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_]*)'  # noqa: S105
 # Two optional dot-prefixed qualifiers supports both ``schema.table``,
 # ``bd.schema.table`` and Netezza ``bd..table`` (empty middle qualifier).
 _QUALIFIED_NAME: Final[str] = (
