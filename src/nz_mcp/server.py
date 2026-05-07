@@ -165,6 +165,7 @@ def _i18n_key_for(code: str) -> str | None:
         "OVERLOAD_AMBIGUOUS": "OVERLOAD_AMBIGUOUS",
         "PROCEDURE_ALREADY_EXISTS": "PROCEDURE_ALREADY_EXISTS",
         "CONFIRM_REQUIRED": "CONFIRM_REQUIRED",
+        "RESPONSE_TOO_LARGE": "RESPONSE_TOO_LARGE",
     }
     return mapping.get(code)
 

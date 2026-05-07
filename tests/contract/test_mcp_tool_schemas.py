@@ -26,6 +26,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_export_ddl",
     "nz_get_procedure_ddl",
     "nz_get_procedure_section",
+    "nz_get_procedure_table_logic",
     "nz_get_table_ddl",
     "nz_get_view_ddl",
     "nz_insert",
