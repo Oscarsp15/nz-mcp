@@ -26,7 +26,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (28 tools registradas)
+## Catálogo v0.1 (30 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -400,7 +400,49 @@ Implementación: parser ligero NZPLSQL en `catalog/procedures.py` (basado en mar
 
 ---
 
-#### 17. `nz_get_procedures_ddl_batch`
+#### 17. `nz_get_procedure_table_logic`
+
+Aísla la lógica de **una** tabla intermedia dentro de un SP: devuelve los `CREATE [TEMP] TABLE … AS …` y/o `INSERT INTO …` que la producen o pueblan, ya con comentarios stripped y terminados en `;`. Útil para responder *"¿cómo se calcula `TT_X`?"* sin pagar tokens por las otras tablas del SP.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | |
+| `schema` | string (required) | |
+| `procedure` | string (required) | |
+| `signature` | string (optional) | Para overloads. |
+| `table` | string (required) | Nombre simple de la tabla (case-insensitive). No se aceptan `schema.table` — la lógica es interna al SP. |
+| `kinds` | array of `"create"` \| `"insert"` (default `["create", "insert"]`) | Filtra los tipos de statement a incluir. |
+
+**Output**:
+```json
+{
+  "table": "TT_OBLIGACIONESCLIENTES",
+  "statements": [
+    {
+      "kind": "CREATE TEMP TABLE",
+      "sql": "CREATE TEMP TABLE TT_OBLIGACIONESCLIENTES AS SELECT ...;",
+      "line_start": 142,
+      "line_end": 168,
+      "size_bytes": 812
+    }
+  ],
+  "count": 1,
+  "not_found": false,
+  "duration_ms": 12
+}
+```
+
+- `kind` ∈ `"CREATE TABLE"` | `"CREATE TEMP TABLE"` | `"INSERT INTO"`. `MERGE`, `UPDATE`, `DELETE`, `TRUNCATE` y SQL dinámico están **fuera de alcance** en v1.
+- `sql` viene sin comentarios (`--`, `/* */`); strings (`'a;b'`) e identificadores entre comillas (`"a;b"`) se preservan.
+- `line_start` / `line_end` apuntan al cuerpo **crudo** original (con comentarios) para auditoría.
+- Si la tabla solo aparece como `FROM`/`JOIN` y nunca como target → `count = 0`, `not_found = true`. Para análisis inverso usar la tool de referencias.
+- Cap total de respuesta: 200 KB → `RESPONSE_TOO_LARGE` (sugiere filtrar por `kinds` o usar `nz_get_procedure_section`).
+
+Implementación: `iter_statements` (boundary `;` consciente de strings y comentarios) + `extract_create_or_insert_targeting` en `catalog/nzplsql_parser.py`, reutilizando `strip_comments` (#105). Ver [`../adr/0011-tool-procedure-table-logic.md`](../adr/0011-tool-procedure-table-logic.md).
+
+---
+
+#### 18. `nz_get_procedures_ddl_batch`
 
 Obtiene los DDL completos de todos los procedimientos almacenados de un schema en un solo paso. Útil para indexación masiva sin ejecutar cientos de queries individuales.
 
@@ -440,7 +482,7 @@ Implementación: usa una sola query al catálogo `_V_PROCEDURE` por schema. Emit
 
 > Todas requieren `NZ_ALLOW_WRITE=true` implícito por `mode: write` o superior en el perfil.
 
-#### 18. `nz_insert`
+#### 19. `nz_insert`
 
 | Input | Tipo | Descripción |
 |---|---|---|
@@ -462,7 +504,7 @@ Implementación: `INSERT INTO ... VALUES (...)` parametrizado. **Prohibido** con
 
 ---
 
-#### 19. `nz_update`
+#### 20. `nz_update`
 
 | Input | Tipo | Descripción |
 |---|---|---|
@@ -482,7 +524,7 @@ Implementación: `INSERT INTO ... VALUES (...)` parametrizado. **Prohibido** con
 
 ---
 
-#### 20. `nz_delete`
+#### 21. `nz_delete`
 
 Mismo patrón que `nz_update` con `where` obligatorio, `dry_run` default `true`.
 
@@ -496,7 +538,7 @@ Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 
 ### 🔴 DDL (`mode: admin`)
 
-#### 21. `nz_create_table`
+#### 22. `nz_create_table`
 
 | Input | Tipo | Descripción |
 |---|---|---|
@@ -518,7 +560,7 @@ Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 
 ---
 
-#### 22. `nz_truncate`
+#### 23. `nz_truncate`
 
 | Input | Tipo | Descripción |
 |---|---|---|
@@ -531,7 +573,7 @@ Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 
 ---
 
-#### 23. `nz_drop_table`
+#### 24. `nz_drop_table`
 
 | Input | Tipo | Descripción |
 |---|---|---|
@@ -545,7 +587,7 @@ Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 
 ---
 
-#### 24. `nz_clone_procedure`
+#### 25. `nz_clone_procedure`
 
 Clona un procedimiento almacenado de un origen a un destino (otro database/schema o renombrado).
 
@@ -583,7 +625,7 @@ Clona un procedimiento almacenado de un origen a un destino (otro database/schem
 
 ### ⚪ Sesión
 
-#### 25. `nz_current_profile`
+#### 26. `nz_current_profile`
 
 Sin inputs.
 
@@ -603,7 +645,7 @@ No incluye password ni secretos.
 
 ---
 
-#### 26. `nz_switch_profile`
+#### 27. `nz_switch_profile`
 
 | Input | Tipo | Descripción |
 |---|---|---|
@@ -617,7 +659,7 @@ No incluye password ni secretos.
 
 ---
 
-#### 27. `nz_export_ddl`
+#### 28. `nz_export_ddl`
 
 Unifica la obtención de DDL de **tabla**, **vista** o **procedimiento** y lo devuelve como **resultado MCP nativo**: bloque **resource** embebido (`mimeType: text/sql`, URI estable `nz-mcp://ddl/...`) más un bloque **text** con resumen. Pensado para clientes que muestran tarjeta de recurso / copia (p. ej. Claude Desktop). Delega en la misma lógica de catálogo que `nz_get_*_ddl`.
 
@@ -636,7 +678,7 @@ Unifica la obtención de DDL de **tabla**, **vista** o **procedimiento** y lo de
 
 ---
 
-#### 28. `nz_insert_select`
+#### 29. `nz_insert_select`
 
 `INSERT INTO schema.target [(columns)] SELECT ...` — copia masiva o multi-fila vía `UNION ALL`. El sub-`select_sql` se valida con `sql_guard` en modo `write` (solo `SELECT`); los literales van en el texto del SELECT (no parametrizados).
 
@@ -657,7 +699,7 @@ Unifica la obtención de DDL de **tabla**, **vista** o **procedimiento** y lo de
 
 ---
 
-#### 29. `nz_create_table_as`
+#### 30. `nz_create_table_as`
 
 `CREATE TABLE schema.target AS SELECT ...` con `DISTRIBUTE ON` / `ORGANIZE ON` (modo `admin`). Rechaza si el destino ya existe (catálogo). El `select_sql` se valida como `SELECT`; el núcleo `CREATE TABLE ... AS` se valida con `sql_guard`; los sufijos Netezza se añaden como plantillas con identificadores validados (igual que `nz_create_table`).
 
@@ -687,7 +729,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
 |---|---|---|---|
-| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedures_ddl_batch`, `nz_export_ddl`, `nz_get_procedure_section`, `nz_current_profile` | true | false | true |
+| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_export_ddl`, `nz_current_profile` | true | false | true |
 | `nz_insert` | false | false | false |
 | `nz_insert_select` | false | false | false |
 | `nz_update`, `nz_delete` | false | true | false |
@@ -714,7 +756,7 @@ Todas las tools devuelven errores con estructura estable:
 ```
 
 Códigos estables (contrato):
-`GUARD_REJECTED`, `PERMISSION_DENIED`, `PROFILE_NOT_FOUND`, `CONNECTION_FAILED`, `QUERY_TIMEOUT`, `RESULT_TOO_LARGE`, `INVALID_INPUT`, `CONFIRM_REQUIRED`, `NETEZZA_ERROR`, `INTERNAL_ERROR`, `OBJECT_NOT_FOUND`, `SECTION_NOT_FOUND`, `PROCEDURE_ALREADY_EXISTS`, `OVERLOAD_AMBIGUOUS`, `CLONE_VALIDATION_FAILED`.
+`GUARD_REJECTED`, `PERMISSION_DENIED`, `PROFILE_NOT_FOUND`, `CONNECTION_FAILED`, `QUERY_TIMEOUT`, `RESULT_TOO_LARGE`, `RESPONSE_TOO_LARGE`, `INVALID_INPUT`, `CONFIRM_REQUIRED`, `NETEZZA_ERROR`, `INTERNAL_ERROR`, `OBJECT_NOT_FOUND`, `SECTION_NOT_FOUND`, `PROCEDURE_ALREADY_EXISTS`, `OVERLOAD_AMBIGUOUS`, `CLONE_VALIDATION_FAILED`.
 
 ### Descripciones de tool (lo que ve la IA)
 

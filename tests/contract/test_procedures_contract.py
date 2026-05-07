@@ -9,6 +9,8 @@ from nz_mcp.tools.procedures import (
     GetProcedureDdlOutput,
     GetProcedureSizeInput,
     GetProcedureSizeOutput,
+    GetProcedureTableLogicInput,
+    GetProcedureTableLogicOutput,
 )
 
 
@@ -138,5 +140,123 @@ def test_size_output_rejects_extra_fields() -> None:
                 "sections_detected": [],
                 "duration_ms": 0,
                 "unexpected_field": True,
+            }
+        )
+
+
+# ── nz_get_procedure_table_logic (issue #109) ────────────────────────────────
+
+
+@pytest.mark.contract
+def test_table_logic_input_accepts_schema_alias_and_defaults_kinds() -> None:
+    inp = GetProcedureTableLogicInput.model_validate(
+        {"database": "D", "schema": "PUBLIC", "procedure": "SP", "table": "FOO"}
+    )
+    assert inp.procedure_schema == "PUBLIC"
+    assert inp.kinds == ["create", "insert"]
+
+
+@pytest.mark.contract
+def test_table_logic_input_accepts_kinds_subset() -> None:
+    inp = GetProcedureTableLogicInput.model_validate(
+        {
+            "database": "D",
+            "schema": "PUBLIC",
+            "procedure": "SP",
+            "table": "FOO",
+            "kinds": ["create"],
+        }
+    )
+    assert inp.kinds == ["create"]
+
+
+@pytest.mark.contract
+def test_table_logic_input_rejects_unknown_kind() -> None:
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        GetProcedureTableLogicInput.model_validate(
+            {
+                "database": "D",
+                "schema": "PUBLIC",
+                "procedure": "SP",
+                "table": "FOO",
+                "kinds": ["update"],
+            }
+        )
+
+
+@pytest.mark.contract
+def test_table_logic_input_requires_table() -> None:
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        GetProcedureTableLogicInput.model_validate(
+            {"database": "D", "schema": "PUBLIC", "procedure": "SP"}
+        )
+
+
+@pytest.mark.contract
+def test_table_logic_output_has_required_fields() -> None:
+    out = GetProcedureTableLogicOutput.model_validate(
+        {
+            "table": "FOO",
+            "statements": [
+                {
+                    "kind": "CREATE TEMP TABLE",
+                    "sql": "CREATE TEMP TABLE FOO AS SELECT 1;",
+                    "line_start": 10,
+                    "line_end": 12,
+                    "size_bytes": 35,
+                }
+            ],
+            "count": 1,
+            "not_found": False,
+            "duration_ms": 5,
+        }
+    )
+    assert out.count == 1
+    assert out.not_found is False
+    assert out.statements[0].kind == "CREATE TEMP TABLE"
+
+
+@pytest.mark.contract
+def test_table_logic_output_rejects_extra_fields() -> None:
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        GetProcedureTableLogicOutput.model_validate(
+            {
+                "table": "FOO",
+                "statements": [],
+                "count": 0,
+                "not_found": True,
+                "duration_ms": 0,
+                "unexpected_field": True,
+            }
+        )
+
+
+@pytest.mark.contract
+def test_table_logic_statement_kind_constrained() -> None:
+    """Each ``StatementItem.kind`` must be one of the three contract-defined values."""
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        GetProcedureTableLogicOutput.model_validate(
+            {
+                "table": "FOO",
+                "statements": [
+                    {
+                        "kind": "MERGE INTO",
+                        "sql": "MERGE INTO FOO USING BAR ON 1;",
+                        "line_start": 1,
+                        "line_end": 1,
+                        "size_bytes": 30,
+                    }
+                ],
+                "count": 1,
+                "not_found": False,
+                "duration_ms": 0,
             }
         )

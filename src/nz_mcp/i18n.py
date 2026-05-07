@@ -101,6 +101,16 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Se requiere confirm=true para ejecutar la mutación con dry_run=false.",
         "en": "confirm=true is required to run the mutation with dry_run=false.",
     },
+    "RESPONSE_TOO_LARGE": {
+        "es": (
+            "La respuesta excede el límite ({size_kb} KB > {cap_kb} KB). "
+            "Filtra por kinds o usa nz_get_procedure_section."
+        ),
+        "en": (
+            "Response exceeds the cap ({size_kb} KB > {cap_kb} KB). "
+            "Filter by kinds or use nz_get_procedure_section."
+        ),
+    },
     # Hints
     "HINT.RESULT_TRUNCATED_BY_ROWS": {
         "es": "Resultado truncado en {n} filas. Añade WHERE o LIMIT para refinar.",

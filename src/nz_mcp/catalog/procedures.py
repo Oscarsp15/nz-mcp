@@ -9,6 +9,8 @@ from typing import Any, Final, Protocol, cast
 from nz_mcp.auth import get_password
 from nz_mcp.catalog.identifier import render_cross_db, validate_catalog_identifier
 from nz_mcp.catalog.nzplsql_parser import (
+    StatementKind,
+    extract_create_or_insert_targeting,
     find_begin_proc_line,
     header_content,
     line_slice,
@@ -185,6 +187,50 @@ def get_procedure_size(
         "lines_raw": 0 if not raw_ddl else len(raw_ddl.splitlines()),
         "lines_clean": 0 if not clean_ddl else len(clean_ddl.splitlines()),
         "sections_detected": detected,
+    }
+
+
+def get_procedure_table_logic(
+    profile: Profile,
+    database: str,
+    schema: str,
+    procedure: str,
+    table: str,
+    kinds: tuple[StatementKind, ...],
+    signature: str | None = None,
+) -> dict[str, Any]:
+    """Return CREATE/INSERT statements that produce or populate ``table``.
+
+    The procedure body is read once from ``_v_procedure``; comments are stripped
+    inside each candidate statement, but ``line_start`` / ``line_end`` keep
+    pointing at the **raw** source so the caller can audit.
+    """
+    rows = _fetch_procedure_rows(profile, database, schema, procedure)
+    row = _pick_procedure_row(rows, signature, procedure)
+    source = _ddl_get(row, "PROCEDURESOURCE")
+
+    matches = extract_create_or_insert_targeting(source, table, kinds=kinds)
+
+    statements: list[dict[str, Any]] = []
+    table_echo = table
+    for idx, m in enumerate(matches):
+        if idx == 0:
+            table_echo = m.target_as_written
+        statements.append(
+            {
+                "kind": m.kind,
+                "sql": m.sql,
+                "line_start": m.line_start,
+                "line_end": m.line_end,
+                "size_bytes": len(m.sql.encode("utf-8")),
+            }
+        )
+
+    return {
+        "table": table_echo,
+        "statements": statements,
+        "count": len(statements),
+        "not_found": len(statements) == 0,
     }
 
 

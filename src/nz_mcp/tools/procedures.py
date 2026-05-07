@@ -7,16 +7,18 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from nz_mcp.catalog.nzplsql_parser import strip_comments
+from nz_mcp.catalog.nzplsql_parser import StatementKind, strip_comments
 from nz_mcp.catalog.procedures import (
     describe_procedure,
     get_all_procedures_ddl,
     get_procedure_ddl,
     get_procedure_section,
     get_procedure_size,
+    get_procedure_table_logic,
     list_procedures,
 )
 from nz_mcp.config import get_active_profile
+from nz_mcp.errors import ResponseTooLargeError
 from nz_mcp.tools.registry import tool
 from nz_mcp.tools.timing import monotonic_duration_ms, monotonic_start
 
@@ -25,6 +27,9 @@ PROC_DDL_WARN_BYTES: int = 100 * 1024
 PROC_DDL_LARGE_WARNING: str = (
     "DDL is very large (>100 KB); consider fetching sections with nz_get_procedure_section."
 )
+
+# Hard cap for the structured response of nz_get_procedure_table_logic (issue #109).
+PROC_TABLE_LOGIC_MAX_RESPONSE_BYTES: int = 200 * 1024
 
 
 class ListProceduresInput(BaseModel):
@@ -450,5 +455,126 @@ def nz_get_procedures_ddl_batch(
         count=len(procs),
         total_size_bytes=total_size,
         warning=warning,
+        duration_ms=monotonic_duration_ms(start),
+    )
+
+
+# ── nz_get_procedure_table_logic (issue #109) ────────────────────────────────
+
+
+_TableLogicKind = Literal["create", "insert"]
+
+
+def _default_kinds() -> list[_TableLogicKind]:
+    """Default for ``GetProcedureTableLogicInput.kinds`` (typed for mypy strict)."""
+    return ["create", "insert"]
+
+
+class GetProcedureTableLogicInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    database: str = Field(min_length=1, max_length=128)
+    procedure_schema: str = Field(
+        alias="schema",
+        min_length=1,
+        max_length=128,
+    )
+    procedure: str = Field(min_length=1, max_length=128)
+    signature: str | None = Field(default=None, max_length=2048)
+    table: str = Field(
+        min_length=1,
+        max_length=128,
+        description=(
+            "Internal table name to isolate (case-insensitive). "
+            "Schema-qualified names are not accepted — the logic is internal to the SP."
+        ),
+    )
+    kinds: list[_TableLogicKind] = Field(
+        default_factory=_default_kinds,
+        description="Statement kinds to include. Defaults to both create and insert.",
+    )
+
+
+class StatementItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["CREATE TABLE", "CREATE TEMP TABLE", "INSERT INTO"]
+    sql: str
+    line_start: int = Field(ge=1)
+    line_end: int = Field(ge=1)
+    size_bytes: int = Field(ge=0)
+
+
+class GetProcedureTableLogicOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    table: str
+    statements: list[StatementItem]
+    count: int = Field(ge=0)
+    not_found: bool
+    duration_ms: int = Field(
+        ge=0,
+        description="Wall time to extract targeting statements (milliseconds).",
+    )
+
+
+_KINDS_MAP: dict[_TableLogicKind, tuple[StatementKind, ...]] = {
+    "create": ("CREATE TABLE", "CREATE TEMP TABLE"),
+    "insert": ("INSERT INTO",),
+}
+
+
+def _resolve_kinds(kinds: list[_TableLogicKind]) -> tuple[StatementKind, ...]:
+    """Map UI ``kinds`` (``create`` / ``insert``) to internal ``StatementKind`` tuples."""
+    out: list[StatementKind] = []
+    seen: set[StatementKind] = set()
+    for k in kinds:
+        for inner in _KINDS_MAP[k]:
+            if inner not in seen:
+                seen.add(inner)
+                out.append(inner)
+    return tuple(out)
+
+
+@tool(
+    name="nz_get_procedure_table_logic",
+    description=(
+        "Return the CREATE/INSERT statements that build or populate a single internal table "
+        "inside a stored procedure (comments stripped, raw line range preserved). "
+        "Use to isolate the logic of one intermediate table without fetching the full DDL. "
+        "Do not use to find what other procedures reference a table — use a reverse-lookup tool."
+    ),
+    mode="read",
+    input_model=GetProcedureTableLogicInput,
+    output_model=GetProcedureTableLogicOutput,
+    annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
+)
+def nz_get_procedure_table_logic(
+    params: GetProcedureTableLogicInput,
+    *,
+    config_path: Path | None = None,
+) -> GetProcedureTableLogicOutput:
+    start = monotonic_start()
+    profile = get_active_profile(path=config_path)
+    raw = get_procedure_table_logic(
+        profile,
+        database=params.database,
+        schema=params.procedure_schema,
+        procedure=params.procedure,
+        table=params.table,
+        kinds=_resolve_kinds(params.kinds),
+        signature=params.signature,
+    )
+
+    statements = [StatementItem(**s) for s in raw["statements"]]
+    total_bytes = sum(s.size_bytes for s in statements)
+    if total_bytes > PROC_TABLE_LOGIC_MAX_RESPONSE_BYTES:
+        raise ResponseTooLargeError(
+            size_kb=total_bytes // 1024,
+            cap_kb=PROC_TABLE_LOGIC_MAX_RESPONSE_BYTES // 1024,
+        )
+
+    return GetProcedureTableLogicOutput(
+        table=raw["table"],
+        statements=statements,
+        count=int(raw["count"]),
+        not_found=bool(raw["not_found"]),
         duration_ms=monotonic_duration_ms(start),
     )

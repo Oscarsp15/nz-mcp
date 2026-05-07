@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
-from typing import Final
+from collections.abc import Iterator
+from dataclasses import dataclass
+from typing import Final, Literal
 
 # Markers are matched outside of single-quoted string regions (masking applied first).
 _BEGIN_PROC: Final[re.Pattern[str]] = re.compile(r"(?i)\bBEGIN_PROC\b")
@@ -375,3 +377,244 @@ def header_content(source: str, begin_proc_line: int) -> str:
         head = "\n".join(source.splitlines()[: begin_proc_line - 1])
         return f"{head}\n{prefix}".strip()
     return prefix.strip()
+
+
+# ── statement iteration (`;`-bounded, string/comment-aware) ──────────────────
+
+
+StatementKind = Literal["CREATE TABLE", "CREATE TEMP TABLE", "INSERT INTO"]
+
+
+@dataclass(frozen=True, slots=True)
+class StatementInfo:
+    """Single SQL statement extracted from a procedure body.
+
+    ``sql`` is the raw text of the statement (including the trailing ``;``).
+    ``line_start`` / ``line_end`` are 1-indexed inclusive line numbers
+    referring to the **original raw** source the caller passed in.
+    """
+
+    sql: str
+    line_start: int
+    line_end: int
+
+
+def _skip_line_comment(source: str, i: int, n: int) -> int:
+    """Return index just past the end-of-line of a ``--`` line comment.
+
+    The newline itself is **not** consumed so the outer loop can update line counters.
+    """
+    while i < n and source[i] != "\n":
+        i += 1
+    return i
+
+
+def _skip_block_comment(source: str, i: int, n: int) -> tuple[int, int]:
+    """Return ``(new_i, newlines_skipped)`` after consuming a ``/* … */`` block."""
+    newlines = 0
+    i += 2  # skip opening ``/*``
+    while i < n:
+        if source[i] == "\n":
+            newlines += 1
+        if source[i] == "*" and i + 1 < n and source[i + 1] == "/":
+            return i + 2, newlines
+        i += 1
+    return i, newlines
+
+
+def iter_statements(source: str) -> Iterator[StatementInfo]:
+    """Yield ``;``-bounded statements from ``source`` safely.
+
+    A ``;`` only ends a statement when it is **outside** of:
+
+    * single-quoted string literals (``'foo;bar'``), with ``''`` escape support,
+    * double-quoted identifiers (``"a;b"``), with ``""`` escape support,
+    * line comments (``-- ... \\n``),
+    * block comments (``/* ... */``, non-nested).
+
+    ``line_start`` / ``line_end`` map to the raw source's line numbers, with
+    ``line_start`` pointing at the first **non-comment, non-blank** character
+    of the statement so callers can jump straight to the SQL when auditing.
+    Whitespace-only / empty trailing chunks are skipped.
+
+    The yielded ``sql`` text is exactly the source slice between boundaries
+    (caller can call :func:`strip_comments` on it for analysis without losing
+    the original line mapping).
+    """
+    n = len(source)
+    if n == 0:
+        return
+
+    i = 0
+    stmt_start = 0
+    stmt_start_line: int | None = None  # set on first real char in current chunk
+    line = 1
+
+    while i < n:
+        ch = source[i]
+
+        if ch == "\n":
+            line += 1
+            i += 1
+            continue
+
+        if ch in ("'", '"'):
+            if stmt_start_line is None:
+                stmt_start_line = line
+            j = _scan_quoted_token(source, i, ch)
+            line += source.count("\n", i, j)
+            i = j
+            continue
+
+        if ch == "-" and i + 1 < n and source[i + 1] == "-":
+            i = _skip_line_comment(source, i, n)
+            continue
+
+        if ch == "/" and i + 1 < n and source[i + 1] == "*":
+            i, newlines = _skip_block_comment(source, i, n)
+            line += newlines
+            continue
+
+        if ch == ";":
+            chunk = source[stmt_start : i + 1]
+            if chunk.strip() and stmt_start_line is not None:
+                yield StatementInfo(
+                    sql=chunk,
+                    line_start=stmt_start_line,
+                    line_end=line,
+                )
+            i += 1
+            stmt_start = i
+            stmt_start_line = None
+            continue
+
+        # Any other meaningful character is the first real char of the chunk
+        # if we have not yet set ``stmt_start_line``.
+        if ch not in " \t\r" and stmt_start_line is None:
+            stmt_start_line = line
+        i += 1
+
+    # Trailing text without a final ``;`` is intentionally ignored — it cannot be
+    # a complete statement under our boundary rule.
+
+
+# ── target-table detection on CREATE / INSERT statements ─────────────────────
+
+
+# Captures the table name token: optional backticks/quotes, allowing
+# ``schema.table``, ``bd.schema.table`` and ``bd..table`` (Netezza double-dot).
+_TABLE_NAME_TOKEN: Final[str] = r'(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_]*)'  # noqa: S105
+# Two optional dot-prefixed qualifiers supports both ``schema.table``,
+# ``bd.schema.table`` and Netezza ``bd..table`` (empty middle qualifier).
+_QUALIFIED_NAME: Final[str] = (
+    rf"(?:{_TABLE_NAME_TOKEN}?\s*\.\s*)?"
+    rf"(?:{_TABLE_NAME_TOKEN}?\s*\.\s*)?"
+    rf"{_TABLE_NAME_TOKEN}"
+)
+
+_RE_CREATE_TABLE: Final[re.Pattern[str]] = re.compile(
+    rf"""
+    \A\s*
+    CREATE\s+
+    (?P<temp>(?:TEMP|TEMPORARY)\s+)?
+    TABLE\s+
+    (?:IF\s+NOT\s+EXISTS\s+)?
+    (?P<name>{_QUALIFIED_NAME})
+    \b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+_RE_INSERT_INTO: Final[re.Pattern[str]] = re.compile(
+    rf"""
+    \A\s*
+    INSERT\s+INTO\s+
+    (?P<name>{_QUALIFIED_NAME})
+    \b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _last_segment_of_qualified(name: str) -> str:
+    """Return ``table`` from ``bd.schema.table`` / ``bd..table`` / ``schema.table``."""
+    parts = [p.strip() for p in name.split(".")]
+    last = parts[-1]
+    return last.strip('"')
+
+
+def classify_target_statement(stmt_sql: str) -> tuple[StatementKind, str] | None:
+    """If ``stmt_sql`` is a CREATE [TEMP] TABLE or INSERT INTO, return ``(kind, target)``.
+
+    ``target`` is the last segment of the qualified name (table name as written,
+    without surrounding quotes — case preserved). The input must already have
+    comments stripped. Returns ``None`` for any other statement kind, including
+    out-of-scope verbs (MERGE, UPDATE, DELETE, TRUNCATE).
+    """
+    m = _RE_CREATE_TABLE.match(stmt_sql)
+    if m is not None:
+        kind: StatementKind = "CREATE TEMP TABLE" if m.group("temp") else "CREATE TABLE"
+        return kind, _last_segment_of_qualified(m.group("name"))
+
+    m = _RE_INSERT_INTO.match(stmt_sql)
+    if m is not None:
+        return "INSERT INTO", _last_segment_of_qualified(m.group("name"))
+
+    return None
+
+
+@dataclass(frozen=True, slots=True)
+class TargetingMatch:
+    """A statement that creates or populates the requested table."""
+
+    kind: StatementKind
+    sql: str
+    line_start: int
+    line_end: int
+    target_as_written: str
+
+
+def extract_create_or_insert_targeting(
+    source: str, table: str, *, kinds: tuple[StatementKind, ...] | None = None
+) -> list[TargetingMatch]:
+    """Return CREATE/INSERT statements whose target last segment equals ``table``.
+
+    The match is case-insensitive on the table name. ``source`` is the raw
+    procedure body (with comments). Each returned ``sql`` is the **clean**
+    text (comments stripped) ending in ``;``, and ``line_start``/``line_end``
+    point to the **raw** body so callers can audit the original.
+
+    ``kinds`` filters by statement kind; ``None`` accepts all supported kinds.
+    """
+    if not table.strip():
+        return []
+    table_norm = table.strip().lower()
+    allowed: set[StatementKind] = (
+        {"CREATE TABLE", "CREATE TEMP TABLE", "INSERT INTO"} if kinds is None else set(kinds)
+    )
+
+    matches: list[TargetingMatch] = []
+    for stmt in iter_statements(source):
+        clean = strip_comments(stmt.sql).strip()
+        if not clean:
+            continue
+        if not clean.endswith(";"):
+            clean = f"{clean};"
+        classified = classify_target_statement(clean)
+        if classified is None:
+            continue
+        kind, target = classified
+        if kind not in allowed:
+            continue
+        if target.lower() != table_norm:
+            continue
+        matches.append(
+            TargetingMatch(
+                kind=kind,
+                sql=clean,
+                line_start=stmt.line_start,
+                line_end=stmt.line_end,
+                target_as_written=target,
+            )
+        )
+    return matches

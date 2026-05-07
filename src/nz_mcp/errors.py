@@ -83,6 +83,16 @@ class ResultTooLargeError(NzMcpError):
     code = "RESULT_TOO_LARGE"
 
 
+class ResponseTooLargeError(NzMcpError):
+    """Raised when a tool's structured response would exceed its byte cap.
+
+    Distinct from ``ResultTooLargeError`` (which signals truncated query rows):
+    here the offending payload is the rendered tool output itself, not row data.
+    """
+
+    code = "RESPONSE_TOO_LARGE"
+
+
 class NetezzaError(NzMcpError):
     code = "NETEZZA_ERROR"
 
