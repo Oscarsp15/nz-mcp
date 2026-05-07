@@ -40,6 +40,10 @@ Cada entrada se documenta en **español** y **english**.
 - ES: ``nz_create_table`` — por defecto ``dry_run=true``; para ejecutar en el servidor hace falta ``dry_run=false`` y ``confirm=true``. Salida alineada con otras tools DDL: ``ddl_to_execute``, ``executed``, ``duration_ms``.
 - EN: ``nz_create_table`` — defaults to ``dry_run=true``; execution requires ``dry_run=false`` and ``confirm=true``. Output aligned with other DDL tools: ``ddl_to_execute``, ``executed``, ``duration_ms``.
 
+### Fixed
+- ES: ``parse_sections`` — corrige ``IndexError`` en ``_find_plain_outer_end`` y ``_first_plain_begin`` al procesar SPs con literales de string multilínea. ``mask_single_quoted_strings`` colapsa newlines dentro de ``'…'`` en espacios, haciendo ``masked.splitlines()`` más corto que ``source.splitlines()``; el loop usaba el conteo del source como límite pero indexaba en masked (issue #113).
+- EN: ``parse_sections`` — fix ``IndexError`` in ``_find_plain_outer_end`` and ``_first_plain_begin`` when processing SPs containing multi-line string literals. ``mask_single_quoted_strings`` collapses newlines inside ``'…'`` to spaces, making ``masked.splitlines()`` shorter than ``source.splitlines()``; the loop used the source line count as its bound but indexed into masked lines (issue #113).
+
 ### Added
 - ES: tool ``nz_get_procedures_ddl_batch`` para obtener los DDL de todos los procedimientos de un schema en lote, reduciendo la carga en indexación masiva (issue #101).
 - EN: ``nz_get_procedures_ddl_batch`` tool to batch fetch DDLs for all procedures in a schema, reducing load during bulk indexing (issue #101).
