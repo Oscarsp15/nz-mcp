@@ -325,7 +325,7 @@ def test_nz_get_procedure_ddl_sizes_always_present(
                 database="D",
                 procedure_schema="PUBLIC",
                 procedure="P",
-                variant=variant,  # type: ignore[arg-type]
+                variant=variant,
             ),
             config_path=two_profiles,
         )
