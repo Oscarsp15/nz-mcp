@@ -339,9 +339,7 @@ def test_nz_get_procedure_ddl_sizes_always_present(
 # ── nz_get_procedure_size ─────────────────────────────────────────────────────
 
 
-def test_nz_get_procedure_size_happy(
-    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
-) -> None:
+def test_nz_get_procedure_size_happy(monkeypatch: pytest.MonkeyPatch, two_profiles: Path) -> None:
     """Standard procedure returns metrics without body."""
     # We mock the low level fetch/pick to test the actual catalog logic
     row = {
