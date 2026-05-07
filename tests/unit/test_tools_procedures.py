@@ -13,10 +13,12 @@ from nz_mcp.tools.procedures import (
     GetProcedureDdlInput,
     GetProceduresDdlBatchInput,
     GetProcedureSectionInput,
+    GetProcedureSizeInput,
     ListProceduresInput,
     nz_describe_procedure,
     nz_get_procedure_ddl,
     nz_get_procedure_section,
+    nz_get_procedure_size,
     nz_get_procedures_ddl_batch,
     nz_list_procedures,
 )
@@ -332,3 +334,94 @@ def test_nz_get_procedure_ddl_sizes_always_present(
         assert out.size_bytes_raw >= 0
         assert out.size_bytes_clean >= 0
         assert out.size_bytes_raw >= out.size_bytes_clean
+
+
+# ── nz_get_procedure_size ─────────────────────────────────────────────────────
+
+
+def test_nz_get_procedure_size_happy(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """Standard procedure returns metrics without body."""
+    # We mock the low level fetch/pick to test the actual catalog logic
+    row = {
+        "PROCEDURE": "MY_SP",
+        "PROCEDURESIGNATURE": "MY_SP()",
+        "ARGUMENTS": "",
+        "RETURNS": "INT",
+        "PROCEDURESOURCE": "BEGIN_PROC\n  BEGIN\n    x := 1;\n  END;\nEND_PROC;",
+        "OWNER": "ADMIN",
+    }
+    monkeypatch.setattr("nz_mcp.catalog.procedures._fetch_procedure_rows", lambda *a, **k: [row])
+    monkeypatch.setattr("nz_mcp.catalog.procedures._pick_procedure_row", lambda *a, **k: row)
+
+    out = nz_get_procedure_size(
+        GetProcedureSizeInput(
+            database="D",
+            procedure_schema="PUBLIC",
+            procedure="MY_SP",
+        ),
+        config_path=two_profiles,
+    )
+    assert out.name == "MY_SP"
+    assert out.signature == "MY_SP()"
+    assert out.size_bytes_raw > 0
+    assert out.size_bytes_clean == out.size_bytes_raw
+    assert out.lines_raw == out.lines_clean
+    assert "body" in out.sections_detected
+
+
+def test_nz_get_procedure_size_with_comments(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """Procedure with comments must reflect clean < raw metrics."""
+    row = {
+        "PROCEDURE": "SP_COMMENTS",
+        "PROCEDURESIGNATURE": "SP_COMMENTS()",
+        "ARGUMENTS": "",
+        "RETURNS": "INT",
+        "PROCEDURESOURCE": (
+            "BEGIN_PROC\n  BEGIN\n    -- c1\n    -- c2\n    -- c3\n    x := 1;\n  END;\nEND_PROC;"
+        ),
+        "OWNER": "ADMIN",
+    }
+    monkeypatch.setattr("nz_mcp.catalog.procedures._fetch_procedure_rows", lambda *a, **k: [row])
+    monkeypatch.setattr("nz_mcp.catalog.procedures._pick_procedure_row", lambda *a, **k: row)
+
+    out = nz_get_procedure_size(
+        GetProcedureSizeInput(
+            database="D",
+            procedure_schema="PUBLIC",
+            procedure="SP_COMMENTS",
+        ),
+        config_path=two_profiles,
+    )
+    assert out.size_bytes_clean < out.size_bytes_raw
+    assert out.lines_clean < out.lines_raw
+
+
+def test_nz_get_procedure_size_with_overload(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """Overloads must be resolvable via signature."""
+    row = {
+        "PROCEDURE": "SP_OVERLOAD",
+        "PROCEDURESIGNATURE": "SP_OVERLOAD(INT)",
+        "ARGUMENTS": "(INT)",
+        "RETURNS": "INT",
+        "PROCEDURESOURCE": "BEGIN_PROC\n  BEGIN\n  END;\nEND_PROC;",
+        "OWNER": "ADMIN",
+    }
+    monkeypatch.setattr("nz_mcp.catalog.procedures._fetch_procedure_rows", lambda *a, **k: [row])
+    monkeypatch.setattr("nz_mcp.catalog.procedures._pick_procedure_row", lambda *a, **k: row)
+
+    out = nz_get_procedure_size(
+        GetProcedureSizeInput(
+            database="D",
+            procedure_schema="PUBLIC",
+            procedure="SP_OVERLOAD",
+            signature="SP_OVERLOAD(INT)",
+        ),
+        config_path=two_profiles,
+    )
+    assert out.signature == "SP_OVERLOAD(INT)"

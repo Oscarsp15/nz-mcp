@@ -312,7 +312,34 @@ Metadata de un SP sin devolver el cuerpo completo.
 
 ---
 
-#### 14. `nz_get_procedure_ddl`
+#### 14. `nz_get_procedure_size`
+
+Extrae las métricas de tamaño (bytes y líneas, en sus variantes `raw` y `clean`) y detecta las secciones lógicas de un SP sin retornar su cuerpo completo. Ideal para token budgeting previo a descargar DDLs gigantes.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | |
+| `schema` | string (required) | |
+| `procedure` | string (required) | |
+| `signature` | string (optional) | |
+
+**Output**:
+```json
+{
+  "name": "SP_LOAD_CUSTOMERS",
+  "signature": "SP_LOAD_CUSTOMERS(VARCHAR)",
+  "size_bytes_raw": 4200,
+  "size_bytes_clean": 3800,
+  "lines_raw": 247,
+  "lines_clean": 210,
+  "sections_detected": ["header", "declare", "body", "exception"],
+  "duration_ms": 15
+}
+```
+
+---
+
+#### 15. `nz_get_procedure_ddl`
 
 Devuelve el DDL completo (`CREATE OR REPLACE PROCEDURE ...`).
 
@@ -344,7 +371,7 @@ Source: `_v_procedure.PROCEDURESOURCE` + `PROCEDURESIGNATURE`.
 
 ---
 
-#### 15. `nz_get_procedure_section`
+#### 16. `nz_get_procedure_section`
 
 Extrae una sección específica de un SP (útil para evitar gastar tokens en SPs largos).
 
@@ -373,7 +400,7 @@ Implementación: parser ligero NZPLSQL en `catalog/procedures.py` (basado en mar
 
 ---
 
-#### 16. `nz_get_procedures_ddl_batch`
+#### 17. `nz_get_procedures_ddl_batch`
 
 Obtiene los DDL completos de todos los procedimientos almacenados de un schema en un solo paso. Útil para indexación masiva sin ejecutar cientos de queries individuales.
 
@@ -413,7 +440,7 @@ Implementación: usa una sola query al catálogo `_V_PROCEDURE` por schema. Emit
 
 > Todas requieren `NZ_ALLOW_WRITE=true` implícito por `mode: write` o superior en el perfil.
 
-#### 17. `nz_insert`
+#### 18. `nz_insert`
 
 | Input | Tipo | Descripción |
 |---|---|---|
@@ -435,7 +462,7 @@ Implementación: `INSERT INTO ... VALUES (...)` parametrizado. **Prohibido** con
 
 ---
 
-#### 18. `nz_update`
+#### 19. `nz_update`
 
 | Input | Tipo | Descripción |
 |---|---|---|
@@ -455,7 +482,7 @@ Implementación: `INSERT INTO ... VALUES (...)` parametrizado. **Prohibido** con
 
 ---
 
-#### 19. `nz_delete`
+#### 20. `nz_delete`
 
 Mismo patrón que `nz_update` con `where` obligatorio, `dry_run` default `true`.
 
@@ -469,7 +496,7 @@ Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 
 ### 🔴 DDL (`mode: admin`)
 
-#### 20. `nz_create_table`
+#### 21. `nz_create_table`
 
 | Input | Tipo | Descripción |
 |---|---|---|
@@ -491,7 +518,7 @@ Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 
 ---
 
-#### 21. `nz_truncate`
+#### 22. `nz_truncate`
 
 | Input | Tipo | Descripción |
 |---|---|---|
@@ -504,7 +531,7 @@ Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 
 ---
 
-#### 22. `nz_drop_table`
+#### 23. `nz_drop_table`
 
 | Input | Tipo | Descripción |
 |---|---|---|
@@ -518,7 +545,7 @@ Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 
 ---
 
-#### 23. `nz_clone_procedure`
+#### 24. `nz_clone_procedure`
 
 Clona un procedimiento almacenado de un origen a un destino (otro database/schema o renombrado).
 
@@ -556,7 +583,7 @@ Clona un procedimiento almacenado de un origen a un destino (otro database/schem
 
 ### ⚪ Sesión
 
-#### 24. `nz_current_profile`
+#### 25. `nz_current_profile`
 
 Sin inputs.
 
@@ -576,7 +603,7 @@ No incluye password ni secretos.
 
 ---
 
-#### 25. `nz_switch_profile`
+#### 26. `nz_switch_profile`
 
 | Input | Tipo | Descripción |
 |---|---|---|
@@ -590,7 +617,7 @@ No incluye password ni secretos.
 
 ---
 
-#### 26. `nz_export_ddl`
+#### 27. `nz_export_ddl`
 
 Unifica la obtención de DDL de **tabla**, **vista** o **procedimiento** y lo devuelve como **resultado MCP nativo**: bloque **resource** embebido (`mimeType: text/sql`, URI estable `nz-mcp://ddl/...`) más un bloque **text** con resumen. Pensado para clientes que muestran tarjeta de recurso / copia (p. ej. Claude Desktop). Delega en la misma lógica de catálogo que `nz_get_*_ddl`.
 
@@ -609,7 +636,7 @@ Unifica la obtención de DDL de **tabla**, **vista** o **procedimiento** y lo de
 
 ---
 
-#### 27. `nz_insert_select`
+#### 28. `nz_insert_select`
 
 `INSERT INTO schema.target [(columns)] SELECT ...` — copia masiva o multi-fila vía `UNION ALL`. El sub-`select_sql` se valida con `sql_guard` en modo `write` (solo `SELECT`); los literales van en el texto del SELECT (no parametrizados).
 
@@ -630,7 +657,7 @@ Unifica la obtención de DDL de **tabla**, **vista** o **procedimiento** y lo de
 
 ---
 
-#### 28. `nz_create_table_as`
+#### 29. `nz_create_table_as`
 
 `CREATE TABLE schema.target AS SELECT ...` con `DISTRIBUTE ON` / `ORGANIZE ON` (modo `admin`). Rechaza si el destino ya existe (catálogo). El `select_sql` se valida como `SELECT`; el núcleo `CREATE TABLE ... AS` se valida con `sql_guard`; los sufijos Netezza se añaden como plantillas con identificadores validados (igual que `nz_create_table`).
 
