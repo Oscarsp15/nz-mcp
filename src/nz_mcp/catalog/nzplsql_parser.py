@@ -277,6 +277,84 @@ def line_slice(source: str, from_line: int, to_line: int) -> str:
     return "\n".join(chunk)
 
 
+def _scan_quoted_token(source: str, start: int, quote_char: str) -> int:
+    """Return the index just past the closing *quote_char*, handling doubled escapes.
+
+    Handles ``''`` (escaped single quote) and ``""`` (escaped double quote).
+    """
+    j = start + 1
+    n = len(source)
+    while j < n:
+        if source[j] == quote_char:
+            if j + 1 < n and source[j + 1] == quote_char:
+                j += 2  # escaped quote — keep going
+                continue
+            j += 1  # closing quote found
+            break
+        j += 1
+    return j
+
+
+def strip_comments(source: str) -> str:
+    """Remove NZPLSQL ``--`` and ``/* … */`` comments from procedure source.
+
+    Preserves ``--`` and ``/*`` that appear inside single-quoted string
+    literals (``'…'``) or double-quoted identifiers (``"…"``).
+
+    Collapses runs of more than one consecutive blank line to a single blank.
+    Trailing whitespace is stripped from every line.
+
+    Security note: this function only removes characters — it never inserts
+    or reorders tokens, so it cannot introduce SQL injection vectors.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(source)
+    while i < n:
+        ch = source[i]
+
+        # single-quoted string literal — pass through verbatim
+        if ch == "'":
+            j = _scan_quoted_token(source, i, "'")
+            out.append(source[i:j])
+            i = j
+            continue
+
+        # double-quoted identifier — pass through verbatim
+        if ch == '"':
+            j = _scan_quoted_token(source, i, '"')
+            out.append(source[i:j])
+            i = j
+            continue
+
+        # line comment (-- …) — skip to end of line, preserve newline
+        if ch == "-" and i + 1 < n and source[i + 1] == "-":
+            while i < n and source[i] != "\n":
+                i += 1
+            continue
+
+        # block comment (/* … */) — skip until closing */
+        if ch == "/" and i + 1 < n and source[i + 1] == "*":
+            i += 2
+            while i < n:
+                if source[i] == "*" and i + 1 < n and source[i + 1] == "/":
+                    i += 2
+                    break
+                i += 1
+            continue
+
+        out.append(ch)
+        i += 1
+
+    result = "".join(out)
+    # Strip trailing whitespace on each line (comments often leave trailing spaces).
+    # Use split('\n') instead of splitlines() so a trailing newline is preserved.
+    result = "\n".join(line.rstrip() for line in result.split("\n"))
+    # Collapse runs of 3+ newlines (= 2+ consecutive blank lines) to at most 2.
+    result = re.sub(r"\n{3,}", "\n\n", result)
+    return result
+
+
 def find_begin_proc_line(source: str) -> int | None:
     """Return 1-indexed line of the first ``BEGIN_PROC`` marker, if any."""
     masked = mask_single_quoted_strings(source)

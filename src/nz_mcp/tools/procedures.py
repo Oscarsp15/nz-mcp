@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from nz_mcp.catalog.nzplsql_parser import strip_comments
 from nz_mcp.catalog.procedures import (
     describe_procedure,
     get_all_procedures_ddl,
@@ -94,17 +95,37 @@ class GetProcedureDdlInput(BaseModel):
     )
     procedure: str = Field(min_length=1, max_length=128)
     signature: str | None = Field(default=None, max_length=2048)
+    variant: Literal["raw", "clean"] = Field(
+        default="raw",
+        description=(
+            "DDL variant to return. "
+            "'raw' preserves original source including comments (default, back-compat). "
+            "'clean' strips NZPLSQL line (--) and block (/* */) comments "
+            "for token-efficient AI reasoning."
+        ),
+    )
 
 
 class GetProcedureDdlOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ddl: str
-    size_bytes: int = Field(ge=0, description="Byte length of ``ddl`` encoded as UTF-8.")
+    size_bytes: int = Field(
+        ge=0,
+        description="Byte length of the returned ``ddl`` variant encoded as UTF-8.",
+    )
+    size_bytes_raw: int = Field(
+        ge=0,
+        description="Byte length of the raw DDL (comments included) encoded as UTF-8.",
+    )
+    size_bytes_clean: int = Field(
+        ge=0,
+        description="Byte length of the clean DDL (comments stripped) encoded as UTF-8.",
+    )
     warning: str | None = Field(
         default=None,
-        description="Set when DDL exceeds ~100 KB; prefer nz_get_procedure_section.",
+        description="Set when the returned DDL exceeds ~100 KB; prefer nz_get_procedure_section.",
     )
-    duration_ms: int = Field(ge=0, description="Wall time to build DDL (milliseconds).")
+    duration_ms: int = Field(ge=0, description="Wall time to build DDL (milliseconds.)")
 
 
 class GetProcedureSectionInput(BaseModel):
@@ -248,9 +269,10 @@ def nz_describe_procedure(
 @tool(
     name="nz_get_procedure_ddl",
     description=(
-        "Return reconstructed CREATE OR REPLACE PROCEDURE DDL from catalog source "
-        "and signature metadata. For very large procedures prefer "
-        "nz_get_procedure_section(section='body')."
+        "Return CREATE OR REPLACE PROCEDURE DDL from catalog. Use variant='clean' to strip "
+        "comments for token-efficient reasoning; 'raw' (default) preserves full source. "
+        "Always returns size_bytes_raw and size_bytes_clean. For very large procedures "
+        "prefer nz_get_procedure_section."
     ),
     mode="read",
     input_model=GetProcedureDdlInput,
@@ -264,18 +286,25 @@ def nz_get_procedure_ddl(
 ) -> GetProcedureDdlOutput:
     start = monotonic_start()
     profile = get_active_profile(path=config_path)
-    ddl = get_procedure_ddl(
+    ddl_raw = get_procedure_ddl(
         profile,
         database=params.database,
         schema=params.procedure_schema,
         procedure=params.procedure,
         signature=params.signature,
     )
-    size_b = len(ddl.encode("utf-8"))
+    ddl_clean = strip_comments(ddl_raw)
+    size_bytes_raw = len(ddl_raw.encode("utf-8"))
+    size_bytes_clean = len(ddl_clean.encode("utf-8"))
+
+    ddl = ddl_clean if params.variant == "clean" else ddl_raw
+    size_b = size_bytes_clean if params.variant == "clean" else size_bytes_raw
     warn = PROC_DDL_LARGE_WARNING if size_b > PROC_DDL_WARN_BYTES else None
     return GetProcedureDdlOutput(
         ddl=ddl,
         size_bytes=size_b,
+        size_bytes_raw=size_bytes_raw,
+        size_bytes_clean=size_bytes_clean,
         warning=warn,
         duration_ms=monotonic_duration_ms(start),
     )
