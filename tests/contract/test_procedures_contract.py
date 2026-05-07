@@ -53,7 +53,12 @@ def test_output_has_size_bytes_raw_and_clean_fields() -> None:
 @pytest.mark.contract
 def test_output_size_bytes_is_size_of_returned_variant() -> None:
     """size_bytes must equal the byte length of the ddl field."""
-    ddl_text = "CREATE OR REPLACE PROCEDURE S.P() RETURNS INT LANGUAGE NZPLSQL AS\nBEGIN_PROC\n  NULL;\nEND_PROC;"
+    ddl_text = (
+        "CREATE OR REPLACE PROCEDURE S.P() RETURNS INT LANGUAGE NZPLSQL AS\n"
+        "BEGIN_PROC\n"
+        "  NULL;\n"
+        "END_PROC;"
+    )
     out = GetProcedureDdlOutput(
         ddl=ddl_text,
         size_bytes=len(ddl_text.encode("utf-8")),

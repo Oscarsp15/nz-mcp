@@ -6,7 +6,6 @@ import pytest
 
 from nz_mcp.catalog.nzplsql_parser import strip_comments
 
-
 # ── line comments ────────────────────────────────────────────────────────────
 
 
