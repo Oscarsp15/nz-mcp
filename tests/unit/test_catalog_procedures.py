@@ -44,6 +44,70 @@ def test_parse_procedure_arguments_empty() -> None:
     assert proc.parse_procedure_arguments("") == []
 
 
+# ── compound-type parsing (issue #121) ──────────────────────────────────────
+
+
+def test_parse_procedure_arguments_character_varying_unnamed() -> None:
+    """``CHARACTER VARYING(N)`` is a single Netezza type, not name + type."""
+    out = proc.parse_procedure_arguments("(DATE, DATE, CHARACTER VARYING(20))")
+    assert len(out) == 3
+    assert out[0] == {"name": "arg1", "type": "DATE"}
+    assert out[1] == {"name": "arg2", "type": "DATE"}
+    assert out[2] == {"name": "arg3", "type": "CHARACTER VARYING(20)"}
+
+
+def test_parse_procedure_arguments_character_varying_with_formal_name() -> None:
+    """Formal names are preserved; the compound type stays glued together."""
+    out = proc.parse_procedure_arguments("(P_FECHA DATE, P_NOMBRE CHARACTER VARYING(50))")
+    assert len(out) == 2
+    assert out[0] == {"name": "P_FECHA", "type": "DATE"}
+    assert out[1] == {"name": "P_NOMBRE", "type": "CHARACTER VARYING(50)"}
+
+
+def test_parse_procedure_arguments_double_precision() -> None:
+    out = proc.parse_procedure_arguments("(DOUBLE PRECISION, INTEGER)")
+    assert out[0] == {"name": "arg1", "type": "DOUBLE PRECISION"}
+    assert out[1] == {"name": "arg2", "type": "INTEGER"}
+
+
+def test_parse_procedure_arguments_timestamp_with_time_zone() -> None:
+    out = proc.parse_procedure_arguments("(TIMESTAMP WITH TIME ZONE, TIME WITH TIME ZONE)")
+    assert out[0] == {"name": "arg1", "type": "TIMESTAMP WITH TIME ZONE"}
+    assert out[1] == {"name": "arg2", "type": "TIME WITH TIME ZONE"}
+
+
+def test_parse_procedure_arguments_national_character_varying() -> None:
+    out = proc.parse_procedure_arguments("(NATIONAL CHARACTER VARYING(10), NATIONAL CHARACTER(5))")
+    assert out[0] == {"name": "arg1", "type": "NATIONAL CHARACTER VARYING(10)"}
+    assert out[1] == {"name": "arg2", "type": "NATIONAL CHARACTER(5)"}
+
+
+def test_parse_procedure_arguments_pi_clientescfm_signature() -> None:
+    """Real signature shape from the witness SP (3 unnamed types)."""
+    out = proc.parse_procedure_arguments("(DATE, CHARACTER VARYING(20), BYTEINT)")
+    assert len(out) == 3
+    # No argument should leak ``CHARACTER`` as a name or ``VARYING(...)`` as
+    # the entire type.
+    for arg in out:
+        assert not arg["type"].startswith("VARYING")
+        assert arg["name"] != "CHARACTER"
+
+
+def test_parse_procedure_arguments_empty_parens() -> None:
+    assert proc.parse_procedure_arguments("()") == []
+
+
+def test_parse_procedure_arguments_mixed_compound_and_simple_with_names() -> None:
+    """Formal names sit before the compound type — both must be detected."""
+    out = proc.parse_procedure_arguments(
+        "(P_AMOUNT DOUBLE PRECISION, P_TS TIMESTAMP WITH TIME ZONE, P_FLAG BYTEINT)"
+    )
+    assert len(out) == 3
+    assert out[0] == {"name": "P_AMOUNT", "type": "DOUBLE PRECISION"}
+    assert out[1] == {"name": "P_TS", "type": "TIMESTAMP WITH TIME ZONE"}
+    assert out[2] == {"name": "P_FLAG", "type": "BYTEINT"}
+
+
 def test_signature_clause_does_not_duplicate_proc_name() -> None:
     """NPS 11.x may store PROCEDURESIGNATURE as NAME(args) — do not emit NAME+NAME."""
     row = (

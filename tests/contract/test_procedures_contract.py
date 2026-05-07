@@ -176,6 +176,9 @@ def test_table_logic_input_accepts_kinds_subset() -> None:
 def test_table_logic_input_rejects_unknown_kind() -> None:
     import pydantic
 
+    # Unknown UI label — ``"upsert"`` is not in the supported set, so the
+    # input must be rejected. ``"update"`` itself is now a valid kind after
+    # issue #120 expanded coverage to drop/truncate/update/delete/merge.
     with pytest.raises(pydantic.ValidationError):
         GetProcedureTableLogicInput.model_validate(
             {
@@ -183,7 +186,7 @@ def test_table_logic_input_rejects_unknown_kind() -> None:
                 "schema": "PUBLIC",
                 "procedure": "SP",
                 "table": "FOO",
-                "kinds": ["update"],
+                "kinds": ["upsert"],
             }
         )
 
@@ -241,7 +244,12 @@ def test_table_logic_output_rejects_extra_fields() -> None:
 
 @pytest.mark.contract
 def test_table_logic_statement_kind_constrained() -> None:
-    """Each ``StatementItem.kind`` must be one of the three contract-defined values."""
+    """``StatementItem.kind`` must be one of the supported contract values.
+
+    After issue #120 the supported set covers CREATE/CREATE TEMP/INSERT/DROP/
+    TRUNCATE/UPDATE/DELETE FROM/MERGE INTO. Any string outside that set must
+    still be rejected by the schema (here we use a fictitious verb).
+    """
     import pydantic
 
     with pytest.raises(pydantic.ValidationError):
@@ -250,8 +258,8 @@ def test_table_logic_statement_kind_constrained() -> None:
                 "table": "FOO",
                 "statements": [
                     {
-                        "kind": "MERGE INTO",
-                        "sql": "MERGE INTO FOO USING BAR ON 1;",
+                        "kind": "UPSERT INTO",
+                        "sql": "UPSERT INTO FOO VALUES (1);",
                         "line_start": 1,
                         "line_end": 1,
                         "size_bytes": 30,

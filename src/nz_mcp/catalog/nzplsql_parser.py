@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Final, Literal
+from typing import Final, Literal, cast
 
 # Markers are matched outside of single-quoted string regions (masking applied first).
 _BEGIN_PROC: Final[re.Pattern[str]] = re.compile(r"(?i)\bBEGIN_PROC\b")
@@ -47,6 +47,95 @@ def mask_single_quoted_strings(source: str) -> str:
     return "".join(out)
 
 
+# Characters that ``str.splitlines()`` treats as line boundaries. Keeping them
+# untouched while masking literals is what guarantees that the masked output
+# splits into the same number of lines as the raw source — without that, any
+# CR (or vertical tab, form feed, etc.) embedded inside a string literal
+# silently shifts every line index downstream (issue #119).
+_LINE_BOUNDARY_CHARS: Final[frozenset[str]] = frozenset(
+    {
+        "\n",  # LF
+        "\r",  # CR
+        "\v",  # VT
+        "\f",  # FF
+        "\x1c",  # FS
+        "\x1d",  # GS
+        "\x1e",  # RS
+        "\x85",  # NEL
+        "\u2028",  # LS
+        "\u2029",  # PS
+    }
+)
+
+
+def mask_literals_preserving_lines(source: str) -> str:
+    """Mask single-quoted literal contents but keep every line-boundary character.
+
+    Also blanks the **content** of NZPLSQL ``--`` line comments and ``/* … */``
+    block comments before quote tracking, so an apostrophe that lives inside a
+    comment cannot open a phantom literal that would mask the rest of the
+    body. This was the second half of issue #119: real procedures contain
+    things like ``-- 10.Feb'`` inside line comments which left
+    :func:`mask_single_quoted_strings` "stuck" in a literal until the next
+    real ``'`` — wiping the outer ``END;`` from the masked view.
+
+    All replacements are done character-by-character so every line-boundary
+    character (LF, CR, VT, FF, FS-RS, NEL, U+2028, U+2029) is preserved
+    untouched. The result therefore satisfies
+    ``len(out.splitlines()) == len(source.splitlines())``.
+    """
+    out: list[str] = []
+    in_quote = False
+    i = 0
+    n = len(source)
+    while i < n:
+        ch = source[i]
+        if in_quote:
+            if ch == "'":
+                if i + 1 < n and source[i + 1] == "'":
+                    # Escaped single quote inside the literal — keep the pair
+                    # as-is so neither character is treated as a quote toggle
+                    # and the masked length stays in sync byte-for-byte.
+                    out.append("''")
+                    i += 2
+                    continue
+                out.append("'")
+                in_quote = False
+                i += 1
+                continue
+            # Replace any non-boundary character; keep boundaries untouched so
+            # ``splitlines`` produces the same line count as the raw source.
+            out.append(ch if ch in _LINE_BOUNDARY_CHARS else " ")
+            i += 1
+            continue
+        # Outside any literal — first try to skip a comment span; comment
+        # contents are blanked so apostrophes inside them cannot toggle the
+        # quote state on subsequent lines.
+        if ch == "-" and i + 1 < n and source[i + 1] == "-":
+            while i < n and source[i] not in _LINE_BOUNDARY_CHARS:
+                out.append(" ")
+                i += 1
+            continue
+        if ch == "/" and i + 1 < n and source[i + 1] == "*":
+            out.append(" ")
+            out.append(" ")
+            i += 2
+            while i < n:
+                if source[i] == "*" and i + 1 < n and source[i + 1] == "/":
+                    out.append(" ")
+                    out.append(" ")
+                    i += 2
+                    break
+                out.append(source[i] if source[i] in _LINE_BOUNDARY_CHARS else " ")
+                i += 1
+            continue
+        out.append(ch)
+        if ch == "'":
+            in_quote = True
+        i += 1
+    return "".join(out)
+
+
 def parse_sections(source: str) -> dict[str, tuple[int, int]]:
     """Return 1-indexed inclusive line ranges per detected section.
 
@@ -59,7 +148,11 @@ def parse_sections(source: str) -> dict[str, tuple[int, int]]:
     if not source.strip():
         return {}
 
-    masked = mask_single_quoted_strings(source)
+    # Use the line-preserving mask so ``masked_lines`` keeps the same indices
+    # as ``source.splitlines()``. Plain ``mask_single_quoted_strings`` blanks
+    # CR/LF inside literals which silently drops lines on Windows-style source
+    # and made section detection return ``[]`` for real procedures (#119).
+    masked = mask_literals_preserving_lines(source)
     lines = source.splitlines()
     masked_lines = masked.splitlines()
     n = len(lines)
@@ -390,7 +483,16 @@ def header_content(source: str, begin_proc_line: int) -> str:
 # ── statement iteration (`;`-bounded, string/comment-aware) ──────────────────
 
 
-StatementKind = Literal["CREATE TABLE", "CREATE TEMP TABLE", "INSERT INTO"]
+StatementKind = Literal[
+    "CREATE TABLE",
+    "CREATE TEMP TABLE",
+    "INSERT INTO",
+    "DROP TABLE",
+    "TRUNCATE TABLE",
+    "UPDATE",
+    "DELETE FROM",
+    "MERGE INTO",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -551,6 +653,61 @@ _RE_INSERT_INTO: Final[re.Pattern[str]] = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+# Five extra write verbs supported when the caller explicitly opts in via
+# ``kinds`` (issue #120). They mirror the verbs that ``_WRITE_PREFIX`` already
+# counts for ``nz_find_table_references``, so the two tools agree on what
+# constitutes a "write" against a table.
+_RE_DROP_TABLE: Final[re.Pattern[str]] = re.compile(
+    rf"""
+    (?<![A-Za-z0-9_])
+    DROP\s+TABLE\s+
+    (?:IF\s+EXISTS\s+)?
+    (?P<name>{_QUALIFIED_NAME})
+    \b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+_RE_TRUNCATE_TABLE: Final[re.Pattern[str]] = re.compile(
+    rf"""
+    (?<![A-Za-z0-9_])
+    TRUNCATE\s+TABLE\s+
+    (?P<name>{_QUALIFIED_NAME})
+    \b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+_RE_UPDATE: Final[re.Pattern[str]] = re.compile(
+    rf"""
+    (?<![A-Za-z0-9_])
+    UPDATE\s+
+    (?P<name>{_QUALIFIED_NAME})
+    \b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+_RE_DELETE_FROM: Final[re.Pattern[str]] = re.compile(
+    rf"""
+    (?<![A-Za-z0-9_])
+    DELETE\s+FROM\s+
+    (?P<name>{_QUALIFIED_NAME})
+    \b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+_RE_MERGE_INTO: Final[re.Pattern[str]] = re.compile(
+    rf"""
+    (?<![A-Za-z0-9_])
+    MERGE\s+INTO\s+
+    (?P<name>{_QUALIFIED_NAME})
+    \b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
 
 def _last_segment_of_qualified(name: str) -> str:
     """Return ``table`` from ``bd.schema.table`` / ``bd..table`` / ``schema.table``."""
@@ -560,38 +717,64 @@ def _last_segment_of_qualified(name: str) -> str:
 
 
 def classify_target_statement(stmt_sql: str) -> tuple[StatementKind, str] | None:
-    """If ``stmt_sql`` contains a CREATE [TEMP] TABLE or INSERT INTO, return ``(kind, target)``.
+    """If ``stmt_sql`` contains a recognized targeting verb, return ``(kind, target)``.
 
-    ``target`` is the last segment of the qualified name (table name as written,
-    without surrounding quotes — case preserved). The input must already have
-    comments stripped. Returns ``None`` for any other statement kind, including
-    out-of-scope verbs (MERGE, UPDATE, DELETE, TRUNCATE).
-
-    The verb is searched anywhere in the chunk, not only at the start, so that
+    Recognized verbs are CREATE [TEMP] TABLE, INSERT INTO, DROP TABLE
+    [IF EXISTS], TRUNCATE TABLE, UPDATE, DELETE FROM and MERGE INTO. Every
+    occurrence is searched anywhere in the chunk (not only at the start) so
     statements yielded by :func:`iter_statements` whose prefix is a leading
     block-control token (``BEGIN``, ``IF … THEN``, ``ELSE``, ``EXCEPTION``,
     ``FOR … LOOP``, ``WHILE``, etc.) are still classified correctly. Single-
     quoted string literals are masked before scanning so verbs that appear
     only inside a literal (``'INSERT INTO foo'``) do not produce a match.
-    When several CREATE/INSERT verbs are present in the same chunk, the one
-    occurring **first** in source order wins, mirroring the previous
-    semantics for chunks that already started at the verb.
+    Comments must already be stripped by the caller.
+
+    ``target`` is the last segment of the qualified name (table name as written,
+    without surrounding quotes — case preserved). When several supported verbs
+    coexist in the same chunk, the one occurring **first** in source order
+    wins, mirroring the prior semantics for chunks that already started at
+    the verb.
     """
     masked = mask_single_quoted_strings(stmt_sql)
 
+    candidates: list[tuple[int, StatementKind, str]] = []
+
     create_match = _RE_CREATE_TABLE.search(masked)
-    insert_match = _RE_INSERT_INTO.search(masked)
-
-    if create_match is not None and (
-        insert_match is None or create_match.start() <= insert_match.start()
-    ):
+    if create_match is not None:
         kind: StatementKind = "CREATE TEMP TABLE" if create_match.group("temp") else "CREATE TABLE"
-        return kind, _last_segment_of_qualified(create_match.group("name"))
+        candidates.append(
+            (
+                create_match.start(),
+                kind,
+                _last_segment_of_qualified(create_match.group("name")),
+            )
+        )
 
-    if insert_match is not None:
-        return "INSERT INTO", _last_segment_of_qualified(insert_match.group("name"))
+    for pattern, verb_kind in (
+        (_RE_INSERT_INTO, "INSERT INTO"),
+        (_RE_DROP_TABLE, "DROP TABLE"),
+        (_RE_TRUNCATE_TABLE, "TRUNCATE TABLE"),
+        (_RE_UPDATE, "UPDATE"),
+        (_RE_DELETE_FROM, "DELETE FROM"),
+        (_RE_MERGE_INTO, "MERGE INTO"),
+    ):
+        match = pattern.search(masked)
+        if match is not None:
+            candidates.append(
+                (
+                    match.start(),
+                    cast(StatementKind, verb_kind),
+                    _last_segment_of_qualified(match.group("name")),
+                )
+            )
 
-    return None
+    if not candidates:
+        return None
+
+    # First match in source order wins (stable when multiple kinds are equal).
+    candidates.sort(key=lambda c: c[0])
+    _, winning_kind, target = candidates[0]
+    return winning_kind, target
 
 
 @dataclass(frozen=True, slots=True)
@@ -621,7 +804,18 @@ def extract_create_or_insert_targeting(
         return []
     table_norm = table.strip().lower()
     allowed: set[StatementKind] = (
-        {"CREATE TABLE", "CREATE TEMP TABLE", "INSERT INTO"} if kinds is None else set(kinds)
+        {
+            "CREATE TABLE",
+            "CREATE TEMP TABLE",
+            "INSERT INTO",
+            "DROP TABLE",
+            "TRUNCATE TABLE",
+            "UPDATE",
+            "DELETE FROM",
+            "MERGE INTO",
+        }
+        if kinds is None
+        else set(kinds)
     )
 
     matches: list[TargetingMatch] = []

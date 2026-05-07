@@ -373,8 +373,57 @@ def get_all_procedures_ddl(
     }
 
 
+# Netezza compound type tokens that span multiple words. When a chunk starts
+# with one of these (case-insensitive) the whole compound — including any
+# trailing ``(N)`` length specifier — belongs to the type, not the name.
+# A formal name, when present, always sits before the type, never after, so
+# detecting the compound at the head is enough to decide whether the chunk has
+# a leading name or only a type. Issue #121.
+_COMPOUND_TYPE_PREFIXES: Final[tuple[tuple[str, ...], ...]] = (
+    ("NATIONAL", "CHARACTER", "VARYING"),
+    ("NATIONAL", "CHARACTER"),
+    ("CHARACTER", "VARYING"),
+    ("DOUBLE", "PRECISION"),
+    ("TIMESTAMP", "WITH", "TIME", "ZONE"),
+    ("TIME", "WITH", "TIME", "ZONE"),
+)
+
+
+def _strip_paren_suffix(token: str) -> str:
+    """Return ``token`` without any trailing ``(…)`` suffix.
+
+    Catalog returns length specifiers glued to the preceding word with no
+    whitespace (``VARYING(20)``), so naive tokenization splits them as one
+    unit. Stripping the suffix lets us match the leading word against the
+    compound-type prefix table.
+    """
+    idx = token.find("(")
+    return token if idx < 0 else token[:idx]
+
+
+def _starts_with_compound_type(tokens: list[str]) -> bool:
+    """Return True when ``tokens`` begins with a known multi-word Netezza type."""
+    upper = [_strip_paren_suffix(t).upper() for t in tokens]
+    return any(
+        len(upper) >= len(prefix) and tuple(upper[: len(prefix)]) == prefix
+        for prefix in _COMPOUND_TYPE_PREFIXES
+    )
+
+
 def parse_procedure_arguments(arguments: str) -> list[dict[str, str]]:
-    """Parse ``_V_PROCEDURE.ARGUMENTS`` into ``[{name, type}, ...]``."""
+    """Parse ``_V_PROCEDURE.ARGUMENTS`` into ``[{name, type}, ...]``.
+
+    Handles Netezza compound types whose canonical spelling spans multiple
+    words (``CHARACTER VARYING(N)``, ``NATIONAL CHARACTER VARYING(N)``,
+    ``NATIONAL CHARACTER(N)``, ``DOUBLE PRECISION``, ``TIME WITH TIME ZONE``,
+    ``TIMESTAMP WITH TIME ZONE``) — they are kept as a single ``type`` rather
+    than being split into a synthetic ``name`` plus a truncated ``type``.
+
+    When ``_v_procedure`` returns only types (no formal parameter names — the
+    typical shape on NPS 11.x for SPs created without explicit names) each
+    argument receives a synthetic ``arg1``, ``arg2``, … name. When a formal
+    name is present (``P_FECHA DATE``) it is preserved verbatim. Issue #121.
+    """
     raw = arguments.strip()
     if not raw or raw.upper() == "NULL":
         return []
@@ -386,8 +435,12 @@ def parse_procedure_arguments(arguments: str) -> list[dict[str, str]]:
         if not chunk:
             continue
         tokens = chunk.split()
-        if len(tokens) >= _MIN_TOKENS_NAMED_ARG and re.match(
-            r"^[A-Za-z_][A-Za-z0-9_]*$", tokens[0]
+        starts_with_compound = _starts_with_compound_type(tokens)
+        first_is_identifier = bool(re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", tokens[0]))
+        if (
+            len(tokens) >= _MIN_TOKENS_NAMED_ARG
+            and first_is_identifier
+            and not starts_with_compound
         ):
             out.append({"name": tokens[0], "type": " ".join(tokens[1:])})
         else:

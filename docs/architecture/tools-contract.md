@@ -411,7 +411,7 @@ Aísla la lógica de **una** tabla intermedia dentro de un SP: devuelve los `CRE
 | `procedure` | string (required) | |
 | `signature` | string (optional) | Para overloads. |
 | `table` | string (required) | Nombre simple de la tabla (case-insensitive). No se aceptan `schema.table` — la lógica es interna al SP. |
-| `kinds` | array of `"create"` \| `"insert"` (default `["create", "insert"]`) | Filtra los tipos de statement a incluir. |
+| `kinds` | array of `"create"` \| `"insert"` \| `"drop"` \| `"truncate"` \| `"update"` \| `"delete"` \| `"merge"` (default `["create", "insert"]`) | Filtra los tipos de statement a incluir. El default mantiene la cobertura v1 (CREATE/INSERT) por back-compat; los cinco verbos extra (`drop`/`truncate`/`update`/`delete`/`merge`) son opt-in y reflejan los mismos writes que cuenta `nz_find_table_references` (issue #120). |
 
 **Output**:
 ```json
@@ -432,7 +432,7 @@ Aísla la lógica de **una** tabla intermedia dentro de un SP: devuelve los `CRE
 }
 ```
 
-- `kind` ∈ `"CREATE TABLE"` | `"CREATE TEMP TABLE"` | `"INSERT INTO"`. `MERGE`, `UPDATE`, `DELETE`, `TRUNCATE` y SQL dinámico están **fuera de alcance** en v1.
+- `kind` ∈ `"CREATE TABLE"` | `"CREATE TEMP TABLE"` | `"INSERT INTO"` | `"DROP TABLE"` | `"TRUNCATE TABLE"` | `"UPDATE"` | `"DELETE FROM"` | `"MERGE INTO"`. SQL dinámico (`EXECUTE IMMEDIATE`) sigue **fuera de alcance**.
 - `sql` viene sin comentarios (`--`, `/* */`); strings (`'a;b'`) e identificadores entre comillas (`"a;b"`) se preservan.
 - `line_start` / `line_end` apuntan al cuerpo **crudo** original (con comentarios) para auditoría.
 - Si la tabla solo aparece como `FROM`/`JOIN` y nunca como target → `count = 0`, `not_found = true`. Para análisis inverso usar la tool de referencias.
