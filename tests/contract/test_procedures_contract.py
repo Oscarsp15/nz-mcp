@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 
 from nz_mcp.tools.procedures import (
+    GetFindTableReferencesInput,
+    GetFindTableReferencesOutput,
     GetProcedureDdlInput,
     GetProcedureDdlOutput,
     GetProcedureSizeInput,
@@ -258,5 +260,125 @@ def test_table_logic_statement_kind_constrained() -> None:
                 "count": 1,
                 "not_found": False,
                 "duration_ms": 0,
+            }
+        )
+
+
+# ── nz_find_table_references (issue #107) ────────────────────────────────────
+
+
+@pytest.mark.contract
+def test_find_table_references_input_accepts_schema_alias_and_minimal() -> None:
+    inp = GetFindTableReferencesInput.model_validate(
+        {"database": "D", "schema": "PUBLIC", "table": "FOO"}
+    )
+    assert inp.procedure_schema == "PUBLIC"
+    assert inp.table_database is None
+    assert inp.table_schema is None
+    assert inp.pattern is None
+
+
+@pytest.mark.contract
+def test_find_table_references_input_accepts_all_fields() -> None:
+    inp = GetFindTableReferencesInput.model_validate(
+        {
+            "database": "D",
+            "schema": "PUBLIC",
+            "table": "FOO",
+            "table_database": "DB1",
+            "table_schema": "S1",
+            "pattern": "SP_%",
+        }
+    )
+    assert inp.table_database == "DB1"
+    assert inp.table_schema == "S1"
+    assert inp.pattern == "SP_%"
+
+
+@pytest.mark.contract
+def test_find_table_references_input_rejects_extra_fields() -> None:
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        GetFindTableReferencesInput.model_validate(
+            {
+                "database": "D",
+                "schema": "PUBLIC",
+                "table": "FOO",
+                "kinds": ["read"],  # not part of this tool
+            }
+        )
+
+
+@pytest.mark.contract
+def test_find_table_references_input_requires_table() -> None:
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        GetFindTableReferencesInput.model_validate({"database": "D", "schema": "PUBLIC"})
+
+
+@pytest.mark.contract
+def test_find_table_references_output_has_required_fields() -> None:
+    out = GetFindTableReferencesOutput.model_validate(
+        {
+            "references": [
+                {
+                    "procedure_name": "SP_X",
+                    "signature": "SP_X(INT)",
+                    "usage": "both",
+                    "occurrences_read": 2,
+                    "occurrences_write": 1,
+                    "last_altered": "2026-04-15 10:30:00",
+                }
+            ],
+            "scanned_count": 10,
+            "match_count": 1,
+            "truncated": False,
+            "duration_ms": 12,
+        }
+    )
+    assert out.match_count == 1
+    assert out.references[0].usage == "both"
+
+
+@pytest.mark.contract
+def test_find_table_references_output_rejects_unknown_usage() -> None:
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        GetFindTableReferencesOutput.model_validate(
+            {
+                "references": [
+                    {
+                        "procedure_name": "SP_X",
+                        "signature": "SP_X()",
+                        "usage": "delete",  # not in Literal["read","write","both"]
+                        "occurrences_read": 0,
+                        "occurrences_write": 1,
+                        "last_altered": "",
+                    }
+                ],
+                "scanned_count": 1,
+                "match_count": 1,
+                "truncated": False,
+                "duration_ms": 0,
+            }
+        )
+
+
+@pytest.mark.contract
+def test_find_table_references_output_rejects_extra_fields() -> None:
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        GetFindTableReferencesOutput.model_validate(
+            {
+                "references": [],
+                "scanned_count": 0,
+                "match_count": 0,
+                "truncated": False,
+                "duration_ms": 0,
+                "unexpected_field": True,
             }
         )

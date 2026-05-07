@@ -111,6 +111,16 @@ MESSAGES: Final[dict[str, Message]] = {
             "Filter by kinds or use nz_get_procedure_section."
         ),
     },
+    "INPUT_TOO_BROAD": {
+        "es": (
+            "El escaneo abarcaría {scanned} procedimientos (cap {cap}). "
+            "Refina la búsqueda con el parámetro 'pattern'."
+        ),
+        "en": (
+            "The scan would cover {scanned} procedures (cap {cap}). "
+            "Narrow it with the 'pattern' parameter."
+        ),
+    },
     # Hints
     "HINT.RESULT_TRUNCATED_BY_ROWS": {
         "es": "Resultado truncado en {n} filas. Añade WHERE o LIMIT para refinar.",

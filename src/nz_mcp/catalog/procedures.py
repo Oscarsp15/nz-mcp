@@ -10,6 +10,7 @@ from nz_mcp.auth import get_password
 from nz_mcp.catalog.identifier import render_cross_db, validate_catalog_identifier
 from nz_mcp.catalog.nzplsql_parser import (
     StatementKind,
+    count_table_references,
     extract_create_or_insert_targeting,
     find_begin_proc_line,
     header_content,
@@ -22,6 +23,7 @@ from nz_mcp.catalog.row_shape import is_sequence_row
 from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
 from nz_mcp.errors import (
+    InputTooBroadError,
     InvalidInputError,
     NetezzaError,
     ObjectNotFoundError,
@@ -34,6 +36,10 @@ _MAX_RANGE_LINES: Final[int] = 500
 _MIN_TOKENS_NAMED_ARG: Final[int] = 2
 
 _ROW_LIST_MIN: Final[int] = 6
+
+# Caps for ``nz_find_table_references`` (issue #107).
+FIND_TABLE_REFERENCES_SCAN_CAP: Final[int] = 5000
+FIND_TABLE_REFERENCES_RESULT_CAP: Final[int] = 1000
 
 # Column order from ``GET_PROCEDURE_DDL`` / ``GET_PROCEDURE_SECTION`` SELECT.
 _DDL_TUPLE_INDEX: Final[dict[str, int]] = {
@@ -561,3 +567,96 @@ def _build_procedure_ddl(schema: str, row: Any) -> str:
     if ret_clause:
         head = f"{head}\n{ret_clause}"
     return f"{head}\nLANGUAGE NZPLSQL AS\n{source}"
+
+
+# ── nz_find_table_references (issue #107) ────────────────────────────────────
+
+
+def find_table_references(
+    profile: Profile,
+    database: str,
+    schema: str,
+    table: str,
+    *,
+    table_database: str | None = None,
+    table_schema: str | None = None,
+    pattern: str | None = None,
+) -> dict[str, Any]:
+    """Return procedures in ``schema`` that read or write ``table``.
+
+    The procedure bodies are fetched in a single batch query; each
+    ``PROCEDURESOURCE`` is then scanned with the parser helpers in
+    :mod:`nz_mcp.catalog.nzplsql_parser`.
+
+    The ``pattern`` (``LIKE`` filter on procedure name) is applied at the
+    catalog query level. After filtering, the candidate set must still be
+    within :data:`FIND_TABLE_REFERENCES_SCAN_CAP`; otherwise an
+    :class:`InputTooBroadError` is raised.
+
+    Returns a ``dict`` shaped to match ``GetFindTableReferencesOutput``
+    minus the ``duration_ms`` field, which the tool layer fills in.
+    """
+    validate_catalog_identifier(schema)
+
+    raw = get_all_procedures_ddl(profile, database, schema, pattern=pattern)
+    procedures = raw["procedures"]
+    scanned = len(procedures)
+
+    if scanned > FIND_TABLE_REFERENCES_SCAN_CAP:
+        raise InputTooBroadError(
+            scanned=scanned,
+            cap=FIND_TABLE_REFERENCES_SCAN_CAP,
+        )
+
+    references: list[dict[str, Any]] = []
+    for proc in procedures:
+        # ``ddl`` includes the reconstructed CREATE OR REPLACE header. The
+        # reference detection must scan the full reconstructed DDL because
+        # signatures and bodies both live in user space — but in practice
+        # only the body holds verbs, and the header is short text. Scanning
+        # the full DDL keeps semantics simple and avoids losing references
+        # in any header transformation.
+        ddl = str(proc["ddl"])
+        reads, writes = count_table_references(
+            ddl,
+            table,
+            table_database=table_database,
+            table_schema=table_schema,
+        )
+        if reads == 0 and writes == 0:
+            continue
+        usage: str
+        if reads > 0 and writes > 0:
+            usage = "both"
+        elif writes > 0:
+            usage = "write"
+        else:
+            usage = "read"
+        references.append(
+            {
+                "procedure_name": str(proc["name"]),
+                "signature": str(proc["signature"]),
+                "usage": usage,
+                "occurrences_read": reads,
+                "occurrences_write": writes,
+                "last_altered": str(proc["last_altered"]),
+            }
+        )
+
+    references.sort(
+        key=lambda r: (
+            -(int(r["occurrences_read"]) + int(r["occurrences_write"])),
+            str(r["procedure_name"]),
+        ),
+    )
+
+    truncated = len(references) > FIND_TABLE_REFERENCES_RESULT_CAP
+    if truncated:
+        references = references[:FIND_TABLE_REFERENCES_RESULT_CAP]
+
+    return {
+        "references": references,
+        "scanned_count": scanned,
+        "match_count": len(references),
+        "truncated": truncated,
+    }
