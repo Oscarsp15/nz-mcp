@@ -6,7 +6,7 @@ from contextlib import closing
 from typing import Any, Final, Protocol, cast
 
 from nz_mcp.auth import get_password
-from nz_mcp.catalog.identifier import render_cross_db
+from nz_mcp.catalog.identifier import render_cross_db, validate_database_identifier
 from nz_mcp.catalog.resolver import resolve_query
 from nz_mcp.catalog.row_shape import is_sequence_row
 from nz_mcp.config import Profile
@@ -32,7 +32,7 @@ class _DdlCursor(Protocol):
     def execute(
         self,
         sql: str,
-        params: tuple[str, str],
+        params: tuple[str, str] | None = ...,
     ) -> None: ...
 
     def fetchone(self) -> Any: ...
@@ -85,15 +85,34 @@ def get_view_ddl(
     schema: str,
     view: str,
 ) -> str:
-    """Return the ``DEFINITION`` text for a view from ``_v_view``."""
+    """Return the ``DEFINITION`` text for a view from ``_v_view``.
+
+    Issue #125: ``_V_VIEW.DEFINITION`` is computed lazily from ``_T_RULE`` of the
+    session's *current* catalog. When the target view lives in a database
+    different from the session's default (cross-database query
+    ``<BD>.._V_VIEW``), the lazy join silently fails and Netezza projects the
+    sentinel string ``'Not a view'`` instead of the real DDL. To work around
+    this, we emit ``SET CATALOG <database>`` on the same connection right
+    before the SELECT. Each call opens a fresh nzpy connection (no pool), so
+    the catalog change does not leak into subsequent queries.
+    """
     params: tuple[str, str] = (schema, view)
     password = get_password(profile.name)
     base_sql = resolve_query("get_view_ddl", profile)
     sql = render_cross_db(base_sql, database=database)
+    # ``database`` was validated by ``render_cross_db``; re-normalize to the same
+    # uppercase identifier shape we will issue via SET CATALOG (no quoting,
+    # because Netezza does not accept quoted identifiers in SET CATALOG and the
+    # validator restricts the alphabet to ``[A-Z][A-Z0-9_]*``).
+    target_catalog = validate_database_identifier(database)
 
     connection = cast(_ConnectionForDdl, open_connection(profile, password))
     try:
         with closing(connection.cursor()) as cursor:
+            # Bind the session catalog to the target database BEFORE reading
+            # ``_V_VIEW.DEFINITION``; otherwise the column projects the
+            # sentinel ``'Not a view'`` for any cross-database lookup.
+            cursor.execute(f"SET CATALOG {target_catalog}")
             cursor.execute(sql, params)
             row = cursor.fetchone()
     except Exception as exc:  # noqa: BLE001, RUF100

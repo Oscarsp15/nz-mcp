@@ -39,10 +39,16 @@ class _FakeDdlCursor:
         self.closed = False
         self.executed_sql: str | None = None
         self.executed_params: tuple[str, str] | None = None
+        # Issue #125: track every statement executed on this cursor in order
+        # so tests can assert that ``SET CATALOG <db>`` was issued *before* the
+        # ``SELECT DEFINITION FROM <BD>.._V_VIEW`` query.
+        self.statements: list[tuple[str, tuple[str, str] | None]] = []
 
-    def execute(self, sql: str, params: tuple[str, str]) -> None:
+    def execute(self, sql: str, params: tuple[str, str] | None = None) -> None:
         self.executed_sql = sql
-        self.executed_params = params
+        if params is not None:
+            self.executed_params = params
+        self.statements.append((sql, params))
 
     def fetchone(self) -> object | None:
         return self._one
@@ -292,7 +298,7 @@ def test_get_view_ddl_raises_when_no_row(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_get_view_ddl_wraps_driver_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     class _Boom(_FakeDdlCursor):
-        def execute(self, sql: str, params: tuple[str, str]) -> None:
+        def execute(self, sql: str, params: tuple[str, str] | None = None) -> None:
             _ = (sql, params)
             raise RuntimeError("driver boom")
 
@@ -326,3 +332,182 @@ def test_get_view_ddl_rejects_dict_without_definition(monkeypatch: pytest.Monkey
         get_view_ddl(_profile(), database="D", schema="S", view="V")
 
     assert "DEFINITION" in exc.value.context["detail"]
+
+
+# ── issue #125: cross-database DDL fetch needs ``SET CATALOG`` ─────────────────
+
+
+class _CrossDbDdlCursor:
+    """Fake cursor that simulates Netezza's lazy ``DEFINITION`` resolution.
+
+    ``_V_VIEW.DEFINITION`` only resolves to the real CREATE VIEW source when
+    the session's current catalog matches the database that owns the view; on
+    cross-database lookups Netezza projects the literal sentinel ``Not a
+    view`` instead. This fake mirrors that behaviour so we can anchor the fix
+    against a deterministic stub.
+    """
+
+    def __init__(
+        self,
+        *,
+        target_db: str,
+        session_db: str,
+        real_definition: str,
+    ) -> None:
+        self._target_db = target_db.upper()
+        self._session_db = session_db.upper()
+        self._real_definition = real_definition
+        self.statements: list[tuple[str, tuple[str, str] | None]] = []
+        self.closed = False
+
+    def execute(self, sql: str, params: tuple[str, str] | None = None) -> None:
+        self.statements.append((sql, params))
+        upper = sql.strip().upper()
+        if upper.startswith("SET CATALOG"):
+            # Mimic the real driver: SET CATALOG mutates the session catalog.
+            self._session_db = upper.removeprefix("SET CATALOG").strip().rstrip(";")
+
+    def fetchone(self) -> object | None:
+        # The last statement is the SELECT for DEFINITION; the projected value
+        # depends on whether the session catalog matches the target DB.
+        if self._session_db == self._target_db:
+            return (self._real_definition,)
+        return ("Not a view",)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _CrossDbConnection:
+    def __init__(self, cursor: _CrossDbDdlCursor) -> None:
+        self._cursor = cursor
+        self.closed = False
+
+    def cursor(self) -> _CrossDbDdlCursor:
+        return self._cursor
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_get_view_ddl_emits_set_catalog_before_select(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #125: SET CATALOG <db> must precede the SELECT to _V_VIEW."""
+    cursor = _FakeDdlCursor(one=("CREATE VIEW PROD_MAESTROBI.DBO.V AS SELECT 1",))
+    connection = _FakeDdlConnection(cursor)
+    monkeypatch.setattr("nz_mcp.catalog.views.get_password", lambda _n: "pw")
+    monkeypatch.setattr("nz_mcp.catalog.views.open_connection", lambda *_a, **_k: connection)
+    monkeypatch.setattr(
+        "nz_mcp.catalog.views.resolve_query",
+        lambda _i, _p: (
+            "SELECT DEFINITION FROM <BD>.._V_VIEW WHERE SCHEMA = UPPER(?) AND VIEWNAME = UPPER(?)"
+        ),
+    )
+
+    out = get_view_ddl(
+        _profile(),
+        database="prod_maestrobi",
+        schema="DBO",
+        view="V_CONTINGENCIACREDITOSFULL",
+    )
+
+    assert out.startswith("CREATE VIEW")
+    # First statement must be SET CATALOG with the validated/normalized DB id.
+    assert len(cursor.statements) == 2
+    set_catalog_sql, set_catalog_params = cursor.statements[0]
+    assert set_catalog_sql.upper().startswith("SET CATALOG ")
+    assert "PROD_MAESTROBI" in set_catalog_sql.upper()
+    assert set_catalog_params is None
+    # Second statement is the actual SELECT against _V_VIEW.
+    select_sql, select_params = cursor.statements[1]
+    assert "_V_VIEW" in select_sql.upper()
+    assert "PROD_MAESTROBI.." in select_sql.upper()
+    assert select_params == ("DBO", "V_CONTINGENCIACREDITOSFULL")
+
+
+def test_get_view_ddl_returns_not_a_view_without_set_catalog_when_unfixed() -> None:
+    """Pure regression anchor: prove the cross-DB fake returns the sentinel.
+
+    This exercises the fake itself (not ``get_view_ddl``) to lock in the
+    contract: when no ``SET CATALOG`` is issued and the session catalog does
+    not match the target database, Netezza returns ``"Not a view"``. If this
+    invariant ever stops holding, the fix tests below would silently start
+    passing for the wrong reason.
+    """
+    cursor = _CrossDbDdlCursor(
+        target_db="PROD_MAESTROBI",
+        session_db="DESA_MODELOS",
+        real_definition="CREATE OR REPLACE VIEW DBO.V AS SELECT 1",
+    )
+    cursor.execute(
+        (
+            "SELECT DEFINITION FROM PROD_MAESTROBI.._V_VIEW "
+            "WHERE SCHEMA = UPPER(?) AND VIEWNAME = UPPER(?)"
+        ),
+        ("DBO", "V"),
+    )
+    assert cursor.fetchone() == ("Not a view",)
+
+
+def test_get_view_ddl_cross_db_fix_returns_real_definition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #125: with ``SET CATALOG``, cross-DB DEFINITION resolves correctly."""
+    cursor = _CrossDbDdlCursor(
+        target_db="PROD_MAESTROBI",
+        session_db="DESA_MODELOS",
+        real_definition=(
+            "CREATE OR REPLACE VIEW DBO.V_CONTINGENCIACREDITOSFULL AS "
+            "SELECT * FROM DBO.CONTINGENCIACREDITOSFULL"
+        ),
+    )
+    connection = _FakeDdlConnection(cursor)  # type: ignore[arg-type]
+    monkeypatch.setattr("nz_mcp.catalog.views.get_password", lambda _n: "pw")
+    monkeypatch.setattr("nz_mcp.catalog.views.open_connection", lambda *_a, **_k: connection)
+    monkeypatch.setattr(
+        "nz_mcp.catalog.views.resolve_query",
+        lambda _i, _p: (
+            "SELECT DEFINITION FROM <BD>.._V_VIEW WHERE SCHEMA = UPPER(?) AND VIEWNAME = UPPER(?)"
+        ),
+    )
+
+    out = get_view_ddl(
+        _profile(),
+        database="PROD_MAESTROBI",
+        schema="DBO",
+        view="V_CONTINGENCIACREDITOSFULL",
+    )
+
+    # Without the fix we would get "Not a view"; with SET CATALOG we get DDL.
+    assert out != "Not a view"
+    assert out.startswith("CREATE OR REPLACE VIEW")
+    assert "CONTINGENCIACREDITOSFULL" in out
+
+
+def test_get_view_ddl_validates_database_identifier_before_set_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #125: a malformed ``database`` must not reach the cursor.
+
+    The DB identifier is interpolated literally into ``SET CATALOG <db>``
+    (Netezza does not accept parameter binding for it), so the validator from
+    ``catalog.identifier`` is the only line of defense. We pin that no
+    ``SET CATALOG`` (and no SELECT) is issued for an invalid identifier.
+    """
+    from nz_mcp.errors import InvalidInputError
+
+    cursor = _FakeDdlCursor(one=("CREATE VIEW X AS SELECT 1",))
+    connection = _FakeDdlConnection(cursor)
+    monkeypatch.setattr("nz_mcp.catalog.views.get_password", lambda _n: "pw")
+    monkeypatch.setattr("nz_mcp.catalog.views.open_connection", lambda *_a, **_k: connection)
+    monkeypatch.setattr(
+        "nz_mcp.catalog.views.resolve_query",
+        lambda _i, _p: "SELECT DEFINITION FROM <BD>.._V_VIEW WHERE A=1",
+    )
+
+    with pytest.raises(InvalidInputError):
+        get_view_ddl(_profile(), database="DB; DROP TABLE T --", schema="S", view="V")
+
+    # No statements should have been issued against the cursor.
+    assert cursor.statements == []
