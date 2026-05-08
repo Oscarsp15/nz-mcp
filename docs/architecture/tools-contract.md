@@ -13,7 +13,7 @@
 - **`nz_table_stats`**: `skew_class` (`balanced` \| `moderate` \| `severe`) según umbrales documentados en código; `stats_last_analyzed` desde `_v_statistic` cuando exista fila/columna.
 - **`nz_get_procedure_ddl`**: `size_bytes` (UTF-8), `warning` si el DDL supera ~100 KB (sin truncar).
 - **`nz_get_table_ddl`**: `notes` lista de cadenas i18n; `reconstructed` indica reconstrucción desde catálogo.
-- **`nz_export_ddl`**: respuesta MCP con `content` (bloques `EmbeddedResource` `text/sql` + `TextContent` resumen) y `meta` (incluye `resource_uri` `nz-mcp://ddl/...`, `duration_ms`, y campos opcionales alineados con table/view/procedure). Cuando se pasa `output_path`, `meta` añade `output_path`, `bytes_written` y `sha256` del archivo escrito (ver § 29).
+- **`nz_export_ddl`**: respuesta MCP con `content` (bloques `EmbeddedResource` `text/sql` + `TextContent` resumen) y `meta` (incluye `resource_uri` `nz-mcp://ddl/...`, `duration_ms`, y campos opcionales alineados con table/view/procedure). Cuando se pasa `output_path`, `meta` añade `output_path`, `bytes_written`, `sha256` del archivo escrito, `preview`, `resource_in_response` y `header_included`; por default el `EmbeddedResource` se **omite** del response y el archivo lleva un header `SET CATALOG <db>;` (ver § 29).
 - **CLI**: `nz-mcp edit-profile` actualiza campos de un perfil existente (sin password).
 
 ## Modos de permiso (recordatorio)
@@ -711,7 +711,7 @@ No incluye password ni secretos.
 
 Unifica la obtención de DDL de **tabla**, **vista** o **procedimiento** y lo devuelve como **resultado MCP nativo**: bloque **resource** embebido (`mimeType: text/sql`, URI estable `nz-mcp://ddl/...`) más un bloque **text** con resumen. Pensado para clientes que muestran tarjeta de recurso / copia (p. ej. Claude Desktop). Delega en la misma lógica de catálogo que `nz_get_*_ddl`.
 
-Opcionalmente persiste el DDL al filesystem del servidor MCP cuando se pasa `output_path` (ver `docs/adr/0013-export-ddl-output-path.md`). Lo escrito al archivo es **byte-idéntico** al `text` del resource (UTF-8 sin BOM, sin reformateo, sin traducción de line endings).
+Opcionalmente persiste el DDL al filesystem del servidor MCP cuando se pasa `output_path` (ver `docs/adr/0013-export-ddl-output-path.md`). Por **default** el archivo escrito incluye un header `-- Database/Schema/Object/Exported …` seguido de `SET CATALOG <db>;` para que sea auto-contenido y re-ejecutable; el response **omite** el bloque resource para evitar el cap collision (~100 KB) cuando el DDL es grande, y reporta un `preview` con las primeras 10 líneas del archivo. Dos parámetros invierten ese comportamiento si el caller los necesita (issue #129).
 
 | Input | Tipo | Descripción |
 |---|---|---|
@@ -723,16 +723,38 @@ Opcionalmente persiste el DDL al filesystem del servidor MCP cuando se pasa `out
 | `include_constraints` | bool (default `true`) | Solo tablas: igual que `nz_get_table_ddl`. |
 | `output_path` | string (optional) | Path absoluto en el host del MCP server donde escribir el DDL. Política: sin `..`, sin `~`, sin caracteres de control; carpeta padre debe existir; archivo no debe existir salvo `overwrite=true`. En POSIX el archivo se crea con `0600`; en Windows hereda ACL del padre (issue #127). |
 | `overwrite` | bool (default `false`) | Si `true`, sobrescribe `output_path` cuando ya existe. |
+| `include_resource_in_response` | bool (default `false`) | Sólo aplica cuando `output_path` está presente. Default `false`: el bloque resource se **omite** del response (sólo `TextContent` summary + `meta`) para evitar exceder el cap MCP con DDLs grandes. `true` restablece la forma anterior (resource + path); el caller asume el riesgo de truncamiento. |
+| `include_header` | bool (default `true`) | Sólo aplica cuando `output_path` está presente. Default `true`: prepende un header SQL (`-- Database/Schema/Object/Exported …` + `SET CATALOG <db>;`) al archivo para que sea auto-contenido y re-ejecutable. `false` escribe el DDL byte-idéntico al `text` del resource. |
 
 **Output exitoso** (`structuredContent`): objeto con `content` (array de bloques MCP serializados) y `meta` (metadatos: `object_type`, `database`, `schema`, `name`, `resource_uri`, `duration_ms`, y según tipo `reconstructed`/`notes`, `size_bytes`/`warning`, etc.). Cuando `output_path` se proveyó y la escritura tuvo éxito, `meta` añade:
 
 - `output_path`: ruta absoluta del archivo escrito.
-- `bytes_written`: longitud en bytes del payload UTF-8 escrito.
-- `sha256`: digest SHA-256 hexadecimal del payload (anclaje de byte-identidad).
+- `bytes_written`: longitud en bytes del payload UTF-8 escrito (incluye el header cuando `include_header=true`).
+- `sha256`: digest SHA-256 hexadecimal del archivo en disco. Cuando `include_header=true` cubre header + DDL; cuando `include_header=false` coincide con el digest del `text` del resource. **El archivo es la fuente de verdad** (ADR 0013, revisión 2026-05-08).
+- `preview`: primeras 10 líneas del archivo, sólo cuando `include_resource_in_response=false` (default con `output_path`). Indicador bounded para que el LLM razone sobre el contenido sin re-leer el archivo.
+- `resource_in_response`: `true` cuando el response incluyó el bloque resource; `false` cuando se omitió. `null` si no se pasó `output_path`.
+- `header_included`: `true` cuando el archivo lleva el header SET CATALOG; `false` cuando no. `null` si no se pasó `output_path`.
 
-Si `output_path` no se especifica, los tres campos vuelven `null` (back-compat estricta).
+Si `output_path` no se especifica, los seis campos (`output_path`, `bytes_written`, `sha256`, `preview`, `resource_in_response`, `header_included`) vuelven `null` y el response mantiene la forma original (resource + summary).
 
 **Errores**: cuando `output_path` está presente, las violaciones de policy (`..`, `~`, path relativo, control chars) y de filesystem-state (carpeta inexistente, archivo existente sin `overwrite`) se devuelven con código estable `INVALID_INPUT`; el detalle viaja en `error.context.detail`. La validación de policy ocurre **antes** de consultar Netezza.
+
+**Ejemplo de archivo escrito (con `output_path` y defaults)**:
+
+```sql
+-- Database: PROD_ANALITICA
+-- Schema:   DBO
+-- Object:   procedure DBO.PI_CLIENTESTCM
+-- Exported: 2026-05-08T05:30:00Z by uaipscrea1 (nz-mcp v0.1.0a0)
+SET CATALOG PROD_ANALITICA;
+
+CREATE OR REPLACE PROCEDURE DBO.PI_CLIENTESTCM(DATE, CHARACTER VARYING(20), BYTEINT)
+RETURNS INTEGER
+LANGUAGE NZPLSQL AS
+…
+```
+
+El header sólo contiene metadata segura (BD, schema, objeto, timestamp UTC, nombre del perfil, versión nz-mcp) — nunca host, user, password ni connection string (regla inviolable 1 de `AGENTS.md`, anclado por test adversarial).
 
 **Transporte MCP**: el servidor puede devolver `CallToolResult` con los bloques tipados en `content` (no solo JSON plano).
 

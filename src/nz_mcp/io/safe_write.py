@@ -18,6 +18,19 @@ disk under a hardened policy:
 The function returns a :class:`WriteResult` with the resolved path, the
 number of bytes written and a SHA-256 hex digest of the payload — all values
 are suitable for the calling tool's ``meta`` block.
+
+Optional header support
+-----------------------
+
+Callers may pass a ``header`` argument; when provided, it is prepended to the
+content *before* the bytes are written and *before* the SHA-256 digest is
+computed. The digest reported in :class:`WriteResult` is therefore always the
+digest of the file actually on disk — the file is the source of truth.
+
+When ``header`` is ``None`` (or omitted), the bytes written are byte-identical
+to the input ``content``: no header, no reformatting, no BOM, no CRLF
+translation. This preserves the original byte-identity guarantee from
+ADR 0013 for callers that need it (see issue #129 follow-up).
 """
 
 from __future__ import annotations
@@ -139,21 +152,33 @@ def _apply_owner_only_permissions(target: Path) -> None:
     target.chmod(_FILE_MODE_OWNER_RW)
 
 
-def write_export_ddl(content: str, path: str, overwrite: bool) -> WriteResult:
+def write_export_ddl(
+    content: str,
+    path: str,
+    overwrite: bool,
+    *,
+    header: str | None = None,
+) -> WriteResult:
     """Write ``content`` to ``path`` under the safe-write policy.
 
     Args:
-        content: DDL text to persist. Always encoded as UTF-8 *without* BOM,
-            byte-identical to what callers receive in the embedded resource
-            block — no header, no reformatting, no line-ending translation.
+        content: DDL text to persist. Always encoded as UTF-8 *without* BOM
+            and without CRLF translation.
         path: Absolute target path. Must comply with the policy described in
             the module docstring.
         overwrite: If ``True``, an existing file at ``path`` is replaced;
             otherwise existence is fatal.
+        header: Optional preamble to prepend to ``content`` before writing.
+            When ``None`` (default), the bytes on disk are byte-identical to
+            ``content`` (preserves the original ADR 0013 invariant). When a
+            string is provided it is concatenated as ``header + content`` and
+            the resulting bytes are what gets persisted *and* what the
+            reported SHA-256 digest covers — the file on disk is the source
+            of truth.
 
     Returns:
         :class:`WriteResult` with the absolute path, bytes written and SHA-256
-        hex digest of the payload.
+        hex digest of the payload (header included when one was supplied).
 
     Raises:
         ValueError: When ``path`` is empty, relative, contains ``..`` or
@@ -165,10 +190,13 @@ def write_export_ddl(content: str, path: str, overwrite: bool) -> WriteResult:
     _ensure_parent_directory(target)
     _ensure_writable_target(target, overwrite=overwrite)
 
-    payload = content.encode("utf-8")
+    full_text = content if header is None else header + content
+    payload = full_text.encode("utf-8")
 
     # ``newline=""`` is irrelevant here because we open in binary; passing the
-    # bytes verbatim guarantees byte identity with the resource block text.
+    # bytes verbatim guarantees byte identity with the resource block text
+    # when ``header`` is None, and a deterministic header+content layout
+    # otherwise.
     with target.open("wb") as fh:
         fh.write(payload)
 

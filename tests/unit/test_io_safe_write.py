@@ -169,3 +169,56 @@ def test_write_result_is_immutable(tmp_path: Path) -> None:
     result = write_export_ddl(_SAMPLE_DDL, str(target), overwrite=False)
     with pytest.raises(AttributeError):
         result.bytes_written = 0  # type: ignore[misc]
+
+
+# --- header parameter (issue #129) -------------------------------------------
+
+
+def test_write_export_ddl_header_none_keeps_byte_identity(tmp_path: Path) -> None:
+    """header=None must preserve the original byte-identity invariant."""
+    target = tmp_path / "v.sql"
+    result = write_export_ddl(_SAMPLE_DDL, str(target), overwrite=False, header=None)
+    assert target.read_bytes() == _SAMPLE_DDL.encode("utf-8")
+    assert result.sha256 == _sha256(_SAMPLE_DDL)
+    assert result.bytes_written == len(_SAMPLE_DDL.encode("utf-8"))
+
+
+def test_write_export_ddl_header_prepended_and_sha_covers_full_file(tmp_path: Path) -> None:
+    """When header is supplied the file starts with it and sha256 covers all of it."""
+    header = "-- Database: DB\n-- Schema:   S\nSET CATALOG DB;\n\n"
+    target = tmp_path / "v.sql"
+    result = write_export_ddl(_SAMPLE_DDL, str(target), overwrite=False, header=header)
+
+    raw = target.read_bytes()
+    assert raw.startswith(header.encode("utf-8"))
+    assert raw.endswith(_SAMPLE_DDL.encode("utf-8"))
+    expected = (header + _SAMPLE_DDL).encode("utf-8")
+    assert raw == expected
+    assert result.sha256 == hashlib.sha256(expected).hexdigest()
+    assert result.bytes_written == len(expected)
+    # And explicitly NOT the digest of the bare DDL.
+    assert result.sha256 != _sha256(_SAMPLE_DDL)
+
+
+def test_write_export_ddl_header_with_unicode_and_quotes(tmp_path: Path) -> None:
+    """SQL-comment header survives Ñ, accents and double quotes without corruption."""
+    header = '-- Database: PROD_ÑANDU\n-- Object:   table "WEIRD"\nSET CATALOG PROD_ÑANDU;\n\n'
+    target = tmp_path / "v.sql"
+    write_export_ddl(_SAMPLE_DDL, str(target), overwrite=False, header=header)
+
+    text = target.read_text(encoding="utf-8")
+    assert text.startswith("-- Database: PROD_ÑANDU\n")
+    assert 'table "WEIRD"' in text
+    assert text.endswith(_SAMPLE_DDL)
+    # No BOM, no CRLF translation even with the header.
+    raw = target.read_bytes()
+    assert not raw.startswith(b"\xef\xbb\xbf")
+    assert b"\r\n" not in raw
+
+
+def test_write_export_ddl_header_empty_string_is_noop_for_payload(tmp_path: Path) -> None:
+    """An empty-string header is a degenerate but legal value: file == DDL."""
+    target = tmp_path / "v.sql"
+    result = write_export_ddl(_SAMPLE_DDL, str(target), overwrite=False, header="")
+    assert target.read_bytes() == _SAMPLE_DDL.encode("utf-8")
+    assert result.sha256 == _sha256(_SAMPLE_DDL)
