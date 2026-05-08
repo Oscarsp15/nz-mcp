@@ -116,6 +116,16 @@ ORDER BY VIEWNAME;
 Vistas: `<BD>.._V_VIEW`
 
 ```sql
+-- Issue #125: la columna DEFINITION se computa lazy desde _T_RULE del
+-- catálogo *actual* de la sesión. Si el query es cross-database desde una
+-- sesión conectada a otra BD, el join silencioso falla y la columna proyecta
+-- el sentinel literal 'Not a view' en lugar del SQL real. Para evitarlo, la
+-- tool emite SET CATALOG <database> en la misma conexión efímera antes del
+-- SELECT (la conexión se descarta al final de la llamada, así no contamina
+-- queries posteriores). El identificador de BD se valida contra
+-- [A-Z][A-Z0-9_]* antes de interpolarlo (Netezza no admite parámetros bind
+-- en SET CATALOG).
+SET CATALOG <database>;
 SELECT DEFINITION
 FROM <BD>.._V_VIEW
 WHERE SCHEMA = UPPER(?) AND VIEWNAME = UPPER(?);
