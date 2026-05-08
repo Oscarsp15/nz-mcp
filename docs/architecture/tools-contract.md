@@ -77,7 +77,7 @@ Lista bases de datos visibles para el usuario del perfil.
 
 | Input | Tipo | Descripción |
 |---|---|---|
-| `pattern` | string (optional) | Filtro tipo `LIKE` sobre el nombre. |
+| `pattern` | string (optional) | Filtro tipo `LIKE` sobre el nombre. Match case-insensitive (los nombres del catálogo se normalizan a mayúsculas). |
 
 **Output**:
 ```json
@@ -91,7 +91,7 @@ Lista bases de datos visibles para el usuario del perfil.
 | Input | Tipo | Descripción |
 |---|---|---|
 | `database` | string (required) | BD a inspeccionar (identificador validado para interpolación `<BD>..`). |
-| `pattern` | string (optional) | Filtro tipo `LIKE` sobre el nombre de schema. |
+| `pattern` | string (optional) | Filtro tipo `LIKE` sobre el nombre de schema. Match case-insensitive. |
 
 **Output**: `{ "schemas": [{"name": "PUBLIC", "owner": "ADMIN"}], "duration_ms": 35 }`
 
@@ -105,7 +105,7 @@ Lista **solo tablas** (no vistas, no procedimientos). Para vistas usar `nz_list_
 |---|---|---|
 | `database` | string (required) | |
 | `schema` | string (required) | |
-| `pattern` | string (optional) | Filtro `LIKE` por nombre. |
+| `pattern` | string (optional) | Filtro `LIKE` por nombre. Match case-insensitive. |
 
 **Output** (solo `name` y `kind`; el conteo de filas va en `nz_table_stats`):
 
@@ -222,7 +222,7 @@ Lista vistas (solo vistas) en un schema.
 |---|---|---|
 | `database` | string (required) | |
 | `schema` | string (required) | |
-| `pattern` | string (optional) | Filtro `LIKE`. |
+| `pattern` | string (optional) | Filtro `LIKE`. Match case-insensitive. |
 
 **Output**:
 ```json
@@ -264,7 +264,7 @@ Lista procedimientos almacenados.
 |---|---|---|
 | `database` | string (required) | |
 | `schema` | string (required) | |
-| `pattern` | string (optional) | |
+| `pattern` | string (optional) | Filtro `LIKE` por nombre. Match case-insensitive. |
 
 **Output**:
 ```json
@@ -453,7 +453,7 @@ Análisis **inverso** de impacto: dado `(database, schema, table)`, devuelve los
 | `table` | string (required) | Nombre de la tabla a buscar (case-insensitive). |
 | `table_database` | string (optional) | Filtra referencias prefijadas con esta BD; si se omite, acepta cualquier BD o sin prefijo. |
 | `table_schema` | string (optional) | Análogo a `table_database`. |
-| `pattern` | string (optional) | Filtro `LIKE` sobre el nombre del SP para acotar el escaneo. |
+| `pattern` | string (optional) | Filtro `LIKE` sobre el nombre del SP para acotar el escaneo. Match case-insensitive. |
 
 **Output**:
 ```json
@@ -498,7 +498,7 @@ Obtiene los DDL completos de todos los procedimientos almacenados de un schema e
 |---|---|---|
 | `database` | string (required) | |
 | `schema` | string (required) | |
-| `pattern` | string (optional) | Filtro tipo `LIKE` sobre el nombre. |
+| `pattern` | string (optional) | Filtro tipo `LIKE` sobre el nombre. Match case-insensitive. |
 
 **Output**:
 ```json

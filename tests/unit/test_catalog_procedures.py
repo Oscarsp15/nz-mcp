@@ -321,3 +321,61 @@ def test_get_all_procedures_ddl(monkeypatch: pytest.MonkeyPatch, two_profiles: P
     assert p1["size_bytes"] > 0
 
     assert res["total_size_bytes"] == p1["size_bytes"] + res["procedures"][1]["size_bytes"]
+
+
+# ── issue #123: case-insensitive ``pattern`` matching for procedures ────────
+
+
+class _CaseInsensitiveProcCursor:
+    """Simulates Netezza's ``LIKE UPPER(?)`` semantics for ``_v_procedure``."""
+
+    def __init__(self, names: list[str]) -> None:
+        self._names = names
+        self.executed_sql: str | None = None
+        self.executed_params: tuple[str, str | None, str | None] | None = None
+
+    def cursor(self) -> _CaseInsensitiveProcCursor:
+        return self
+
+    def execute(self, sql: str, params: tuple[str, str | None, str | None]) -> None:
+        self.executed_sql = sql
+        self.executed_params = params
+
+    def fetchall(self) -> list[tuple[str, str, str, str, str, int]]:
+        if self.executed_params is None:
+            return []
+        _, marker, pattern = self.executed_params
+        if marker is None or pattern is None:
+            picked = list(self._names)
+        else:
+            upper = pattern.upper()
+            if "%" in upper:
+                needle = upper.strip("%")
+                picked = [n for n in self._names if needle in n]
+            else:
+                picked = [n for n in self._names if n == upper]
+        return [(n, "OWN", "()", "", "()", 0) for n in picked]
+
+    def close(self) -> None:
+        return
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    ["pi_baserepe%", "PI_BASEREPE%", "PI_baseREPE%"],
+    ids=["all-lower", "all-upper", "mixed-case"],
+)
+def test_list_procedures_pattern_is_case_insensitive(
+    monkeypatch: pytest.MonkeyPatch,
+    pattern: str,
+) -> None:
+    """Issue #123: ``nz_list_procedures`` must match catalog names case-insensitively."""
+    fake = _CaseInsensitiveProcCursor(names=["PI_BASEREPERFILAMIENTOGENERAL"])
+    monkeypatch.setattr("nz_mcp.catalog.procedures.get_password", lambda _n: "pw")
+    monkeypatch.setattr(proc, "open_connection", lambda *_a, **_k: fake)
+
+    out = proc.list_procedures(_DUMMY_PROFILE, "PROD_ANALITICA", "DBO", pattern)
+
+    assert out and out[0]["name"] == "PI_BASEREPERFILAMIENTOGENERAL"
+    assert fake.executed_sql is not None
+    assert "LIKE UPPER(?)" in " ".join(fake.executed_sql.split())

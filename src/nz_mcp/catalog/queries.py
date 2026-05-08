@@ -22,10 +22,10 @@ LIST_DATABASES: Final[CatalogQuery] = CatalogQuery(
     id="list_databases",
     sql=(
         "SELECT DATABASE, OWNER FROM _v_database "
-        "WHERE (? IS NULL OR DATABASE LIKE ?) ORDER BY DATABASE"
+        "WHERE (? IS NULL OR DATABASE LIKE UPPER(?)) ORDER BY DATABASE"
     ),
     catalog_views=("_V_DATABASE",),
-    description="Lists visible databases with an optional LIKE filter.",
+    description="Lists visible databases with an optional LIKE filter (case-insensitive).",
     tested_versions=(NPS_112_IF1,),
 )
 
@@ -33,10 +33,13 @@ LIST_SCHEMAS: Final[CatalogQuery] = CatalogQuery(
     id="list_schemas",
     sql=(
         "SELECT SCHEMA, OWNER FROM <BD>.._V_SCHEMA "
-        "WHERE (? IS NULL OR SCHEMA LIKE ?) ORDER BY SCHEMA"
+        "WHERE (? IS NULL OR SCHEMA LIKE UPPER(?)) ORDER BY SCHEMA"
     ),
     catalog_views=("_V_SCHEMA",),
-    description="Lists schemas for a specific database using cross-database notation.",
+    description=(
+        "Lists schemas for a specific database using cross-database notation; "
+        "the optional pattern matches case-insensitively."
+    ),
     tested_versions=(NPS_112_IF1,),
     cross_database=True,
 )
@@ -46,10 +49,10 @@ LIST_TABLES: Final[CatalogQuery] = CatalogQuery(
     sql=(
         "SELECT TABLENAME AS NAME, OWNER FROM <BD>.._V_TABLE "
         "WHERE SCHEMA = UPPER(?) AND OBJTYPE='TABLE' "
-        "AND (? IS NULL OR TABLENAME LIKE ?) ORDER BY TABLENAME"
+        "AND (? IS NULL OR TABLENAME LIKE UPPER(?)) ORDER BY TABLENAME"
     ),
     catalog_views=("_V_TABLE",),
-    description="Lists tables for a schema with optional name filter.",
+    description="Lists tables for a schema with an optional case-insensitive name filter.",
     tested_versions=(NPS_112_IF1,),
     cross_database=True,
 )
@@ -58,10 +61,11 @@ LIST_VIEWS: Final[CatalogQuery] = CatalogQuery(
     id="list_views",
     sql=(
         "SELECT VIEWNAME AS NAME, OWNER, CREATEDATE FROM <BD>.._V_VIEW "
-        "WHERE SCHEMA = UPPER(?) AND (? IS NULL OR VIEWNAME LIKE ?) ORDER BY VIEWNAME"
+        "WHERE SCHEMA = UPPER(?) AND (? IS NULL OR VIEWNAME LIKE UPPER(?)) "
+        "ORDER BY VIEWNAME"
     ),
     catalog_views=("_V_VIEW",),
-    description="Lists views for a schema with optional name filter.",
+    description="Lists views for a schema with an optional case-insensitive name filter.",
     tested_versions=(NPS_112_IF1,),
     cross_database=True,
 )
@@ -153,10 +157,10 @@ LIST_PROCEDURES: Final[CatalogQuery] = CatalogQuery(
     sql=(
         "SELECT PROCEDURE, OWNER, ARGUMENTS, RETURNS, PROCEDURESIGNATURE, NUMARGS "
         "FROM <BD>.._V_PROCEDURE WHERE SCHEMA = UPPER(?) "
-        "AND (? IS NULL OR PROCEDURE LIKE ?) ORDER BY PROCEDURE"
+        "AND (? IS NULL OR PROCEDURE LIKE UPPER(?)) ORDER BY PROCEDURE"
     ),
     catalog_views=("_V_PROCEDURE",),
-    description="Lists procedures for a schema with optional name filter.",
+    description="Lists procedures for a schema with an optional case-insensitive name filter.",
     tested_versions=(NPS_112_IF1,),
     cross_database=True,
 )
@@ -191,10 +195,12 @@ GET_ALL_PROCEDURES_DDL: Final[CatalogQuery] = CatalogQuery(
         "SELECT PROCEDURE, OWNER, ARGUMENTS, RETURNS, PROCEDURESOURCE, "
         "PROCEDURESIGNATURE, CREATEDATE "
         "FROM <BD>.._V_PROCEDURE WHERE SCHEMA = UPPER(?) "
-        "AND (? IS NULL OR PROCEDURE LIKE ?) ORDER BY PROCEDURE"
+        "AND (? IS NULL OR PROCEDURE LIKE UPPER(?)) ORDER BY PROCEDURE"
     ),
     catalog_views=("_V_PROCEDURE",),
-    description="Returns all procedure DDLs for a schema with an optional name filter.",
+    description=(
+        "Returns all procedure DDLs for a schema with an optional case-insensitive name filter."
+    ),
     tested_versions=(NPS_112_IF1,),
     cross_database=True,
 )
