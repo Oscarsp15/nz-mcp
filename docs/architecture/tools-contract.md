@@ -13,7 +13,7 @@
 - **`nz_table_stats`**: `skew_class` (`balanced` \| `moderate` \| `severe`) según umbrales documentados en código; `stats_last_analyzed` desde `_v_statistic` cuando exista fila/columna.
 - **`nz_get_procedure_ddl`**: `size_bytes` (UTF-8), `warning` si el DDL supera ~100 KB (sin truncar).
 - **`nz_get_table_ddl`**: `notes` lista de cadenas i18n; `reconstructed` indica reconstrucción desde catálogo.
-- **`nz_export_ddl`**: respuesta MCP con `content` (bloques `EmbeddedResource` `text/sql` + `TextContent` resumen) y `meta` (incluye `resource_uri` `nz-mcp://ddl/...`, `duration_ms`, y campos opcionales alineados con table/view/procedure).
+- **`nz_export_ddl`**: respuesta MCP con `content` (bloques `EmbeddedResource` `text/sql` + `TextContent` resumen) y `meta` (incluye `resource_uri` `nz-mcp://ddl/...`, `duration_ms`, y campos opcionales alineados con table/view/procedure). Cuando se pasa `output_path`, `meta` añade `output_path`, `bytes_written` y `sha256` del archivo escrito (ver § 29).
 - **CLI**: `nz-mcp edit-profile` actualiza campos de un perfil existente (sin password).
 
 ## Modos de permiso (recordatorio)
@@ -711,6 +711,8 @@ No incluye password ni secretos.
 
 Unifica la obtención de DDL de **tabla**, **vista** o **procedimiento** y lo devuelve como **resultado MCP nativo**: bloque **resource** embebido (`mimeType: text/sql`, URI estable `nz-mcp://ddl/...`) más un bloque **text** con resumen. Pensado para clientes que muestran tarjeta de recurso / copia (p. ej. Claude Desktop). Delega en la misma lógica de catálogo que `nz_get_*_ddl`.
 
+Opcionalmente persiste el DDL al filesystem del servidor MCP cuando se pasa `output_path` (ver `docs/adr/0013-export-ddl-output-path.md`). Lo escrito al archivo es **byte-idéntico** al `text` del resource (UTF-8 sin BOM, sin reformateo, sin traducción de line endings).
+
 | Input | Tipo | Descripción |
 |---|---|---|
 | `object_type` | enum: `table` \| `view` \| `procedure` (required) | |
@@ -719,8 +721,18 @@ Unifica la obtención de DDL de **tabla**, **vista** o **procedimiento** y lo de
 | `name` | string (required) | Nombre de tabla, vista o procedimiento. |
 | `signature` | string (optional) | Solo procedimientos: firma/overload. |
 | `include_constraints` | bool (default `true`) | Solo tablas: igual que `nz_get_table_ddl`. |
+| `output_path` | string (optional) | Path absoluto en el host del MCP server donde escribir el DDL. Política: sin `..`, sin `~`, sin caracteres de control; carpeta padre debe existir; archivo no debe existir salvo `overwrite=true`. En POSIX el archivo se crea con `0600`; en Windows hereda ACL del padre (issue #127). |
+| `overwrite` | bool (default `false`) | Si `true`, sobrescribe `output_path` cuando ya existe. |
 
-**Output exitoso** (`structuredContent`): objeto con `content` (array de bloques MCP serializados) y `meta` (metadatos: `object_type`, `database`, `schema`, `name`, `resource_uri`, `duration_ms`, y según tipo `reconstructed`/`notes`, `size_bytes`/`warning`, etc.).
+**Output exitoso** (`structuredContent`): objeto con `content` (array de bloques MCP serializados) y `meta` (metadatos: `object_type`, `database`, `schema`, `name`, `resource_uri`, `duration_ms`, y según tipo `reconstructed`/`notes`, `size_bytes`/`warning`, etc.). Cuando `output_path` se proveyó y la escritura tuvo éxito, `meta` añade:
+
+- `output_path`: ruta absoluta del archivo escrito.
+- `bytes_written`: longitud en bytes del payload UTF-8 escrito.
+- `sha256`: digest SHA-256 hexadecimal del payload (anclaje de byte-identidad).
+
+Si `output_path` no se especifica, los tres campos vuelven `null` (back-compat estricta).
+
+**Errores**: cuando `output_path` está presente, las violaciones de policy (`..`, `~`, path relativo, control chars) y de filesystem-state (carpeta inexistente, archivo existente sin `overwrite`) se devuelven con código estable `INVALID_INPUT`; el detalle viaja en `error.context.detail`. La validación de policy ocurre **antes** de consultar Netezza.
 
 **Transporte MCP**: el servidor puede devolver `CallToolResult` con los bloques tipados en `content` (no solo JSON plano).
 
