@@ -64,7 +64,7 @@ def test_list_schemas_queries_catalog_with_optional_like(monkeypatch: pytest.Mon
     monkeypatch.setattr(
         "nz_mcp.catalog.schemas.resolve_query",
         lambda _query_id, _profile: (
-            "SELECT SCHEMA, OWNER FROM <BD>.._V_SCHEMA WHERE (? IS NULL OR SCHEMA LIKE ?)"
+            "SELECT SCHEMA, OWNER FROM <BD>.._V_SCHEMA WHERE (? IS NULL OR SCHEMA LIKE UPPER(?))"
         ),
     )
 
@@ -128,3 +128,52 @@ def test_list_schemas_rejects_bad_row_shape(monkeypatch: pytest.MonkeyPatch) -> 
         list_schemas(_profile(), database="MYDB")
 
     assert "Unexpected row shape" in exc.value.context["detail"]
+
+
+# ── issue #123: case-insensitive ``pattern`` matching ───────────────────────
+
+
+class _CaseInsensitiveSchemaCursor(_FakeCursor):
+    """Stub cursor that simulates Netezza's ``LIKE UPPER(?)`` semantics."""
+
+    def __init__(self, names: list[str]) -> None:
+        super().__init__(rows=[])
+        self._names = names
+
+    def execute(self, sql: str, params: tuple[str | None, str | None]) -> None:
+        super().execute(sql, params)
+        marker, pattern = params
+        if marker is None or pattern is None:
+            self.rows = [(n, "OWN") for n in self._names]
+            return
+        upper = pattern.upper()
+        if "%" in upper:
+            needle = upper.strip("%")
+            self.rows = [(n, "OWN") for n in self._names if needle in n]
+        else:
+            self.rows = [(n, "OWN") for n in self._names if n == upper]
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    ["dbo", "DBO", "Dbo"],
+    ids=["all-lower", "all-upper", "mixed-case"],
+)
+def test_list_schemas_pattern_is_case_insensitive(
+    monkeypatch: pytest.MonkeyPatch,
+    pattern: str,
+) -> None:
+    """Issue #123: a pattern in any case must match the upper-case catalog ``SCHEMA``."""
+    cursor = _CaseInsensitiveSchemaCursor(names=["DBO", "ETL"])
+    connection = _FakeConnection(cursor)
+    monkeypatch.setattr("nz_mcp.catalog.schemas.get_password", lambda _name: "pw")
+    monkeypatch.setattr(
+        "nz_mcp.catalog.schemas.open_connection",
+        lambda *_args, **_kwargs: connection,
+    )
+
+    out = list_schemas(_profile(), database="PROD_MAESTROBI", pattern=pattern)
+
+    assert out == [{"name": "DBO", "owner": "OWN"}]
+    assert cursor.executed_sql is not None
+    assert "LIKE UPPER(?)" in " ".join(cursor.executed_sql.split())

@@ -98,7 +98,8 @@ def test_list_views_queries_catalog_with_optional_like(monkeypatch: pytest.Monke
         "nz_mcp.catalog.views.resolve_query",
         lambda _i, _p: (
             "SELECT VIEWNAME AS NAME, OWNER, X FROM <BD>.._V_VIEW "
-            "WHERE SCHEMA = UPPER(?) AND (? IS NULL OR VIEWNAME LIKE ?) ORDER BY VIEWNAME"
+            "WHERE SCHEMA = UPPER(?) AND (? IS NULL OR VIEWNAME LIKE UPPER(?)) "
+            "ORDER BY VIEWNAME"
         ),
     )
 
@@ -148,6 +149,84 @@ def test_list_views_wraps_driver_errors(monkeypatch: pytest.MonkeyPatch) -> None
 
     assert "catalog down" in exc.value.context["detail"]
     assert "secret-pw" not in exc.value.context["detail"]
+
+
+# ── issue #123: case-insensitive ``pattern`` matching ───────────────────────
+
+
+class _CaseInsensitiveLikeListCursor:
+    """Fake cursor that simulates Netezza's ``LIKE UPPER(?)`` semantics."""
+
+    def __init__(self, names: list[str]) -> None:
+        self._names = names
+        self.executed_sql: str | None = None
+        self.executed_params: tuple[str, str | None, str | None] | None = None
+        self.closed = False
+
+    def execute(self, sql: str, params: tuple[str, str | None, str | None]) -> None:
+        self.executed_sql = sql
+        self.executed_params = params
+
+    def fetchall(self) -> list[tuple[str, str]]:
+        if self.executed_params is None:
+            return []
+        _, marker, pattern = self.executed_params
+        if marker is None or pattern is None:
+            return [(n, "OWN") for n in self._names]
+        upper = pattern.upper()
+        if "%" not in upper:
+            return [(n, "OWN") for n in self._names if n == upper]
+        needle = upper.strip("%")
+        return [(n, "OWN") for n in self._names if needle in n]
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _CaseInsensitiveListConnection:
+    def __init__(self, cursor: _CaseInsensitiveLikeListCursor) -> None:
+        self._cursor = cursor
+        self.closed = False
+
+    def cursor(self) -> _CaseInsensitiveLikeListCursor:
+        return self._cursor
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        "v_CONTINGENCIACREDITOSFULL",
+        "V_CONTINGENCIACREDITOSFULL",
+        "V_contingenciacreditosFULL",
+        "%contingenciacreditosfull%",
+        "%CONTINGENCIACREDITOSFULL%",
+    ],
+    ids=[
+        "all-lower-prefix",
+        "all-upper",
+        "mixed-case",
+        "lower-with-wildcards",
+        "upper-with-wildcards",
+    ],
+)
+def test_list_views_pattern_is_case_insensitive(
+    monkeypatch: pytest.MonkeyPatch,
+    pattern: str,
+) -> None:
+    """Issue #123: pattern in any case matches Netezza's upper-case ``VIEWNAME``."""
+    cursor = _CaseInsensitiveLikeListCursor(names=["V_CONTINGENCIACREDITOSFULL"])
+    connection = _CaseInsensitiveListConnection(cursor)
+    monkeypatch.setattr("nz_mcp.catalog.views.get_password", lambda _n: "pw")
+    monkeypatch.setattr("nz_mcp.catalog.views.open_connection", lambda *_a, **_k: connection)
+
+    out = list_views(_profile(), database="PROD_MAESTROBI", schema="DBO", pattern=pattern)
+
+    assert out == [{"name": "V_CONTINGENCIACREDITOSFULL", "owner": "OWN"}]
+    assert cursor.executed_sql is not None
+    assert "LIKE UPPER(?)" in " ".join(cursor.executed_sql.split())
 
 
 def test_list_views_rejects_bad_row_shape(monkeypatch: pytest.MonkeyPatch) -> None:
