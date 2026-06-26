@@ -52,7 +52,7 @@ def test_issue133_multirow_insert_succeeds() -> None:
         out = nz_insert(
             InsertInput(
                 database=db,
-                schema=schema,
+                table_schema=schema,
                 table=_TABLE,
                 rows=[
                     {"ID": 1, "NOMBRE": "Oscar"},
