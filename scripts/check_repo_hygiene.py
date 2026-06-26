@@ -42,6 +42,7 @@ ALLOWED_TOP_DIRS: frozenset[str] = frozenset(
         "tests",
         "docs",
         ".github",
+        ".claude",
         "scripts",
     }
 )
