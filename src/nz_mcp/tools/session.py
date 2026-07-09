@@ -12,6 +12,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from nz_mcp.catalog.databases import list_databases
+from nz_mcp.catalog.identifier import validate_database_identifier
 from nz_mcp.config import (
     PermissionMode,
     Profile,
@@ -19,8 +21,9 @@ from nz_mcp.config import (
     get_profile,
     list_profile_names,
     set_active_profile,
+    update_profile_fields,
 )
-from nz_mcp.errors import ProfileNotFoundError
+from nz_mcp.errors import ObjectNotFoundError, ProfileNotFoundError
 from nz_mcp.tools.registry import tool
 
 # --- nz_current_profile -------------------------------------------------------
@@ -121,3 +124,63 @@ def nz_switch_profile(
     if on_switch is not None:
         on_switch(target)
     return SwitchProfileOutput(switched_to=target.name, mode=target.mode)
+
+
+# --- nz_switch_database -------------------------------------------------------
+
+
+class SwitchDatabaseInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    database: str = Field(min_length=1, max_length=128)
+
+
+class SwitchDatabaseOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    switched_to: str
+    previous_database: str
+    profile: str
+    mode: PermissionMode
+
+
+@tool(
+    name="nz_switch_database",
+    description=(
+        "Switch the working database of the active profile, reusing its credentials, so "
+        "subsequent tools resolve unqualified names against it (e.g. move to DESA_MAESTROBI "
+        "then query DBO.EFE_MC_CREDITOS without a DB prefix). The target must be visible to "
+        "the profile user. Persists in profiles.toml. Does NOT change host/user/mode — use "
+        "nz_switch_profile for those. Call nz_list_databases to see options; switch back when done."
+    ),
+    mode="read",
+    input_model=SwitchDatabaseInput,
+    output_model=SwitchDatabaseOutput,
+    annotations={"readOnlyHint": False, "idempotentHint": True, "openWorldHint": False},
+)
+def nz_switch_database(
+    params: SwitchDatabaseInput,
+    *,
+    config_path: Path | None = None,
+) -> SwitchDatabaseOutput:
+    profile = get_active_profile(path=config_path)
+    target = validate_database_identifier(params.database)
+    previous = profile.database
+
+    if target != validate_database_identifier(previous):
+        visible = {d["name"].upper() for d in list_databases(profile)}
+        if target not in visible:
+            raise ObjectNotFoundError(
+                detail=(
+                    f"Database {target!r} is not visible to profile {profile.name!r}. "
+                    f"Available: {', '.join(sorted(visible))}."
+                ),
+                database=target,
+                available=sorted(visible),
+            )
+        update_profile_fields(profile.name, path=config_path, database=target)
+
+    return SwitchDatabaseOutput(
+        switched_to=target,
+        previous_database=previous,
+        profile=profile.name,
+        mode=profile.mode,
+    )
