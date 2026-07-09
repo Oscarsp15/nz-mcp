@@ -88,8 +88,18 @@ def execute_ddl(
     statement_type: str,
     dry_run: bool,
     confirm: bool,
+    allow_prod_reads: bool = False,
 ) -> dict[str, Any]:
-    """Validate and (optionally) compile a procedure/view DDL against the active DB."""
+    """Validate and (optionally) compile a procedure/view DDL against the active DB.
+
+    When ``allow_prod_reads`` is true the ``PROD_REF_IN_NONPROD`` environment guard
+    is skipped: the caller certifies it has already flipped every write target to the
+    active (non-production) database and that any remaining ``PROD_`` references are
+    read-only. Compiling a CREATE statement is inert — real writes only happen on
+    CALL — so this only relaxes the compile-time textual scan, not runtime behaviour.
+    All other validations (single statement, well-formed header, admin mode,
+    statement_type) still apply. Default false preserves the fail-closed behaviour.
+    """
     ddl = _resolve_ddl(sql, input_path)
     _assert_type_matches(ddl, statement_type)
 
@@ -101,7 +111,8 @@ def execute_ddl(
             kind=str(parsed.kind),
         )
 
-    assert_env_safe(parsed.raw, active_database=profile.database)
+    if not allow_prod_reads:
+        assert_env_safe(parsed.raw, active_database=profile.database)
 
     if dry_run:
         return {

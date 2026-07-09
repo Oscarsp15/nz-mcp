@@ -21,6 +21,7 @@ class ExecuteDdlInput(BaseModel):
     statement_type: Literal["procedure", "view"]
     dry_run: bool = True
     confirm: bool = False
+    allow_prod_reads: bool = False
 
 
 class ExecuteDdlOutput(BaseModel):
@@ -34,12 +35,12 @@ class ExecuteDdlOutput(BaseModel):
 @tool(
     name="nz_execute_ddl",
     description=(
-        "Compile a full CREATE [OR REPLACE] PROCEDURE (NZPLSQL) or CREATE [OR REPLACE] VIEW "
-        "from inline sql or input_path against the active profile database. Requires profile "
-        "mode admin. Default dry_run=true validates and returns the SQL without executing; set "
-        "dry_run=false and confirm=true to compile. Rejects PROD_ references when the active "
-        "database is not a production one. Use for procedures/views only — not for tables (use "
-        "nz_create_table) nor for running a procedure (use nz_call_procedure)."
+        "Compile a full CREATE [OR REPLACE] PROCEDURE (NZPLSQL) or VIEW from sql or input_path "
+        "against the active profile database. Requires mode admin. dry_run=true (default) "
+        "returns the SQL without executing; dry_run=false + confirm=true compiles. Rejects "
+        "PROD_ refs from a non-production database; allow_prod_reads=true skips that check when "
+        "you certify all writes were flipped to the active DB and remaining PROD_ refs are "
+        "read-only. Procedures/views only — not tables nor CALL (nz_call_procedure)."
     ),
     mode="admin",
     input_model=ExecuteDdlInput,
@@ -64,6 +65,7 @@ def nz_execute_ddl(
         statement_type=params.statement_type,
         dry_run=params.dry_run,
         confirm=params.confirm,
+        allow_prod_reads=params.allow_prod_reads,
     )
     return ExecuteDdlOutput(
         dry_run=bool(raw["dry_run"]),
