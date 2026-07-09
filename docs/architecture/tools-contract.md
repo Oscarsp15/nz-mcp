@@ -803,6 +803,36 @@ El header sólo contiene metadata segura (BD, schema, objeto, timestamp UTC, nom
 
 ---
 
+#### 32. `nz_execute_ddl`
+
+Compila un `CREATE [OR REPLACE] PROCEDURE` (NZPLSQL) **completo** o un `CREATE [OR REPLACE] VIEW` provisto por el caller —inline o leído de `input_path`— contra la base de datos del **perfil activo** (modo `admin`). A diferencia de `nz_clone_procedure` (que reconstruye el DDL desde el catálogo), aquí el DDL lo escribe el usuario. El cuerpo NZPLSQL es opaco para `sql_guard` (se valida por la ruta de cabecera, igual que el clonado). Pensado para mantener SPs/vistas versionados en archivos `.sql` y compilarlos (incluida la nube `nzsaas`). Ver `docs/adr/0014-tool-execute-ddl.md`.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `sql` | string (optional) | DDL inline. Exactamente uno de `sql` / `input_path`. |
+| `input_path` | string (optional) | Path absoluto en el host del MCP server. Misma política que `nz_export_ddl.output_path` (sin `..`, sin `~`, sin control chars); el archivo debe existir y pesar ≤ 1 MiB. |
+| `statement_type` | enum: `procedure` \| `view` (required) | Debe coincidir con la forma del DDL: `procedure` exige el marcador `LANGUAGE NZPLSQL AS`; `view` exige `CREATE [OR REPLACE] VIEW`. |
+| `dry_run` | bool (default **true**) | Si `true`, valida y devuelve `sql_to_execute` sin ejecutar. |
+| `confirm` | bool (**required if** `dry_run=false`) | |
+
+**Output**:
+```json
+{
+  "dry_run": true,
+  "sql_to_execute": "CREATE OR REPLACE PROCEDURE DBO.PI_X(...) ... LANGUAGE NZPLSQL AS ...",
+  "executed": false,
+  "duration_ms": 0
+}
+```
+
+**Reglas**:
+- Guarda de entorno (`assert_env_safe`): si la BD del perfil activo **no** empieza con `PROD_`, cualquier identificador `PROD_*` en el SQL → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD`. Evita compilar en desarrollo código que apunta a producción. Es un escaneo conservador (un literal con `PROD_` también dispara; falla cerrado).
+- Todo el SQL pasa por `sql_guard.validate(mode="admin")`; se exige `CREATE`.
+- Ejecuta contra la BD del perfil activo (no acepta `database` cross-DB).
+- No usar para tablas (`nz_create_table`) ni para ejecutar un procedimiento (`nz_call_procedure`).
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -818,6 +848,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 | `nz_create_table` | false | false | true |
 | `nz_create_table_as` | false | false | false |
 | `nz_clone_procedure` | false | false | true |
+| `nz_execute_ddl` | false | false | true |
 | `nz_truncate`, `nz_drop_table` | false | **true** | true |
 | `nz_switch_profile` | false | false | true |
 

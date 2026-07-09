@@ -48,6 +48,18 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "La tool '{tool}' no acepta sentencias del tipo '{kind}'.",
         "en": "Tool '{tool}' does not accept '{kind}' statements.",
     },
+    "GUARD_REJECTED.PROD_REF_IN_NONPROD": {
+        "es": (
+            "El SQL referencia identificadores de producción ({refs}) pero el perfil "
+            "activo apunta a una base de datos no productiva ({active_database}). "
+            "Rechazado para evitar operaciones cross-entorno."
+        ),
+        "en": (
+            "The SQL references production identifiers ({refs}) but the active profile "
+            "targets a non-production database ({active_database}). "
+            "Rejected to prevent cross-environment operations."
+        ),
+    },
     # Permissions
     "PERMISSION_DENIED.MODE_TOO_LOW": {
         "es": "La operación requiere modo '{required}' pero el perfil tiene '{actual}'.",

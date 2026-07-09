@@ -22,6 +22,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_describe_procedure",
     "nz_describe_table",
     "nz_drop_table",
+    "nz_execute_ddl",
     "nz_explain",
     "nz_export_ddl",
     "nz_find_table_references",
