@@ -50,6 +50,15 @@ _NZPLSQL_MARKER: Final[re.Pattern[str]] = re.compile(
     r"\bLANGUAGE\s+NZPLSQL\s+AS\b",
     re.IGNORECASE,
 )
+# Environment guard: identifiers prefixed ``PROD_`` (databases, schemas, objects) are
+# treated as production references. When the active profile database is not itself a
+# ``PROD_`` database, referencing them from generated DDL/CALL SQL is rejected so a
+# development session cannot compile or invoke code that targets production.
+_PROD_PREFIX: Final[str] = "PROD_"
+_PROD_REF_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"\bPROD_[A-Za-z0-9_]*\b",
+    re.IGNORECASE,
+)
 _NZPLSQL_PROC_HEAD: Final[re.Pattern[str]] = re.compile(
     r"^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\s+"
     r"(?P<sch>[A-Za-z][A-Za-z0-9_]*)\s*\.\s*(?P<proc>[A-Za-z][A-Za-z0-9_]*)"
@@ -118,6 +127,27 @@ def validate(sql: str, *, mode: PermissionMode) -> ParsedStatement:
     _enforce(kind=kind, has_where=has_where, mode=mode)
 
     return ParsedStatement(kind=kind, has_where=has_where, raw=sql)
+
+
+def assert_env_safe(sql: str, *, active_database: str) -> None:
+    """Reject ``PROD_`` references when the active database is not a production one.
+
+    Environment safety rail for the write/DDL/CALL tools: when the active profile
+    targets a non-production database (its name does not start with ``PROD_``), any
+    ``PROD_``-prefixed identifier in ``sql`` (e.g. ``PROD_ANALITICA..T``) is treated
+    as an accidental cross-environment reference and rejected. The check is a
+    conservative textual scan — a string literal containing ``PROD_`` also trips it;
+    that is intentional (fail closed). See docs/adr/0014-tool-execute-ddl.md.
+    """
+    if active_database.strip().upper().startswith(_PROD_PREFIX):
+        return
+    refs = sorted({m.group(0).upper() for m in _PROD_REF_PATTERN.finditer(sql)})
+    if refs:
+        raise GuardRejectedError(
+            code="PROD_REF_IN_NONPROD",
+            refs=", ".join(refs),
+            active_database=active_database,
+        )
 
 
 def _validate_nzplsql_procedure(sql: str, *, mode: PermissionMode) -> ParsedStatement:
