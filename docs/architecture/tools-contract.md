@@ -889,6 +889,23 @@ Elimina un overload de procedimiento vía `DROP PROCEDURE schema.proc(tipos)` (m
 
 ---
 
+#### 35. `nz_switch_database`
+
+Cambia la **base de datos de trabajo del perfil activo** reutilizando sus credenciales, para que las tools siguientes resuelvan nombres sin calificar contra ella (p. ej. moverse a `DESA_MAESTROBI` y consultar `DBO.EFE_MC_CREDITOS` sin prefijo de BD). Pensado para un mismo servidor/usuario con muchas BDs, sin pre-crear un perfil por BD. Ver `docs/adr/0016-tool-switch-database.md`.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | Nombre de la BD destino. Se valida (`[A-Z][A-Z0-9_]*`) y debe ser **visible** en `_v_database` para el usuario del perfil. |
+
+**Output**: `{ "switched_to": "DESA_MAESTROBI", "previous_database": "DESA_MODELOS", "profile": "nzsaas", "mode": "admin" }`
+
+**Reglas**:
+- Actualiza el campo `database` del perfil activo en `profiles.toml` (persiste, como `nz_switch_profile` con `active`). El output da `previous_database` para poder volver.
+- **No** cambia `host`/`user`/`mode` (para eso está `nz_switch_profile`); cambiar de BD es benigno (ya se puede leer cualquier BD con `BD..objeto`).
+- BD no visible → `OBJECT_NOT_FOUND` con la lista disponible. Cambiar a la misma BD es un no-op (no consulta el catálogo).
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -907,7 +924,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 | `nz_execute_ddl` | false | false | true |
 | `nz_call_procedure` | false | **true** | false |
 | `nz_truncate`, `nz_drop_table`, `nz_drop_procedure` | false | **true** | true |
-| `nz_switch_profile` | false | false | true |
+| `nz_switch_profile`, `nz_switch_database` | false | false | true |
 
 ### Formato de errores
 

@@ -41,6 +41,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_list_tables",
     "nz_list_views",
     "nz_query_select",
+    "nz_switch_database",
     "nz_switch_profile",
     "nz_table_sample",
     "nz_table_stats",
