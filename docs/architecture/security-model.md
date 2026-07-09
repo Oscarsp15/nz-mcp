@@ -63,6 +63,10 @@
 
 NPS 11.x usa ``DROP TABLE esquema.tabla IF EXISTS``, no el orden ANSI ``DROP TABLE IF EXISTS esquema.tabla``. ``sqlglot`` no parsea la forma sufijo; el guard la reconoce con un patrón dedicado (identificadores validados, sin apilamiento) y la clasifica como ``DROP`` en modo ``admin``, igual que el resto de DDL administrativo.
 
+#### ``CALL`` (ejecución de procedimientos)
+
+``sqlglot`` no parsea ``CALL`` (cae a un ``Command`` genérico y emite warning a stderr). El guard lo intercepta con un patrón dedicado que **solo acepta placeholders ``?`` como argumentos**: ``CALL esquema.proc(?, …)``. Un argumento literal (``CALL P(1)``) **no** matchea y se rechaza como ``UNKNOWN_STATEMENT``, forzando la parametrización vía bind params del driver. Es una operación **EXECUTE** (el SP ejecuta código arbitrario) y se gatea a ``admin``, mismo tier que la DDL. Ver [`../adr/0015-sql-guard-call-statement.md`](../adr/0015-sql-guard-call-statement.md).
+
 ### Reglas por modo
 
 | Statement kind | `read` | `write` | `admin` |
@@ -76,6 +80,7 @@ NPS 11.x usa ``DROP TABLE esquema.tabla IF EXISTS``, no el orden ANSI ``DROP TAB
 | `CREATE TABLE` | ❌ | ❌ | ✅ |
 | `TRUNCATE` | ❌ | ❌ | ✅ |
 | `DROP TABLE` | ❌ | ❌ | ✅ |
+| `CALL schema.proc(?, …)` (EXECUTE; solo placeholders) | ❌ | ❌ | ✅ |
 | `DROP DATABASE`, `DROP USER`, `GRANT`, `REVOKE` | ❌ | ❌ | ❌ |
 | Stacked (`; ...;`) | ❌ | ❌ | ❌ |
 | Comentarios `--` o `/* */` con statements dentro | sanear antes de parsear | | |
