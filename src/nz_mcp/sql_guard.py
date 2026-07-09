@@ -30,6 +30,7 @@ class StatementKind(StrEnum):
     CREATE = "CREATE"
     TRUNCATE = "TRUNCATE"
     DROP = "DROP"
+    CALL = "CALL"
     UNKNOWN = "UNKNOWN"
 
 
@@ -66,6 +67,16 @@ _NZPLSQL_PROC_HEAD: Final[re.Pattern[str]] = re.compile(
     r"(?:\s+RETURNS\b[\s\S]*)?\s*$",
     re.IGNORECASE | re.DOTALL,
 )
+# ``sqlglot`` cannot parse ``CALL`` (falls back to a generic Command and logs a warning).
+# We intercept it with a dedicated pattern: qualified name + a parenthesised list of ``?``
+# placeholders only. Literal arguments are rejected on purpose — arguments must be
+# parameterized (see docs/adr/0015-sql-guard-call-statement.md).
+_CALL_HEAD: Final[re.Pattern[str]] = re.compile(
+    r"^\s*CALL\s+"
+    r"(?P<sch>[A-Za-z][A-Za-z0-9_]*)\s*\.\s*(?P<proc>[A-Za-z][A-Za-z0-9_]*)"
+    r"\s*\(\s*(?P<args>[?\s,]*)\)\s*$",
+    re.IGNORECASE,
+)
 # Netezza NPS places ``IF EXISTS`` after the qualified name (not ANSI ``DROP TABLE IF EXISTS ...``).
 _NETEZZA_DROP_TABLE_IF_EXISTS_SUFFIX: Final[re.Pattern[str]] = re.compile(
     r"^\s*DROP\s+TABLE\s+"
@@ -95,6 +106,9 @@ def validate(sql: str, *, mode: PermissionMode) -> ParsedStatement:
 
     if _NETEZZA_DROP_TABLE_IF_EXISTS_SUFFIX.match(sql.strip()):
         return _validate_netezza_drop_if_exists_suffix(sql, mode=mode)
+
+    if _CALL_HEAD.match(sql.strip()):
+        return _validate_call(sql, mode=mode)
 
     try:
         parsed_list = sqlglot.parse(sql, read="postgres")
@@ -188,6 +202,23 @@ def _validate_nzplsql_procedure(sql: str, *, mode: PermissionMode) -> ParsedStat
     return ParsedStatement(kind=StatementKind.CREATE, has_where=False, raw=sql)
 
 
+def _validate_call(sql: str, *, mode: PermissionMode) -> ParsedStatement:
+    """Validate ``CALL schema.proc(?, …)`` (placeholder args only) and gate to admin."""
+    m = _CALL_HEAD.match(sql.strip())
+    if not m:
+        raise GuardRejectedError(code="UNKNOWN_STATEMENT", detail="Malformed CALL statement.")
+    try:
+        validate_catalog_identifier(m.group("sch"))
+        validate_catalog_identifier(m.group("proc"))
+    except InvalidInputError as exc:
+        raise GuardRejectedError(
+            code="UNKNOWN_STATEMENT",
+            detail="Invalid CALL identifier.",
+        ) from exc
+    _enforce(kind=StatementKind.CALL, has_where=False, mode=mode)
+    return ParsedStatement(kind=StatementKind.CALL, has_where=False, raw=sql)
+
+
 def _validate_netezza_drop_if_exists_suffix(sql: str, *, mode: PermissionMode) -> ParsedStatement:
     """Accept Netezza ``DROP TABLE schema.table IF EXISTS`` (suffix form)."""
     m = _NETEZZA_DROP_TABLE_IF_EXISTS_SUFFIX.match(sql.strip())
@@ -269,6 +300,13 @@ def _enforce(*, kind: StatementKind, has_where: bool, mode: PermissionMode) -> N
         raise GuardRejectedError(code="STATEMENT_NOT_ALLOWED", kind=str(kind), mode=mode)
 
     if kind in _DDL_KINDS:
+        if mode == "admin":
+            return
+        raise GuardRejectedError(code="STATEMENT_NOT_ALLOWED", kind=str(kind), mode=mode)
+
+    # CALL executes arbitrary procedure code (an EXECUTE-class operation); gate to admin,
+    # same tier as DDL. See docs/adr/0015-sql-guard-call-statement.md.
+    if kind is StatementKind.CALL:
         if mode == "admin":
             return
         raise GuardRejectedError(code="STATEMENT_NOT_ALLOWED", kind=str(kind), mode=mode)

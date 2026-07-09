@@ -833,6 +833,41 @@ Compila un `CREATE [OR REPLACE] PROCEDURE` (NZPLSQL) **completo** o un `CREATE [
 
 ---
 
+#### 33. `nz_call_procedure`
+
+Ejecuta un procedimiento almacenado vía `CALL schema.proc(args)` y devuelve el return code + los mensajes `NOTICE`/`RAISE` que emite el SP (modo `admin`). Aplica a on-prem y a la nube `nzsaas`. Ver `docs/adr/0015-sql-guard-call-statement.md`.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | Debe coincidir con la BD del perfil activo. |
+| `schema` | string (required) | |
+| `procedure` | string (required) | |
+| `args` | array de escalares (optional) | `str`/`int`/`float`/`bool`/`null`. Se pasan **parametrizados** (`?`), nunca concatenados. Máx 100. |
+| `signature` | string (optional) | Firma de tipos `(TIPO, …)` del overload; si se da, se valida que el nº de args coincida. |
+| `dry_run` | bool (default **true**) | Si `true`, devuelve `call_sql` sin ejecutar. |
+| `confirm` | bool (**required if** `dry_run=false`) | |
+| `timeout_s` | int (optional, 1..300) | Timeout de la conexión efímera; default el del perfil. |
+
+**Output**:
+```json
+{
+  "dry_run": false,
+  "call_sql": "CALL DBO.NZMCP_SMOKE_CALL(?)",
+  "executed": true,
+  "return_value": "50",
+  "messages": ["nz-mcp: recibido 5", "nz-mcp: paso 2 ok"],
+  "duration_ms": 110
+}
+```
+
+**Reglas**:
+- `sql_guard` clasifica `CALL` (kind `CALL`) y lo permite **solo en `admin`** (rechazo `STATEMENT_NOT_ALLOWED` en read/write). Ruta dedicada de regex que **solo acepta placeholders `?`**: un argumento literal se rechaza (`UNKNOWN_STATEMENT`), forzando parametrización.
+- Guarda de entorno `assert_env_safe`: un `CALL` a un SP `PROD_*` desde un perfil no productivo → `PROD_REF_IN_NONPROD`.
+- `return_value` es el valor devuelto por el SP (o `null` si no hay result set); `messages` son los `NOTICE`/`RAISE` capturados de `cursor.notices`.
+- No usar para crear un SP (`nz_execute_ddl`) ni para leer su DDL (`nz_get_procedure_ddl`).
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -849,6 +884,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 | `nz_create_table_as` | false | false | false |
 | `nz_clone_procedure` | false | false | true |
 | `nz_execute_ddl` | false | false | true |
+| `nz_call_procedure` | false | **true** | false |
 | `nz_truncate`, `nz_drop_table` | false | **true** | true |
 | `nz_switch_profile` | false | false | true |
 
