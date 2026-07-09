@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -231,6 +232,66 @@ def test_execute_insert_skip_ignores_duplicate(monkeypatch: pytest.MonkeyPatch) 
         confirm=True,
     )
     assert out["inserted"] == 1
+
+
+class _NetezzaLikeCursor:
+    """Fake cursor that rejects multi-row VALUES lists, like real Netezza does.
+
+    Real Netezza fails an ``INSERT ... VALUES (..),(..)`` with
+    "Multiple-row VALUES lists are not supported". A permissive ``MagicMock``
+    hides that, so this strict cursor pins the regression for issue #133.
+    """
+
+    _MULTI_ROW_VALUES = re.compile(r"VALUES\s*\([^)]*\)\s*,\s*\(", re.IGNORECASE)
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[Any, ...] | None]] = []
+        self.rowcount = 0
+
+    def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
+        if self._MULTI_ROW_VALUES.search(sql):
+            msg = "ERROR: Multiple-row VALUES lists are not supported"
+            raise OSError(msg)
+        self.calls.append((sql, params))
+
+    def close(self) -> None:
+        pass
+
+
+def test_execute_insert_multirow_uses_union_all_not_values_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #133: multi-row insert must be a single atomic UNION ALL statement.
+
+    A multi-row ``VALUES (..),(..)`` would raise against the Netezza-like cursor.
+    """
+    cursor = _NetezzaLikeCursor()
+    conn = MagicMock()
+    conn.cursor.return_value = cursor
+    monkeypatch.setattr("nz_mcp.catalog.write.get_password", lambda _n: "pw")
+    monkeypatch.setattr("nz_mcp.catalog.write.open_connection", lambda *_a, **_k: conn)
+
+    rows = [{"A": 1, "B": 2}, {"A": 3, "B": 4}, {"A": 5, "B": 6}]
+    out = execute_insert(
+        _PROFILE,
+        "DEV",
+        "PUBLIC",
+        "TAB",
+        rows,
+        on_conflict="error",
+        dry_run=False,
+        confirm=True,
+    )
+
+    assert out["inserted"] == 3
+    # One atomic statement, not one execute per row.
+    assert len(cursor.calls) == 1
+    sql, params = cursor.calls[0]
+    assert "INSERT INTO PUBLIC.TAB" in sql
+    assert "UNION ALL" in sql.upper()
+    assert _NetezzaLikeCursor._MULTI_ROW_VALUES.search(sql) is None
+    # Params stay parameterized and flattened in row order (cols sorted: A, B).
+    assert params == (1, 2, 3, 4, 5, 6)
 
 
 def test_execute_insert_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
