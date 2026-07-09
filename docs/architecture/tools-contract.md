@@ -814,6 +814,7 @@ Compila un `CREATE [OR REPLACE] PROCEDURE` (NZPLSQL) **completo** o un `CREATE [
 | `statement_type` | enum: `procedure` \| `view` (required) | Debe coincidir con la forma del DDL: `procedure` exige el marcador `LANGUAGE NZPLSQL AS`; `view` exige `CREATE [OR REPLACE] VIEW`. |
 | `dry_run` | bool (default **true**) | Si `true`, valida y devuelve `sql_to_execute` sin ejecutar. |
 | `confirm` | bool (**required if** `dry_run=false`) | |
+| `allow_prod_reads` | bool (default **false**) | Si `true`, **omite solo** la guarda `PROD_REF_IN_NONPROD`. El caller certifica que ya volteó todas las **escrituras** a la BD activa y que los `PROD_*` restantes son **solo lecturas**. Aplica igual en `dry_run` y en compilación real. El resto de validaciones (statement único, cabecera, modo admin, `statement_type`) siguen vigentes. |
 
 **Output**:
 ```json
@@ -827,6 +828,7 @@ Compila un `CREATE [OR REPLACE] PROCEDURE` (NZPLSQL) **completo** o un `CREATE [
 
 **Reglas**:
 - Guarda de entorno (`assert_env_safe`): si la BD del perfil activo **no** empieza con `PROD_`, cualquier identificador `PROD_*` en el SQL → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD`. Evita compilar en desarrollo código que apunta a producción. Es un escaneo conservador (un literal con `PROD_` también dispara; falla cerrado).
+- `allow_prod_reads=true` desactiva **únicamente** esa guarda: compilar un `CREATE` es inerte (las escrituras reales solo ocurren en `CALL`), así que el flag relaja el escaneo textual de compilación, no el comportamiento en ejecución. El default `false` conserva el bloqueo (falla cerrado). No se intenta distinguir lecturas de escrituras: el flag es la certificación explícita del caller.
 - Todo el SQL pasa por `sql_guard.validate(mode="admin")`; se exige `CREATE`.
 - Ejecuta contra la BD del perfil activo (no acepta `database` cross-DB).
 - No usar para tablas (`nz_create_table`) ni para ejecutar un procedimiento (`nz_call_procedure`).

@@ -149,6 +149,67 @@ def test_prod_ref_rejected_in_non_prod_profile() -> None:
     assert "PROD_ANALITICA" in str(ei.value.context.get("refs"))
 
 
+def test_prod_ref_rejected_without_allow_prod_reads_flag() -> None:
+    # Acceptance #1: same call without the flag still rejects (fail-closed default).
+    with pytest.raises(GuardRejectedError) as ei:
+        execute_ddl(
+            _profile(database="DESA_MODELOS"),
+            sql="CREATE OR REPLACE VIEW DBO.V AS SELECT * FROM PROD_ANALITICA..T",
+            input_path=None,
+            statement_type="view",
+            dry_run=True,
+            confirm=False,
+            allow_prod_reads=False,
+        )
+    assert ei.value.code == "PROD_REF_IN_NONPROD"
+
+
+def test_prod_ref_allowed_when_allow_prod_reads_true() -> None:
+    # Acceptance #2: caller certifies reads-only; guard is skipped, DDL validates.
+    out = execute_ddl(
+        _profile(database="DESA_MODELOS"),
+        sql="CREATE OR REPLACE VIEW DBO.V AS SELECT * FROM PROD_ANALITICA..T",
+        input_path=None,
+        statement_type="view",
+        dry_run=True,
+        confirm=False,
+        allow_prod_reads=True,
+    )
+    assert out["dry_run"] is True
+    assert out["executed"] is False
+    assert "PROD_ANALITICA" in out["sql_to_execute"]
+
+
+def test_non_prod_ddl_compiles_regardless_of_flag() -> None:
+    # Acceptance #3: a SP with no PROD_ refs behaves identically with or without the flag.
+    for flag in (False, True):
+        out = execute_ddl(
+            _profile(database="DESA_MODELOS"),
+            sql=_PROC,
+            input_path=None,
+            statement_type="procedure",
+            dry_run=True,
+            confirm=False,
+            allow_prod_reads=flag,
+        )
+        assert out["dry_run"] is True
+        assert "LANGUAGE NZPLSQL AS" in out["sql_to_execute"]
+
+
+def test_allow_prod_reads_still_enforces_other_guards() -> None:
+    # The flag skips ONLY the env guard: statement_type mismatch still rejects.
+    with pytest.raises(InvalidInputError, match="view"):
+        execute_ddl(
+            _profile(database="DESA_MODELOS"),
+            sql=_PROC,
+            input_path=None,
+            statement_type="view",
+            dry_run=True,
+            confirm=False,
+            allow_prod_reads=True,
+        )
+
+
 def test_prod_ref_allowed_in_prod_profile() -> None:
     out = execute_ddl(
         _profile(database="PROD_ANALITICA"),

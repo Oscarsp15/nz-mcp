@@ -63,9 +63,31 @@ No hay parámetro `database` cross-DB: `nz_execute_ddl` compila contra la BD del
 - Reportes de falsos positivos de la guarda `PROD_` en literales/comentarios (≥3 ⇒ excluir strings del escaneo).
 - Si aparece necesidad de compilar cross-DB explícito, evaluar un parámetro `database` con su propia guarda.
 
+## Amendment 2026-07-09 — `allow_prod_reads` (opt-in del caller)
+
+### Contexto
+
+En el flujo real de "volteo" de SPs, las **lecturas** (`SELECT ... FROM PROD_x`) deben quedarse en `PROD_` a propósito (las tablas fuente no tienen datos en `DESA`); solo las **escrituras** se voltean a `DESA_`. Con la guarda `PROD_REF_IN_NONPROD` original —escaneo textual ciego que no distingue lectura de escritura— era imposible compilar contra `DESA` un SP correctamente volteado, porque conserva lecturas `PROD_` legítimas.
+
+### Decisión
+
+Se añade `allow_prod_reads: bool = False` a `nz_execute_ddl` (`ExecuteDdlInput` → `catalog.execute_ddl.execute_ddl`). Cuando es `true`, se **omite únicamente** la llamada a `assert_env_safe` (guarda `PROD_REF_IN_NONPROD`); el resto del flujo (statement único, cabecera bien formada, modo `admin`, `statement_type`, `sql_guard.validate`) es idéntico. Aplica igual en `dry_run` y en compilación real.
+
+### Por qué es seguro (no viola "no relajar estrictez sin ADR")
+
+- **`assert_env_safe` no cambia**: la guarda sigue exactamente igual en `sql_guard.py`. Lo que se agrega es un opt-in en la capa de tool que decide, bajo certificación explícita del caller, no invocarla. No hay rama nueva en `sql_guard` que reduzca estrictez.
+- **Compilar es inerte**: un `CREATE [OR REPLACE] PROCEDURE` no ejecuta lógica; las escrituras reales solo ocurren en `CALL` (que mantiene su propia `assert_env_safe`, issue #148). El flag relaja el escaneo *de compilación*, no el comportamiento en ejecución.
+- **Default `false` = fail-closed**: el comportamiento por defecto no cambia; hay que optar explícitamente.
+- **No se parsea read/write**: el flag ES la certificación del caller de que ya volteó todas las escrituras a la BD activa y que los `PROD_*` restantes son solo lecturas. No intentamos inferir intención del SQL (evita falsa sensación de seguridad).
+
+### Alternativa considerada
+
+- **Variante semántica (marcar lecturas permitidas por objeto)** — rechazada por ahora: requiere parsear y clasificar cada referencia `PROD_`, alto costo y frágil frente a NZPLSQL opaco. El opt-in booleano con certificación explícita del caller es más simple y honesto sobre dónde vive la responsabilidad.
+
 ## References
 
 - Issue #147 (GitHub) — spec y criterios de aceptación.
+- Issue #156 (GitHub) — amendment `allow_prod_reads` (lecturas `PROD_` bajo certificación del caller).
 - ADR 0006 — Tools de responsabilidad única (justifica una tool con `statement_type`, no un parámetro "operación").
 - ADR 0013 — `safe_write.py` (precedente de política de paths aislada, reutilizada por `safe_read.py`).
 - `docs/architecture/security-model.md` — barreras defensivas y regla "no relajar estrictez sin ADR".
