@@ -32,7 +32,9 @@ def open_connection(profile: Profile, password: str) -> object:
             password=password,
             timeout=profile.timeout_s_default,
             application_name=APPLICATION_NAME,
-            securityLevel=1,
+            # SSL negotiation per profile (default 2 = preferred-secured). See config.Profile
+            # and docs/adr/0017-connection-security-level.md.
+            securityLevel=profile.security_level,
             logLevel=_NZPY_LOG_LEVEL_WARNING,
         )
     except Exception as exc:  # noqa: BLE001, RUF100

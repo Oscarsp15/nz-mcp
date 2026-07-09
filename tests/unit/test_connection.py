@@ -9,7 +9,7 @@ from nz_mcp.connection import APPLICATION_NAME, open_connection
 from nz_mcp.errors import ConnectionError as NzConnectionError
 
 
-def _profile() -> Profile:
+def _profile(*, security_level: int = 2) -> Profile:
     return Profile(
         name="dev",
         host="nz-dev.example.com",
@@ -18,6 +18,7 @@ def _profile() -> Profile:
         user="svc_dev",
         mode="read",
         timeout_s_default=45,
+        security_level=security_level,
     )
 
 
@@ -43,10 +44,31 @@ def test_open_connection_calls_nzpy_with_expected_parameters(
     assert captured["password"] == test_secret
     assert captured["timeout"] == 45
     assert captured["application_name"] == APPLICATION_NAME
-    assert captured["securityLevel"] == 1
+    # Secure-by-default: profiles that do not set security_level negotiate SSL (preferred).
+    assert captured["securityLevel"] == 2
     # Maps to WARNING inside nzpy; lower values flood stderr with per-packet DEBUG
     # that shreds client UIs rendering on stderr (e.g. nz-workbench progress bar).
     assert captured["logLevel"] == 2
+
+
+def test_open_connection_propagates_profile_security_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _captured_level(security_level: int) -> object:
+        captured: dict[str, object] = {}
+
+        def _fake_connect(**kwargs: object) -> object:
+            captured.update(kwargs)
+            return object()
+
+        monkeypatch.setattr("nz_mcp.connection.nzpy.connect", _fake_connect)
+        open_connection(_profile(security_level=security_level), "".join(["test", "-pw"]))
+        return captured["securityLevel"]
+
+    # Only-secured (SSL required), as the SaaS instance needs.
+    assert _captured_level(3) == 3
+    # Cleartext opt-in for a trusted lab network.
+    assert _captured_level(1) == 1
 
 
 def test_open_connection_sanitizes_known_password_in_driver_detail(

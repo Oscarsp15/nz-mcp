@@ -118,6 +118,7 @@ port = 5480
 database = "DEV"
 user = "svc_claude"
 mode = "read"
+security_level = 3          # only-secured (SSL required); recomendado para SaaS/nube
 max_rows_default = 100
 timeout_s_default = 30
 
@@ -127,7 +128,12 @@ port = 5480
 database = "DEV"
 user = "svc_claude"
 mode = "write"
+# security_level omitido → default 2 (preferred-secured: negocia SSL, con fallback)
 ```
+
+### SSL / `security_level`
+
+`connection.py` propaga `profile.security_level` a `nzpy.connect` (`securityLevel`). Valores: `0` preferred-unsecured, `1` only-unsecured, `2` preferred-secured (default), `3` only-secured. El **default es `2`** (secure-by-default): negocia TLS y hace fallback a claro solo si el servidor no ofrece SSL, así que es seguro y no rompe on-prem sin TLS. `1` (tráfico en claro) es **opt-in explícito** y solo para una red de laboratorio confiable. Instancias SaaS/nube deben usar `3`. Ver [`../adr/0017-connection-security-level.md`](../adr/0017-connection-security-level.md).
 
 4. Al conectar: `password = keyring.get_password("nz-mcp", f"profile:{profile_name}")`.
 
