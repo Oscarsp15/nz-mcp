@@ -101,8 +101,12 @@ def execute_insert(  # noqa: PLR0912, PLR0915
     cols = [_validate_column_name(k) for k in first_keys]
     qual = _qualified_table(schema, table)
     placeholders = "(" + ", ".join(["?"] * len(cols)) + ")"
-    values_clause = ", ".join([placeholders] * len(rows))
-    sql = f"INSERT INTO {qual} ({', '.join(cols)}) VALUES {values_clause}"  # noqa: S608
+    # Netezza rejects multi-row "VALUES (..),(..)" lists (issue #133). Insert
+    # every row in a single atomic statement via INSERT ... SELECT ? UNION ALL,
+    # the idiomatic multi-row form for Netezza.
+    row_select = "SELECT " + ", ".join(["?"] * len(cols))
+    select_source = " UNION ALL ".join([row_select] * len(rows))
+    sql = f"INSERT INTO {qual} ({', '.join(cols)}) {select_source}"
 
     flat_params: list[Any] = []
     for row in rows:
