@@ -11,6 +11,7 @@ from nz_mcp.tools import (
     databases,  # noqa: F401  (registers database tools)
     ddl,  # noqa: F401  (registers DDL tools)
     describe_table,  # noqa: F401  (registers nz_describe_table)
+    drop_procedure,  # noqa: F401  (registers nz_drop_procedure)
     execute_ddl,  # noqa: F401  (registers nz_execute_ddl)
     export_ddl,  # noqa: F401  (registers nz_export_ddl)
     procedures,  # noqa: F401  (registers procedure tools)

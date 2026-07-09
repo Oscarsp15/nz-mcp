@@ -9,6 +9,7 @@ from typing import Any, Final, Protocol, cast
 
 from nz_mcp.auth import get_password
 from nz_mcp.catalog.identifier import validate_catalog_identifier, validate_database_identifier
+from nz_mcp.catalog.procedures import list_procedures
 from nz_mcp.catalog.tables import table_exists
 from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
@@ -25,6 +26,12 @@ _TYPE_SAFE: Final[re.Pattern[str]] = re.compile(
 )
 _MAX_TYPE_LEN: Final[int] = 200
 _MAX_CTAS_SELECT_SQL: Final[int] = 65536
+
+# Argument-type token for a DROP PROCEDURE signature, e.g. ``INT4``, ``DATE``,
+# ``VARCHAR(20)``, ``CHARACTER VARYING(20)``, ``NUMERIC(10,2)``, ``DOUBLE PRECISION``.
+_SIG_TYPE: Final[re.Pattern[str]] = re.compile(
+    r"^[A-Za-z][A-Za-z0-9_ ]*(?:\(\s*\d+(?:\s*,\s*\d+)?\s*\))?$",
+)
 
 
 class _CursorLike(Protocol):
@@ -415,3 +422,96 @@ def execute_drop_table(
         connection.close()
 
     return {"dropped": True}
+
+
+def _split_top_level_commas(s: str) -> list[str]:
+    depth = 0
+    cur: list[str] = []
+    parts: list[str] = []
+    for ch in s:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        if ch == "," and depth == 0:
+            parts.append("".join(cur))
+            cur = []
+            continue
+        cur.append(ch)
+    parts.append("".join(cur))
+    return parts
+
+
+def _validate_signature_types(signature: str) -> str:
+    """Return a normalized ``TYPE, TYPE`` list from a DROP PROCEDURE signature.
+
+    The signature carries argument **types** (not values), so it is interpolated into
+    the DDL text; each top-level type token is validated against a strict pattern to keep
+    the interpolation injection-safe (the whole statement still goes through ``sql_guard``).
+    """
+    sig = signature.strip()
+    if sig.startswith("(") and sig.endswith(")"):
+        sig = sig[1:-1].strip()
+    if not sig:
+        return ""
+    parts = [p.strip() for p in _split_top_level_commas(sig)]
+    for p in parts:
+        if not p or not _SIG_TYPE.match(p):
+            raise InvalidInputError(detail=f"Invalid argument type in signature: {p!r}")
+    return ", ".join(parts)
+
+
+def _procedure_named_exists(profile: Profile, database: str, schema: str, procedure: str) -> bool:
+    rows = list_procedures(profile, database, schema, pattern=None)
+    target = procedure.upper()
+    return any(str(r.get("name", "")).upper() == target for r in rows)
+
+
+def execute_drop_procedure(
+    profile: Profile,
+    database: str,
+    schema: str,
+    procedure: str,
+    signature: str,
+    *,
+    if_exists: bool,
+) -> dict[str, Any]:
+    """Execute ``DROP PROCEDURE schema.proc(types)`` with ``sql_guard`` (admin).
+
+    Netezza requires the argument-type signature to disambiguate overloads. ``if_exists``
+    is enforced in Python (catalog existence check) because NPS does not parse an
+    ``IF EXISTS`` suffix on ``DROP PROCEDURE``.
+    """
+    _ensure_session_database(profile, database)
+    sch = validate_catalog_identifier(schema)
+    proc = validate_catalog_identifier(procedure)
+    sig = _validate_signature_types(signature)
+
+    drop_sql = f"DROP PROCEDURE {sch}.{proc}({sig})"
+    parsed = guard_validate(drop_sql, mode="admin")
+    if parsed.kind is not StatementKind.DROP:
+        raise NetezzaError(
+            operation="execute_drop_procedure",
+            detail=f"Unexpected statement kind after validation: {parsed.kind}",
+        )
+
+    if if_exists and not _procedure_named_exists(profile, database, sch, proc):
+        return {"dropped": False, "duration_ms": 0}
+
+    password = get_password(profile.name)
+    connection = cast(_ConnectionLike, open_connection(profile, password))
+    start = time.monotonic()
+    try:
+        with closing(connection.cursor()) as cursor:
+            cursor.execute(parsed.raw, ())
+    except Exception as exc:  # noqa: BLE001, RUF100
+        raise NetezzaError(
+            operation="execute_drop_procedure",
+            database=database,
+            detail=sanitize(str(exc), known_secrets={password}),
+        ) from exc
+    finally:
+        connection.close()
+
+    duration_ms = int((time.monotonic() - start) * 1000)
+    return {"dropped": True, "duration_ms": duration_ms}
