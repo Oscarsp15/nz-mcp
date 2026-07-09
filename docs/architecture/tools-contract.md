@@ -868,6 +868,27 @@ Ejecuta un procedimiento almacenado vía `CALL schema.proc(args)` y devuelve el 
 
 ---
 
+#### 34. `nz_drop_procedure`
+
+Elimina un overload de procedimiento vía `DROP PROCEDURE schema.proc(tipos)` (modo `admin`, `confirm` obligatorio). Netezza desambigua overloads por la **firma de tipos de argumentos**, que es obligatoria. Aplica a on-prem y a la nube `nzsaas`.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | Debe coincidir con la BD del perfil activo. |
+| `schema` | string (required) | |
+| `procedure` | string (required) | |
+| `signature` | string (required) | Lista de **tipos** de argumentos del overload, p. ej. `(DATE, VARCHAR(20))` o `INT4`. Se valida token a token (patrón de tipo) antes de interpolarse; todo el statement pasa por `sql_guard`. |
+| `confirm` | bool (**required**, debe ser `true`) | Sin `dry_run`, igual que `nz_drop_table`. |
+| `if_exists` | bool (default `true`) | Si `true` y el procedimiento no existe, es un no-op (`dropped=false`). NPS no parsea `IF EXISTS` en `DROP PROCEDURE`, así que se resuelve en la capa Python (chequeo de catálogo). |
+
+**Output**: `{ "dropped": true, "duration_ms": 12 }` — `dropped=false` cuando `if_exists=true` y no existía.
+
+**Reglas**:
+- `sql_guard.validate(mode="admin")` clasifica el statement como `DROP`.
+- No usar para tablas (`nz_drop_table`) ni para crear/ejecutar procedimientos (`nz_execute_ddl` / `nz_call_procedure`).
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -885,7 +906,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 | `nz_clone_procedure` | false | false | true |
 | `nz_execute_ddl` | false | false | true |
 | `nz_call_procedure` | false | **true** | false |
-| `nz_truncate`, `nz_drop_table` | false | **true** | true |
+| `nz_truncate`, `nz_drop_table`, `nz_drop_procedure` | false | **true** | true |
 | `nz_switch_profile` | false | false | true |
 
 ### Formato de errores
