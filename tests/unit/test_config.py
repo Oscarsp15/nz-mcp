@@ -76,3 +76,34 @@ def test_update_profile_fields_noop_returns_none(two_profiles: Path) -> None:
 def test_update_profile_fields_unknown_profile(two_profiles: Path) -> None:
     with pytest.raises(ProfileNotFoundError):
         update_profile_fields("nope", two_profiles, mode="read")
+
+
+def test_security_level_defaults_to_preferred_secured(tmp_profiles: Path) -> None:
+    tmp_profiles.write_text(
+        '[profiles.only]\nhost = "h"\nport = 5480\ndatabase = "DB"\nuser = "u"\nmode = "read"\n',
+        encoding="utf-8",
+    )
+    # Secure-by-default: no security_level in the file negotiates SSL (preferred-secured).
+    assert get_profile("only", path=tmp_profiles).security_level == 2
+
+
+def test_security_level_explicit_value_is_loaded(tmp_profiles: Path) -> None:
+    tmp_profiles.write_text(
+        "[profiles.saas]\n"
+        'host = "h"\nport = 5480\ndatabase = "DB"\nuser = "u"\nmode = "read"\n'
+        "security_level = 3\n",
+        encoding="utf-8",
+    )
+    assert get_profile("saas", path=tmp_profiles).security_level == 3
+
+
+@pytest.mark.parametrize("bad", [-1, 4, 99])
+def test_security_level_out_of_range_rejected(tmp_profiles: Path, bad: int) -> None:
+    tmp_profiles.write_text(
+        "[profiles.bad]\n"
+        'host = "h"\nport = 5480\ndatabase = "DB"\nuser = "u"\nmode = "read"\n'
+        f"security_level = {bad}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(InvalidProfileError):
+        get_profile("bad", path=tmp_profiles)

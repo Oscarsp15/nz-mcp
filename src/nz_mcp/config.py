@@ -46,6 +46,11 @@ class Profile(BaseModel):
     database: str = Field(min_length=1)
     user: str = Field(min_length=1)
     mode: PermissionMode
+    # Netezza SSL negotiation level passed to nzpy: 0 preferred-unsecured, 1 only-unsecured,
+    # 2 preferred-secured (SSL, falls back), 3 only-secured (SSL required). Default 2 is
+    # secure-by-default and non-breaking (falls back to unsecured where SSL is unavailable);
+    # 1 (cleartext) is opt-in only, for a trusted lab network. See docs/adr/0017-*.md.
+    security_level: int = Field(default=2, ge=0, le=3)
     max_rows_default: int = Field(default=DEFAULT_MAX_ROWS, ge=1, le=MAX_ROWS_CAP)
     timeout_s_default: int = Field(default=DEFAULT_TIMEOUT_S, ge=1, le=TIMEOUT_S_CAP)
     # Catalog overrides run as-is and do not go through sql_guard.
