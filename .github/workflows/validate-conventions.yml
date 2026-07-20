@@ -19,7 +19,7 @@ jobs:
         run: echo "Skipping for ${{ github.actor }} — bots use their own naming."
       - uses: actions/checkout@v6
         if: github.actor != 'dependabot[bot]'
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         if: github.actor != 'dependabot[bot]'
         with:
           python-version: "3.11"
@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Validate PR title
@@ -90,7 +90,7 @@ jobs:
         run: echo "Skipping for ${{ github.actor }} — bots have their own PR body format."
       - uses: actions/checkout@v6
         if: github.actor != 'dependabot[bot]'
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         if: github.actor != 'dependabot[bot]'
         with:
           python-version: "3.11"
@@ -107,7 +107,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Validate every commit subject in PR
@@ -144,7 +144,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Reject temporary / self-help files
