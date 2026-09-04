@@ -23,6 +23,15 @@ _NZPY_LOG_LEVEL_WARNING: Final[int] = 2
 
 def open_connection(profile: Profile, password: str) -> object:
     """Open a Netezza connection with bounded timeout and fixed app name."""
+    # nzpy >=1.17.5 aborts the SSL handshake unless a CA bundle is given via
+    # ``ssl={"ca_certs": ...}`` or ``skipCertVerification=True`` is passed (a top-level
+    # connect kwarg, not an ``ssl`` key). Verification is opt-in per profile; see
+    # docs/adr/0017-connection-security-level.md (#160).
+    ssl_kwargs: dict[str, object] = (
+        {"ssl": {"ca_certs": profile.ca_certs}, "skipCertVerification": False}
+        if profile.ca_certs
+        else {"skipCertVerification": True}
+    )
     try:
         return nzpy.connect(
             user=profile.user,
@@ -36,6 +45,7 @@ def open_connection(profile: Profile, password: str) -> object:
             # and docs/adr/0017-connection-security-level.md.
             securityLevel=profile.security_level,
             logLevel=_NZPY_LOG_LEVEL_WARNING,
+            **ssl_kwargs,
         )
     except Exception as exc:  # noqa: BLE001, RUF100
         # nzpy may raise unchecked driver errors; we surface them as typed ConnectionError for MCP.

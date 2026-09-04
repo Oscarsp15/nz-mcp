@@ -107,3 +107,34 @@ def test_security_level_out_of_range_rejected(tmp_profiles: Path, bad: int) -> N
     )
     with pytest.raises(InvalidProfileError):
         get_profile("bad", path=tmp_profiles)
+
+
+def test_ca_certs_defaults_to_none(tmp_profiles: Path) -> None:
+    tmp_profiles.write_text(
+        '[profiles.only]\nhost = "h"\nport = 5480\ndatabase = "DB"\nuser = "u"\nmode = "read"\n',
+        encoding="utf-8",
+    )
+    # No CA bundle configured: certificate verification is skipped (opt-in only).
+    assert get_profile("only", path=tmp_profiles).ca_certs is None
+
+
+def test_ca_certs_explicit_path_is_loaded(tmp_profiles: Path) -> None:
+    tmp_profiles.write_text(
+        "[profiles.saas]\n"
+        'host = "h"\nport = 5480\ndatabase = "DB"\nuser = "u"\nmode = "read"\n'
+        'ca_certs = "/etc/nz/ca.pem"\n',
+        encoding="utf-8",
+    )
+    assert get_profile("saas", path=tmp_profiles).ca_certs == "/etc/nz/ca.pem"
+
+
+def test_unknown_profile_field_still_rejected(tmp_profiles: Path) -> None:
+    tmp_profiles.write_text(
+        "[profiles.bad]\n"
+        'host = "h"\nport = 5480\ndatabase = "DB"\nuser = "u"\nmode = "read"\n'
+        "skip_cert_verification = true\n",
+        encoding="utf-8",
+    )
+    # extra="forbid" is preserved: typos or unsupported keys must not pass silently.
+    with pytest.raises(InvalidProfileError):
+        get_profile("bad", path=tmp_profiles)

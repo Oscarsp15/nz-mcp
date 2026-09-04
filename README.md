@@ -44,6 +44,8 @@ Servidor MCP (Model Context Protocol) para **IBM Netezza Performance Server**. P
 
 Rutas completas al ejecutable para Claude Desktop (pipx vs `.venv`) y ejemplos de `claude_desktop_config.json`: [docs/guides/claude-desktop-setup.md](docs/guides/claude-desktop-setup.md).
 
+Campos opcionales por perfil en `~/.nz-mcp/profiles.toml` (se editan a mano): `security_level` (0-3, default `2` = negocia SSL con fallback a claro; `3` = SSL obligatorio) y `ca_certs` (ruta a un bundle CA en PEM para **verificar** el certificado del servidor; si se omite, la conexión SSL se establece sin verificar el certificado). Detalle en [docs/architecture/security-model.md](docs/architecture/security-model.md).
+
 ## Configuración rápida en Claude Desktop
 
 `claude_desktop_config.json` (ajusta `command` al `nz-mcp` de pipx o del venv, ver guía arriba):

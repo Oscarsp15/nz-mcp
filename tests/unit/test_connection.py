@@ -9,7 +9,7 @@ from nz_mcp.connection import APPLICATION_NAME, open_connection
 from nz_mcp.errors import ConnectionError as NzConnectionError
 
 
-def _profile(*, security_level: int = 2) -> Profile:
+def _profile(*, security_level: int = 2, ca_certs: str | None = None) -> Profile:
     return Profile(
         name="dev",
         host="nz-dev.example.com",
@@ -19,6 +19,7 @@ def _profile(*, security_level: int = 2) -> Profile:
         mode="read",
         timeout_s_default=45,
         security_level=security_level,
+        ca_certs=ca_certs,
     )
 
 
@@ -69,6 +70,41 @@ def test_open_connection_propagates_profile_security_level(
     assert _captured_level(3) == 3
     # Cleartext opt-in for a trusted lab network.
     assert _captured_level(1) == 1
+
+
+def test_open_connection_skips_cert_verification_without_ca_certs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_connect(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("nz_mcp.connection.nzpy.connect", _fake_connect)
+    open_connection(_profile(), "".join(["test", "-pw"]))
+
+    # nzpy >=1.17.5 aborts the SSL handshake at security_level 2/3 unless told to skip
+    # verification; it is a top-level connect kwarg, not a key of the ``ssl`` dict.
+    assert captured["skipCertVerification"] is True
+    assert "ssl" not in captured
+
+
+def test_open_connection_verifies_cert_with_profile_ca_certs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_connect(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("nz_mcp.connection.nzpy.connect", _fake_connect)
+    open_connection(_profile(ca_certs="/etc/nz/ca.pem"), "".join(["test", "-pw"]))
+
+    # nzpy reads the CA bundle from ``ssl["ca_certs"]`` and enforces CERT_REQUIRED.
+    assert captured["ssl"] == {"ca_certs": "/etc/nz/ca.pem"}
+    assert captured["skipCertVerification"] is False
 
 
 def test_open_connection_sanitizes_known_password_in_driver_detail(

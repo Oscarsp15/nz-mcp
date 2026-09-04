@@ -30,6 +30,8 @@ nz-mcp init        # interactive wizard
 
 > v0.1 not on PyPI yet. Meanwhile: `pipx install git+https://github.com/Oscarsp15/nz-mcp.git`
 
+Optional per-profile fields in `~/.nz-mcp/profiles.toml` (edited by hand): `security_level` (0-3, default `2` = negotiate SSL with cleartext fallback; `3` = SSL required) and `ca_certs` (path to a PEM CA bundle used to **verify** the server certificate; when omitted, the SSL connection is established without certificate verification). Details in [docs/architecture/security-model.md](docs/architecture/security-model.md).
+
 ## Quick setup in Claude Desktop
 
 `claude_desktop_config.json`:

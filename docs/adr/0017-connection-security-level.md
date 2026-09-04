@@ -62,3 +62,55 @@ Perfiles que **omiten** `security_level` pasan de `1` (claro) a `2` (SSL preferi
 - ADR 0003 — credenciales en keyring (contexto de seguridad de conexión).
 - `docs/architecture/security-model.md` — sección SSL / `security_level`.
 - `src/nz_mcp/connection.py`, `src/nz_mcp/config.py` — implementación.
+
+## Enmienda 2026-09-04 (#160): verificación de certificado opt-in vía `ca_certs`
+
+### Contexto
+
+nzpy **1.17.5+** endureció el handshake SSL. Con `securityLevel` 2 o 3, si el cliente no aporta un
+bundle CA ni pide explícitamente saltar la verificación, el driver aborta con
+`No CA certificate provided. Supply a valid ca_certs path or set skipCertVerification=True`.
+nzpy 1.17.4 (con el que se validó esta ADR) caía silenciosamente a `CERT_NONE`. `connection.py` no
+pasaba ni `ssl` ni `skipCertVerification`, así que **toda instalación nueva** (`pip`/`pipx` resuelven
+nzpy 1.17.7) fallaba contra appliances con SSL habilitado, incluso con el default `security_level = 2`.
+
+### Verificado contra el código de nzpy 1.17.7 (no asumido)
+
+- `nzpy/__init__.py:49-54` — firma de `connect(...)`: `ssl=None` y `skipCertVerification=None` son
+  **kwargs top-level e independientes**. `skipCertVerification` **no** es una clave del dict `ssl`.
+- `nzpy/__init__.py:60-61` — si `skipCertVerification is None`, se resuelve a
+  `securityLevel not in (2, 3)`: con el default `2` de esta ADR queda `False` → verificación exigida.
+- `nzpy/handshake.py:295` — el dict `ssl` se lee únicamente como `self.ssl_params.get('ca_certs')`.
+- `nzpy/handshake.py:300-311` — sin `ca_certs`: si `skipCertVerification` es falso, warning y
+  `return False` (handshake abortado); si es `True`, contexto con `CERT_NONE`.
+- `nzpy/handshake.py:313-330` — con `ca_certs`: `ssl.create_default_context(cafile=ca_certs)` y
+  `verify_mode = CERT_REQUIRED` (`check_hostname = False` lo fija el driver, no es configurable).
+
+### Decisión
+
+- `Profile` gana el campo opcional `ca_certs: str | None = None` (ruta a bundle CA en PEM).
+  `extra="forbid"` se mantiene.
+- `open_connection` pasa **siempre** una de dos combinaciones a `nzpy.connect`:
+  - `ca_certs` definido → `ssl={"ca_certs": <ruta>}` + `skipCertVerification=False`
+    (verificación obligatoria, `CERT_REQUIRED`).
+  - `ca_certs` ausente → `skipCertVerification=True` (SSL cifrado, sin verificar certificado).
+- La verificación de certificado es **opt-in**: el default no verifica para **no romper on-prem**,
+  cuyos appliances rara vez exponen una CA confiable, y reproduce exactamente el comportamiento
+  que este proyecto ya tenía con nzpy 1.17.4. El cifrado del canal (`security_level` 2/3) no cambia.
+
+### Alternativas descartadas
+
+1. **Fijar `nzpy<1.17.5` en `pyproject.toml`** — rechazada: congela el driver, oculta el problema y
+   la spec (`data-engineer.md`) exige soportar la última estable.
+2. **Verificación obligatoria por defecto (sin `ca_certs` → error)** — rechazada como default:
+   rompe on-prem igual que el bug que se corrige; queda disponible como opt-in vía `ca_certs`.
+3. **Pasar `ssl={"skipCertVerification": True}`** (lo que sugería el issue) — rechazada: el driver
+   ignora esa clave (`handshake.py:295` solo lee `ca_certs`) y el handshake seguiría abortando.
+
+### Consecuencias
+
+- Instalaciones nuevas vuelven a conectar con el default `security_level = 2`.
+- Quien disponga del certificado del appliance obtiene verificación real con una línea en
+  `profiles.toml`. Sin `ca_certs`, el canal va cifrado pero es vulnerable a MITM con certificado
+  falso (misma exposición que con nzpy 1.17.4); documentado en `security-model.md`.
+- Exponer `ca_certs` en el wizard `add-profile` sigue **diferido** (§4 de esta ADR).
