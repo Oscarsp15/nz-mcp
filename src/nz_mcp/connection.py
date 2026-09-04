@@ -23,7 +23,7 @@ _NZPY_LOG_LEVEL_WARNING: Final[int] = 2
 
 def open_connection(profile: Profile, password: str) -> object:
     """Open a Netezza connection with bounded timeout and fixed app name."""
-    # nzpy >=1.17.5 aborts the SSL handshake unless a CA bundle is given via
+    # nzpy >=1.17.7 aborts the SSL handshake unless a CA bundle is given via
     # ``ssl={"ca_certs": ...}`` or ``skipCertVerification=True`` is passed (a top-level
     # connect kwarg, not an ``ssl`` key). Verification is opt-in per profile; see
     # docs/adr/0017-connection-security-level.md (#160).

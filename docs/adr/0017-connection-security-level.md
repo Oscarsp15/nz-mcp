@@ -67,7 +67,7 @@ Perfiles que **omiten** `security_level` pasan de `1` (claro) a `2` (SSL preferi
 
 ### Contexto
 
-nzpy **1.17.5+** endureció el handshake SSL. Con `securityLevel` 2 o 3, si el cliente no aporta un
+nzpy **1.17.7** endureció el handshake SSL. Con `securityLevel` 2 o 3, si el cliente no aporta un
 bundle CA ni pide explícitamente saltar la verificación, el driver aborta con
 `No CA certificate provided. Supply a valid ca_certs path or set skipCertVerification=True`.
 nzpy 1.17.4 (con el que se validó esta ADR) caía silenciosamente a `CERT_NONE`. `connection.py` no
@@ -97,10 +97,13 @@ nzpy 1.17.7) fallaba contra appliances con SSL habilitado, incluso con el defaul
 - La verificación de certificado es **opt-in**: el default no verifica para **no romper on-prem**,
   cuyos appliances rara vez exponen una CA confiable, y reproduce exactamente el comportamiento
   que este proyecto ya tenía con nzpy 1.17.4. El cifrado del canal (`security_level` 2/3) no cambia.
+- El pin mínimo sube a `nzpy>=1.17.7` en `pyproject.toml`. Verificado contra los wheels de PyPI:
+  `skipCertVerification` **no existe** en 1.17.4 (la firma de `connect` no acepta `**kwargs` →
+  `TypeError`) ni en 1.17.5/1.17.6; aparece en 1.17.7. Sin tope superior.
 
 ### Alternativas descartadas
 
-1. **Fijar `nzpy<1.17.5` en `pyproject.toml`** — rechazada: congela el driver, oculta el problema y
+1. **Fijar `nzpy<1.17.7` en `pyproject.toml`** — rechazada: congela el driver, oculta el problema y
    la spec (`data-engineer.md`) exige soportar la última estable.
 2. **Verificación obligatoria por defecto (sin `ca_certs` → error)** — rechazada como default:
    rompe on-prem igual que el bug que se corrige; queda disponible como opt-in vía `ca_certs`.
@@ -110,6 +113,8 @@ nzpy 1.17.7) fallaba contra appliances con SSL habilitado, incluso con el defaul
 ### Consecuencias
 
 - Instalaciones nuevas vuelven a conectar con el default `security_level = 2`.
+- Instalaciones existentes con nzpy 1.17.4 se actualizan a 1.17.7 al reinstalar (`pip install -e .`)
+  porque el pin mínimo lo exige; sin ese pin el kwarg nuevo rompería el driver viejo.
 - Quien disponga del certificado del appliance obtiene verificación real con una línea en
   `profiles.toml`. Sin `ca_certs`, el canal va cifrado pero es vulnerable a MITM con certificado
   falso (misma exposición que con nzpy 1.17.4); documentado en `security-model.md`.

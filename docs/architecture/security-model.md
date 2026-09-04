@@ -135,7 +135,7 @@ mode = "write"
 
 `connection.py` propaga `profile.security_level` a `nzpy.connect` (`securityLevel`). Valores: `0` preferred-unsecured, `1` only-unsecured, `2` preferred-secured (default), `3` only-secured. El **default es `2`** (secure-by-default): negocia TLS y hace fallback a claro solo si el servidor no ofrece SSL, así que es seguro y no rompe on-prem sin TLS. `1` (tráfico en claro) es **opt-in explícito** y solo para una red de laboratorio confiable. Instancias SaaS/nube deben usar `3`. Ver [`../adr/0017-connection-security-level.md`](../adr/0017-connection-security-level.md).
 
-**Verificación del certificado** (nzpy >= 1.17.5): es **opt-in** mediante el campo opcional `ca_certs = "/ruta/ca.pem"` del perfil, con el que `connection.py` pasa `ssl={"ca_certs": …}` y exige `CERT_REQUIRED`. Sin `ca_certs`, se pasa `skipCertVerification=True`: el canal va cifrado pero el certificado del servidor no se valida (misma exposición a MITM con certificado falso que con nzpy 1.17.4; aceptable en redes on-prem controladas). Ver enmienda #160 en la ADR 0017.
+**Verificación del certificado** (nzpy >= 1.17.7): es **opt-in** mediante el campo opcional `ca_certs = "/ruta/ca.pem"` del perfil, con el que `connection.py` pasa `ssl={"ca_certs": …}` y exige `CERT_REQUIRED`. Sin `ca_certs`, se pasa `skipCertVerification=True`: el canal va cifrado pero el certificado del servidor no se valida (misma exposición a MITM con certificado falso que con nzpy 1.17.4; aceptable en redes on-prem controladas). Ver enmienda #160 en la ADR 0017.
 
 4. Al conectar: `password = keyring.get_password("nz-mcp", f"profile:{profile_name}")`.
 
