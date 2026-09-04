@@ -84,7 +84,7 @@ def test_open_connection_skips_cert_verification_without_ca_certs(
     monkeypatch.setattr("nz_mcp.connection.nzpy.connect", _fake_connect)
     open_connection(_profile(), "".join(["test", "-pw"]))
 
-    # nzpy >=1.17.5 aborts the SSL handshake at security_level 2/3 unless told to skip
+    # nzpy >=1.17.7 aborts the SSL handshake at security_level 2/3 unless told to skip
     # verification; it is a top-level connect kwarg, not a key of the ``ssl`` dict.
     assert captured["skipCertVerification"] is True
     assert "ssl" not in captured
