@@ -420,3 +420,97 @@ def test_truncate_procedure_ddl_minified_single_line() -> None:
     text, resume = proc.truncate_procedure_ddl(ddl, 1024)
     assert len(text.encode("utf-8")) == 1024
     assert resume == 1
+
+
+# ── re-executable DDL delimiters (issue #184) ────────────────────────────────
+
+
+def _proc_row(source: str) -> dict[str, str]:
+    return {
+        "PROCEDURE": "P",
+        "OWNER": "O",
+        "ARGUMENTS": "()",
+        "RETURNS": "INTEGER",
+        "PROCEDURESOURCE": source,
+        "PROCEDURESIGNATURE": "P()",
+    }
+
+
+def _patch_single_row(monkeypatch: pytest.MonkeyPatch, row: dict[str, str]) -> None:
+    monkeypatch.setattr(proc, "_fetch_procedure_rows", lambda *_a, **_k: [row])
+    monkeypatch.setattr(proc, "_pick_procedure_row", lambda rows, *_x: rows[0])
+
+
+def _numbered_source(count: int, *, leading_blank: bool = False) -> str:
+    lines = [f"  line {i};" for i in range(1, count + 1)]
+    if leading_blank:
+        lines.insert(0, "")
+    return "\n".join(lines)
+
+
+def test_get_procedure_ddl_reinjects_nzplsql_delimiters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PROCEDURESOURCE omits BEGIN_PROC/END_PROC; the DDL must re-add them."""
+    _patch_single_row(monkeypatch, _proc_row("DECLARE x INT;\nBEGIN\n  NULL;\nEND;"))
+    ddl = proc.get_procedure_ddl(_DUMMY_PROFILE, "DB", "SCH", "P")
+    body = ddl.split("LANGUAGE NZPLSQL AS\n", 1)[1]
+    assert body.splitlines()[0] == "BEGIN_PROC"
+    assert body.rstrip().endswith("END_PROC;")
+
+
+def test_get_procedure_ddl_does_not_duplicate_delimiters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_single_row(monkeypatch, _proc_row("BEGIN_PROC\nDECLARE x INT;\nEND_PROC;\n"))
+    ddl = proc.get_procedure_ddl(_DUMMY_PROFILE, "DB", "SCH", "P")
+    assert ddl.count("BEGIN_PROC") == 1
+    assert ddl.count("END_PROC") == 1
+
+
+def test_wrap_nzplsql_body_is_the_one_clone_uses() -> None:
+    """The helper lives in ``procedures`` and ``clone`` reuses it, without copying."""
+    from nz_mcp.catalog import clone
+
+    # getattr keeps mypy from flagging the private re-export through ``clone``.
+    assert getattr(clone, "_wrap_nzplsql_body") is proc._wrap_nzplsql_body  # noqa: B009
+
+
+def test_wrap_nzplsql_body_keeps_leading_source_lines() -> None:
+    wrapped = proc._wrap_nzplsql_body("\n\nDECLARE x INT;")
+    assert wrapped.splitlines()[:3] == ["BEGIN_PROC", "", ""]
+
+
+def test_ddl_header_lines_counts_injected_begin_proc() -> None:
+    ddl = "CREATE OR REPLACE PROCEDURE S.P()\nLANGUAGE NZPLSQL AS\nBEGIN_PROC\nA\nEND_PROC;\n"
+    assert proc._ddl_header_lines(ddl) == 3
+
+
+@pytest.mark.parametrize("leading_blank", [False, True])
+def test_truncation_hint_line_continues_wrapped_ddl(
+    monkeypatch: pytest.MonkeyPatch,
+    leading_blank: bool,
+) -> None:
+    """The resume line of a wrapped DDL leaves no gap and no overlap (issue #170)."""
+    source = _numbered_source(400, leading_blank=leading_blank)
+    _patch_single_row(monkeypatch, _proc_row(source))
+    ddl = proc.get_procedure_ddl(_DUMMY_PROFILE, "DB", "SCH", "P")
+
+    cut, resume = proc.truncate_procedure_ddl(ddl, 500)
+    assert resume > 1
+
+    section = proc.get_procedure_section(
+        _DUMMY_PROFILE,
+        "DB",
+        "SCH",
+        "P",
+        "range",
+        from_line=resume,
+        to_line=resume + 9,
+    )
+    first_unread = section["content"].splitlines()[0]
+    # No gap: the section starts on the line right after the truncated payload.
+    assert cut.splitlines()[-1] == source.splitlines()[resume - 2]
+    assert first_unread == source.splitlines()[resume - 1]
+    # No overlap: that line was not part of what the caller already received.
+    assert first_unread not in cut

@@ -163,9 +163,26 @@ def get_procedure_ddl(
 
 
 # Line that closes the reconstructed DDL header built by ``_build_procedure_ddl``.
-# Everything after it is verbatim ``PROCEDURESOURCE``, so counting the newlines up
-# to it yields the offset between DDL line numbers and source line numbers.
+# After it come the ``BEGIN_PROC`` delimiter and verbatim ``PROCEDURESOURCE``, so
+# counting those lines yields the offset between DDL and source line numbers.
 _DDL_SOURCE_MARKER: Final[str] = "\nLANGUAGE NZPLSQL AS\n"
+
+# Delimiter line re-injected by ``_build_procedure_ddl``. It is not stored in
+# ``PROCEDURESOURCE``, so it counts as header and never as source line 1.
+_BEGIN_PROC_LINE: Final[re.Pattern[str]] = re.compile(r"^\s*BEGIN_PROC\s*$", re.IGNORECASE)
+
+
+def _ddl_header_lines(ddl: str) -> int:
+    """Count the DDL lines that precede ``PROCEDURESOURCE`` line 1."""
+    marker_at = ddl.find(_DDL_SOURCE_MARKER)
+    if marker_at < 0:
+        return 0
+    source_at = marker_at + len(_DDL_SOURCE_MARKER)
+    count = ddl.count("\n", 0, source_at)
+    first_line, _, _ = ddl[source_at:].partition("\n")
+    if _BEGIN_PROC_LINE.match(first_line):
+        count += 1
+    return count
 
 
 def truncate_procedure_ddl(ddl: str, max_bytes: int) -> tuple[str, int]:
@@ -181,8 +198,7 @@ def truncate_procedure_ddl(ddl: str, max_bytes: int) -> tuple[str, int]:
     if len(ddl.encode("utf-8")) <= max_bytes:
         return ddl, 0
 
-    marker_at = ddl.find(_DDL_SOURCE_MARKER)
-    header_lines = 0 if marker_at < 0 else ddl.count("\n", 0, marker_at + len(_DDL_SOURCE_MARKER))
+    header_lines = _ddl_header_lines(ddl)
 
     kept: list[str] = []
     used = 0
@@ -651,6 +667,27 @@ def _signature_clause_for_ddl(proc: str, signature: str, arguments: str) -> str:
     return sig_norm
 
 
+def _wrap_nzplsql_body(body: str) -> str:
+    """Wrap a raw procedure body with the NZPLSQL delimiters so it can be executed.
+
+    ``_V_PROCEDURE.PROCEDURESOURCE`` stores only the text *between* ``BEGIN_PROC``
+    and ``END_PROC``; the delimiters themselves are not persisted, so any DDL
+    rebuilt from the catalog must re-inject them to stay re-executable.
+
+    Idempotent: a body that already carries both delimiters is returned untouched.
+    Leading whitespace is preserved on purpose - dropping it would shift every
+    ``PROCEDURESOURCE`` line number and break ``_ddl_header_lines``.
+    """
+    stripped = body.strip()
+    if re.match(r"^\s*BEGIN_PROC\b", stripped, re.IGNORECASE) and re.search(
+        r"\bEND_PROC\s*;?\s*$",
+        stripped,
+        re.IGNORECASE,
+    ):
+        return body
+    return f"BEGIN_PROC\n{body.rstrip()}\nEND_PROC;\n"
+
+
 def _build_procedure_ddl(schema: str, row: Any) -> str:
     proc = _ddl_get(row, "PROCEDURE").strip()
     args = _ddl_get(row, "ARGUMENTS").strip()
@@ -663,7 +700,7 @@ def _build_procedure_ddl(schema: str, row: Any) -> str:
     head = f"CREATE OR REPLACE PROCEDURE {sch}.{sig_use}"
     if ret_clause:
         head = f"{head}\n{ret_clause}"
-    return f"{head}\nLANGUAGE NZPLSQL AS\n{source}"
+    return f"{head}\nLANGUAGE NZPLSQL AS\n{_wrap_nzplsql_body(source)}"
 
 
 # ── nz_find_table_references (issue #107) ────────────────────────────────────

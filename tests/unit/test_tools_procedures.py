@@ -535,9 +535,12 @@ def test_nz_get_procedure_ddl_truncates_by_default_and_hints(
     assert "nz_get_procedure_size" in out.hint
     assert "nz_get_procedure_section" in out.hint
     assert "from_line=" in out.hint
-    # The DDL header (2 lines) is not counted in the source resume line.
+    # Neither the DDL header (2 lines) nor the injected BEGIN_PROC delimiter are
+    # PROCEDURESOURCE lines, so 3 lines are discounted from the resume line (#184).
     resume = int(out.hint.split("from_line=")[1].split(",")[0])
-    assert resume == len(out.ddl.splitlines()) - 1
+    assert resume == len(out.ddl.splitlines()) - 2
+    first_source_line = out.ddl.splitlines()[3]
+    assert first_source_line == "  x := 0; -- filler comment padding the line"
 
 
 def test_nz_get_procedure_ddl_under_cap_keeps_full_text(

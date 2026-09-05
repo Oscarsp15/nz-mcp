@@ -9,9 +9,9 @@ import pytest
 from nz_mcp.catalog.clone import (
     _normalize_returns_for_netezza,
     _parse_first_procedure_line,
-    _wrap_nzplsql_body,
     clone_procedure,
 )
+from nz_mcp.catalog.procedures import _wrap_nzplsql_body
 from nz_mcp.config import Profile
 from nz_mcp.errors import InvalidInputError, NetezzaError, ProcedureAlreadyExistsError
 
