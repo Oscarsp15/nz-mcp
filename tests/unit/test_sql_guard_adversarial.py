@@ -6,9 +6,10 @@ Each entry must remain blocked. Adding a new bypass goes here BEFORE the fix.
 from __future__ import annotations
 
 import pytest
+import sqlglot
 
 from nz_mcp.errors import GuardRejectedError
-from nz_mcp.sql_guard import StatementKind, validate
+from nz_mcp.sql_guard import StatementKind, _assert_selective_where, validate
 
 
 @pytest.mark.adversarial
@@ -230,6 +231,17 @@ def test_confirm_full_table_does_not_waive_the_where_requirement() -> None:
 
 
 @pytest.mark.adversarial
+def test_selective_where_helper_tolerates_a_missing_where() -> None:
+    """The WHERE-less guard inside the helper is defensive and must stay.
+
+    Through ``validate`` it is unreachable: ``_enforce`` rejects a WHERE-less UPDATE or
+    DELETE first. It is kept so the helper cannot crash on ``where.this`` if that order
+    ever changes, and it is exercised directly rather than left uncovered.
+    """
+    expr = sqlglot.parse_one("UPDATE t SET a = 1", read="postgres")
+    _assert_selective_where(expr, kind="UPDATE", confirm_full_table=False)
+
+
 def test_mode_rejection_wins_over_tautology_hint() -> None:
     """A caller who may not DELETE is told that, not invited to retry with the flag.
 
