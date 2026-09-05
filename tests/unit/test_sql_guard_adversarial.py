@@ -239,7 +239,7 @@ def test_selective_where_helper_tolerates_a_missing_where() -> None:
     ever changes, and it is exercised directly rather than left uncovered.
     """
     expr = sqlglot.parse_one("UPDATE t SET a = 1", read="postgres")
-    _assert_selective_where(expr, kind="UPDATE", confirm_full_table=False)
+    _assert_selective_where(expr, kind=StatementKind.UPDATE, confirm_full_table=False)
 
 
 def test_mode_rejection_wins_over_tautology_hint() -> None:
