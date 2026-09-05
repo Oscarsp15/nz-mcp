@@ -131,6 +131,61 @@ def single_profile_name_or_none(file: ProfilesFile) -> str | None:
     return keys[0] if len(keys) == 1 else None
 
 
+def upsert_profile(
+    name: str,
+    block: dict[str, Any],
+    path: Path | None = None,
+    *,
+    set_active: bool = False,
+) -> Profile:
+    """Create or replace the ``[profiles.<name>]`` section, never appending a duplicate.
+
+    ``block`` fully replaces the previous section, so callers must pass every field they
+    want to keep. The block is validated before touching the file: an invalid profile
+    raises ``InvalidProfileError`` and ``profiles.toml`` stays untouched.
+    """
+    target = path or profiles_path()
+    try:
+        merged = Profile.model_validate({"name": name, **block})
+    except ValidationError as exc:
+        raise InvalidProfileError(profile=name, detail=str(exc)) from exc
+    raw: dict[str, Any] = {}
+    if target.exists():
+        raw = tomllib.loads(target.read_text(encoding="utf-8"))
+    profiles = raw.get("profiles")
+    if not isinstance(profiles, dict):
+        profiles = {}
+    profiles[name] = block
+    raw["profiles"] = profiles
+    if set_active:
+        raw["active"] = name
+    _dump_profiles_raw(target, raw)
+    return merged
+
+
+def remove_profile(name: str, path: Path | None = None) -> bool:
+    """Delete a profile block from ``profiles.toml``.
+
+    Returns ``True`` when the deleted profile was the active one; in that case ``active``
+    is dropped from the file so no stale name is left pointing at a missing profile.
+    Raises ``ProfileNotFoundError`` when the profile is not declared.
+    """
+    target = path or profiles_path()
+    if not target.exists():
+        raise ProfileNotFoundError(profile=name, hint_es="", hint_en="")
+    raw: dict[str, Any] = tomllib.loads(target.read_text(encoding="utf-8"))
+    profiles = raw.get("profiles")
+    if not isinstance(profiles, dict) or name not in profiles:
+        raise ProfileNotFoundError(profile=name, hint_es="", hint_en="")
+    del profiles[name]
+    raw["profiles"] = profiles
+    was_active = raw.get("active") == name
+    if was_active:
+        del raw["active"]
+    _dump_profiles_raw(target, raw)
+    return was_active
+
+
 def update_profile_fields(
     name: str,
     path: Path | None = None,
