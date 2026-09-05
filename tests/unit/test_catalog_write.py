@@ -325,3 +325,55 @@ def test_execute_insert_confirm_required(monkeypatch: pytest.MonkeyPatch) -> Non
             confirm=False,
         )
     assert ei.value.code == "CONFIRM_REQUIRED"
+
+
+def test_execute_update_rejects_always_true_where(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An always-true WHERE must not reach the driver (issue #140)."""
+    monkeypatch.setattr("nz_mcp.catalog.write.get_password", lambda _n: "pw")
+    with pytest.raises(GuardRejectedError) as ge:
+        execute_update(
+            _PROFILE,
+            "DEV",
+            "PUBLIC",
+            "TAB",
+            {"X": 1},
+            "1 = 1",
+            dry_run=False,
+            confirm=True,
+        )
+    assert ge.value.code == "WHERE_ALWAYS_TRUE"
+
+
+def test_execute_delete_rejects_always_true_where(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("nz_mcp.catalog.write.get_password", lambda _n: "pw")
+    with pytest.raises(GuardRejectedError) as ge:
+        execute_delete(
+            _PROFILE,
+            "DEV",
+            "PUBLIC",
+            "TAB",
+            "ID = 5 OR TRUE",
+            dry_run=False,
+            confirm=True,
+        )
+    assert ge.value.code == "WHERE_ALWAYS_TRUE"
+
+
+def test_execute_delete_full_table_runs_when_confirmed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The caller can still wipe the table, but only by declaring the intent."""
+    cursor = MagicMock()
+    cursor.rowcount = 42
+    conn = _mock_conn(cursor)
+    monkeypatch.setattr("nz_mcp.catalog.write.get_password", lambda _n: "pw")
+    monkeypatch.setattr("nz_mcp.catalog.write.open_connection", lambda *_a, **_k: conn)
+    out = execute_delete(
+        _PROFILE,
+        "DEV",
+        "PUBLIC",
+        "TAB",
+        "1 = 1",
+        dry_run=False,
+        confirm=True,
+        confirm_full_table=True,
+    )
+    assert out["deleted"] == 42

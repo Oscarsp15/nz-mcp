@@ -72,7 +72,7 @@ def test_select_happy_path(fake_profile, fake_connection, monkeypatch):
 
 def test_select_rejects_delete(fake_profile):
     with pytest.raises(GuardRejectedError) as e:
-        nz_query_select(fake_profile, QuerySelectInput(sql="DELETE FROM t WHERE 1=1"))
+        nz_query_select(fake_profile, QuerySelectInput(sql="DELETE FROM t WHERE id = 1"))
     assert e.value.code == "WRONG_STATEMENT_FOR_TOOL"
 ```
 

@@ -63,6 +63,24 @@
 
 NPS 11.x usa ``DROP TABLE esquema.tabla IF EXISTS``, no el orden ANSI ``DROP TABLE IF EXISTS esquema.tabla``. ``sqlglot`` no parsea la forma sufijo; el guard la reconoce con un patrón dedicado (identificadores validados, sin apilamiento) y la clasifica como ``DROP`` en modo ``admin``, igual que el resto de DDL administrativo.
 
+#### Predicados `WHERE` siempre verdaderos (`UPDATE` / `DELETE`)
+
+Exigir la **presencia** de `WHERE` no protege de nada: `DELETE FROM T WHERE 1=1` la
+tiene y borra la tabla entera. El guard pliega el predicado sobre el AST (constant
+folding propio, sin regex) y rechaza con `WHERE_ALWAYS_TRUE` las formas triviales:
+literales booleanos, literal numérico como predicado, comparaciones entre dos
+literales del mismo tipo, `NOT` de una constante decidible, `AND`/`OR` con lógica
+ternaria y `col = col`. El llamante puede seguir afectando a toda la tabla, pero
+**solo declarando la intención** con `confirm_full_table=true` (parámetro de
+`nz_update` / `nz_delete`), que queda registrado en los argumentos de la llamada y
+no eleva privilegios ni exime del `WHERE`.
+
+Decidir tautología en el caso general es **indecidible**: no se detectan constantes
+tras funciones (`ABS(1)=1`), predicados dependientes de datos (`id > -2147483648`,
+`name LIKE '%'`), comparaciones entre tipos distintos, aritmética ni subconsultas.
+Alcance exacto y límites en
+[`../adr/0020-sql-guard-tautological-where.md`](../adr/0020-sql-guard-tautological-where.md).
+
 #### ``CALL`` (ejecución de procedimientos)
 
 ``sqlglot`` no parsea ``CALL`` (cae a un ``Command`` genérico y emite warning a stderr). El guard lo intercepta con un patrón dedicado que **solo acepta placeholders ``?`` como argumentos**: ``CALL esquema.proc(?, …)``. Un argumento literal (``CALL P(1)``) **no** matchea y se rechaza como ``UNKNOWN_STATEMENT``, forzando la parametrización vía bind params del driver. Es una operación **EXECUTE** (el SP ejecuta código arbitrario) y se gatea a ``admin``, mismo tier que la DDL. Ver [`../adr/0015-sql-guard-call-statement.md`](../adr/0015-sql-guard-call-statement.md).
@@ -73,10 +91,12 @@ NPS 11.x usa ``DROP TABLE esquema.tabla IF EXISTS``, no el orden ANSI ``DROP TAB
 |---|---|---|---|
 | `SELECT`, `WITH` (solo SELECT), `UNION` / `UNION ALL` (solo ramas `SELECT`), `EXPLAIN`, `SHOW` | ✅ | ✅ | ✅ |
 | `INSERT` | ❌ | ✅ | ✅ |
-| `UPDATE` (con `WHERE`) | ❌ | ✅ | ✅ |
+| `UPDATE` (con `WHERE` selectivo) | ❌ | ✅ | ✅ |
 | `UPDATE` sin `WHERE` | ❌ | ❌ | ❌ |
-| `DELETE` (con `WHERE`) | ❌ | ✅ | ✅ |
+| `DELETE` (con `WHERE` selectivo) | ❌ | ✅ | ✅ |
 | `DELETE` sin `WHERE` | ❌ | ❌ | ❌ |
+| `UPDATE` / `DELETE` con `WHERE` siempre verdadero (`1=1`, `TRUE`, `id=5 OR 1=1`, …) | ❌ | ❌ | ❌ |
+| Ídem con `confirm_full_table=true` (intención declarada por el llamante) | ❌ | ✅ | ✅ |
 | `CREATE TABLE` | ❌ | ❌ | ✅ |
 | `TRUNCATE` | ❌ | ❌ | ✅ |
 | `DROP TABLE` | ❌ | ❌ | ✅ |
@@ -97,6 +117,9 @@ SELECT 1 -- ; DROP TABLE t
 WITH x AS (DELETE FROM t RETURNING *) SELECT * FROM x;
 UPDATE t SET a=1;                        -- sin WHERE
 DELETE FROM t;                            -- sin WHERE
+DELETE FROM t WHERE 1=1;                  -- WHERE tautológico
+UPDATE t SET a=1 WHERE TRUE;              -- idem
+DELETE FROM t WHERE id=5 OR 1=1;          -- OR que neutraliza el predicado
 SELECT * FROM t; SELECT * FROM t2;        -- stacked
 BEGIN; DELETE FROM t; COMMIT;             -- transacción con DML
 ```
