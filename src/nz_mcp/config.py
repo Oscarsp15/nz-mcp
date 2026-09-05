@@ -51,6 +51,10 @@ class Profile(BaseModel):
     # secure-by-default and non-breaking (falls back to unsecured where SSL is unavailable);
     # 1 (cleartext) is opt-in only, for a trusted lab network. See docs/adr/0017-*.md.
     security_level: int = Field(default=2, ge=0, le=3)
+    # Path to a CA bundle (PEM) used to verify the server certificate during SSL negotiation.
+    # Opt-in: when unset, certificate verification is skipped (nzpy >=1.17.7 otherwise aborts
+    # the handshake, and on-prem appliances rarely ship a trusted CA). See ADR 0017 (#160).
+    ca_certs: str | None = None
     max_rows_default: int = Field(default=DEFAULT_MAX_ROWS, ge=1, le=MAX_ROWS_CAP)
     timeout_s_default: int = Field(default=DEFAULT_TIMEOUT_S, ge=1, le=TIMEOUT_S_CAP)
     # Catalog overrides run as-is and do not go through sql_guard.

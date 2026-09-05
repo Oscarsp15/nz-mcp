@@ -27,7 +27,7 @@ classifiers = [
 ]
 dependencies = [
     "mcp>=1.2.0,<2",
-    "nzpy>=1.16",
+    "nzpy>=1.17.7",
     "pydantic>=2.6",
     "sqlglot>=25.0",
     "keyring>=25.0",
