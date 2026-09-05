@@ -12,7 +12,11 @@ import structlog
 
 from nz_mcp.auth import get_password
 from nz_mcp.catalog.identifier import validate_catalog_identifier, validate_database_identifier
-from nz_mcp.catalog.procedures import get_procedure_ddl, list_procedures
+from nz_mcp.catalog.procedures import (
+    _wrap_nzplsql_body,
+    get_procedure_ddl,
+    list_procedures,
+)
 from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
 from nz_mcp.errors import InvalidInputError, NetezzaError, ProcedureAlreadyExistsError
@@ -69,18 +73,6 @@ def _parse_first_procedure_line(line: str) -> tuple[str, str, str]:
         m.group("proc").upper(),
         m.group("sig"),
     )
-
-
-def _wrap_nzplsql_body(body: str) -> str:
-    """Wrap raw procedure body for CREATE execution (catalog source omits delimiters)."""
-    stripped = body.strip()
-    if re.match(r"^\s*BEGIN_PROC\b", stripped, re.IGNORECASE) and re.search(
-        r"\bEND_PROC\s*;?\s*$",
-        stripped,
-        re.IGNORECASE,
-    ):
-        return body
-    return f"BEGIN_PROC\n{stripped}\nEND_PROC;\n"
 
 
 def _extract_returns(head_block: str) -> str | None:

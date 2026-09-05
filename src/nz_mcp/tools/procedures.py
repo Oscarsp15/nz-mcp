@@ -14,7 +14,7 @@ from nz_mcp.catalog.procedures import (
     describe_procedure,
     find_table_references,
     get_all_procedures_ddl,
-    get_procedure_ddl,
+    get_procedure_ddl_with_layout,
     get_procedure_section,
     get_procedure_size,
     get_procedure_table_logic,
@@ -397,13 +397,14 @@ def nz_get_procedure_ddl(
 ) -> GetProcedureDdlOutput:
     start = monotonic_start()
     profile = get_active_profile(path=config_path)
-    ddl_raw = get_procedure_ddl(
+    built = get_procedure_ddl_with_layout(
         profile,
         database=params.database,
         schema=params.procedure_schema,
         procedure=params.procedure,
         signature=params.signature,
     )
+    ddl_raw = built.text
     ddl_clean = strip_comments(ddl_raw)
     size_bytes_raw = len(ddl_raw.encode("utf-8"))
     size_bytes_clean = len(ddl_clean.encode("utf-8"))
@@ -418,7 +419,11 @@ def nz_get_procedure_ddl(
         # The budget is spent on the raw prefix even for variant='clean' so the
         # resume line stays valid against PROCEDURESOURCE numbering. Stripping
         # comments afterwards can only shrink the payload, never overflow it.
-        cut, resume_line = truncate_procedure_ddl(ddl_raw, params.max_bytes)
+        cut, resume_line = truncate_procedure_ddl(
+            ddl_raw,
+            params.max_bytes,
+            header_lines=built.header_lines,
+        )
         ddl = strip_comments(cut) if is_clean else cut
 
     size_b = len(ddl.encode("utf-8"))

@@ -118,21 +118,21 @@ def test_signature_clause_does_not_duplicate_proc_name() -> None:
         "DECLARE x INT; BEGIN NULL; END;",
         "AGRUPAR_ALERTAS(DATE)",
     )
-    ddl = proc._build_procedure_ddl("DBO", row)
+    ddl = proc._build_procedure_ddl("DBO", row).text
     assert "AGRUPAR_ALERTASAGRUPAR_ALERTAS" not in ddl
     assert "CREATE OR REPLACE PROCEDURE DBO.AGRUPAR_ALERTAS(DATE)" in ddl
 
 
 def test_signature_clause_legacy_paren_only() -> None:
     row = ("P", "O", "(INT)", "", "BEGIN END;", "(INT)")
-    ddl = proc._build_procedure_ddl("S", row)
+    ddl = proc._build_procedure_ddl("S", row).text
     assert "CREATE OR REPLACE PROCEDURE S.P(INT)" in ddl
     assert "P.P(" not in ddl
 
 
 def test_signature_clause_empty_args_procedure() -> None:
     row = ("PROC", "O", "()", "", "BEGIN END;", "()")
-    ddl = proc._build_procedure_ddl("S", row)
+    ddl = proc._build_procedure_ddl("S", row).text
     assert "CREATE OR REPLACE PROCEDURE S.PROC()" in ddl
 
 
@@ -263,7 +263,7 @@ def test_build_procedure_ddl() -> None:
         "BEGIN_PROC\nBEGIN\nEND;\nEND_PROC;",
         "(X INT)",
     )
-    ddl = proc._build_procedure_ddl("DB1", row)
+    ddl = proc._build_procedure_ddl("DB1", row).text
     assert "CREATE OR REPLACE PROCEDURE DB1.SP" in ddl
     assert "LANGUAGE NZPLSQL AS" in ddl
     assert "BEGIN_PROC" in ddl
@@ -393,14 +393,14 @@ def _ddl(source_lines: int) -> str:
 
 def test_truncate_procedure_ddl_noop_when_under_budget() -> None:
     ddl = _ddl(5)
-    text, resume = proc.truncate_procedure_ddl(ddl, 10_000)
+    text, resume = proc.truncate_procedure_ddl(ddl, 10_000, header_lines=2)
     assert text == ddl
     assert resume == 0
 
 
 def test_truncate_procedure_ddl_resume_line_is_source_relative() -> None:
     ddl = _ddl(200)
-    text, resume = proc.truncate_procedure_ddl(ddl, 200)
+    text, resume = proc.truncate_procedure_ddl(ddl, 200, header_lines=2)
     assert len(text.encode("utf-8")) <= 200
     kept_lines = len(text.splitlines())
     # Two header lines precede PROCEDURESOURCE line 1.
@@ -410,13 +410,130 @@ def test_truncate_procedure_ddl_resume_line_is_source_relative() -> None:
 
 def test_truncate_procedure_ddl_cuts_on_line_boundaries() -> None:
     ddl = _ddl(200)
-    text, _ = proc.truncate_procedure_ddl(ddl, 200)
+    text, _ = proc.truncate_procedure_ddl(ddl, 200, header_lines=2)
     assert ddl.startswith(text)
     assert not text.splitlines()[-1].endswith(" ")
 
 
 def test_truncate_procedure_ddl_minified_single_line() -> None:
     ddl = "X" * 5000
-    text, resume = proc.truncate_procedure_ddl(ddl, 1024)
+    text, resume = proc.truncate_procedure_ddl(ddl, 1024, header_lines=0)
     assert len(text.encode("utf-8")) == 1024
     assert resume == 1
+
+
+# ── re-executable DDL delimiters (issue #184) ────────────────────────────────
+
+
+def _proc_row(source: str) -> dict[str, str]:
+    return {
+        "PROCEDURE": "P",
+        "OWNER": "O",
+        "ARGUMENTS": "()",
+        "RETURNS": "INTEGER",
+        "PROCEDURESOURCE": source,
+        "PROCEDURESIGNATURE": "P()",
+    }
+
+
+def _patch_single_row(monkeypatch: pytest.MonkeyPatch, row: dict[str, str]) -> None:
+    monkeypatch.setattr(proc, "_fetch_procedure_rows", lambda *_a, **_k: [row])
+    monkeypatch.setattr(proc, "_pick_procedure_row", lambda rows, *_x: rows[0])
+
+
+def _numbered_source(count: int, *, leading_blank: bool = False) -> str:
+    lines = [f"  line {i};" for i in range(1, count + 1)]
+    if leading_blank:
+        lines.insert(0, "")
+    return "\n".join(lines)
+
+
+def test_get_procedure_ddl_reinjects_nzplsql_delimiters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PROCEDURESOURCE omits BEGIN_PROC/END_PROC; the DDL must re-add them."""
+    _patch_single_row(monkeypatch, _proc_row("DECLARE x INT;\nBEGIN\n  NULL;\nEND;"))
+    ddl = proc.get_procedure_ddl(_DUMMY_PROFILE, "DB", "SCH", "P")
+    body = ddl.split("LANGUAGE NZPLSQL AS\n", 1)[1]
+    assert body.splitlines()[0] == "BEGIN_PROC"
+    assert body.rstrip().endswith("END_PROC;")
+
+
+def test_get_procedure_ddl_does_not_duplicate_delimiters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_single_row(monkeypatch, _proc_row("BEGIN_PROC\nDECLARE x INT;\nEND_PROC;\n"))
+    ddl = proc.get_procedure_ddl(_DUMMY_PROFILE, "DB", "SCH", "P")
+    assert ddl.count("BEGIN_PROC") == 1
+    assert ddl.count("END_PROC") == 1
+
+
+def test_wrap_nzplsql_body_is_the_one_clone_uses() -> None:
+    """The helper lives in ``procedures`` and ``clone`` reuses it, without copying."""
+    from nz_mcp.catalog import clone
+
+    # getattr keeps mypy from flagging the private re-export through ``clone``.
+    assert getattr(clone, "_wrap_nzplsql_body") is proc._wrap_nzplsql_body  # noqa: B009
+
+
+def test_wrap_nzplsql_body_keeps_leading_source_lines() -> None:
+    wrapped = proc._wrap_nzplsql_body("\n\nDECLARE x INT;")
+    assert wrapped.splitlines()[:3] == ["BEGIN_PROC", "", ""]
+
+
+def test_build_procedure_ddl_reports_the_injected_delimiter_as_header() -> None:
+    row = ("P", "O", "()", "", "DECLARE x INT;\nBEGIN\nEND;", "P()")
+    built = proc._build_procedure_ddl("S", row)
+    # CREATE line + LANGUAGE line + the BEGIN_PROC this call injected.
+    assert built.header_lines == 3
+    assert built.text.splitlines()[built.header_lines] == "DECLARE x INT;"
+
+
+def test_build_procedure_ddl_reports_native_delimiter_as_source() -> None:
+    """A BEGIN_PROC the catalog stores is source line 1, not header (audit of #184)."""
+    row = ("P", "O", "()", "", "BEGIN_PROC\nDECLARE x INT;\nEND_PROC;", "P()")
+    built = proc._build_procedure_ddl("S", row)
+    assert built.header_lines == 2
+    assert built.text.splitlines()[built.header_lines] == "BEGIN_PROC"
+
+
+@pytest.mark.parametrize("leading_blank", [False, True])
+@pytest.mark.parametrize("native_delimiters", [False, True])
+def test_truncation_hint_line_continues_wrapped_ddl(
+    monkeypatch: pytest.MonkeyPatch,
+    leading_blank: bool,
+    native_delimiters: bool,
+) -> None:
+    """The resume line leaves no gap and no overlap (issue #170).
+
+    Parametrized over the two shapes ``PROCEDURESOURCE`` can have, because the DDL
+    text is identical in both and only the builder can tell them apart.
+    """
+    source = _numbered_source(400, leading_blank=leading_blank)
+    if native_delimiters:
+        source = f"BEGIN_PROC\n{source}\nEND_PROC;"
+    _patch_single_row(monkeypatch, _proc_row(source))
+    built = proc.get_procedure_ddl_with_layout(_DUMMY_PROFILE, "DB", "SCH", "P")
+
+    cut, resume = proc.truncate_procedure_ddl(
+        built.text,
+        500,
+        header_lines=built.header_lines,
+    )
+    assert resume > 1
+
+    section = proc.get_procedure_section(
+        _DUMMY_PROFILE,
+        "DB",
+        "SCH",
+        "P",
+        "range",
+        from_line=resume,
+        to_line=resume + 9,
+    )
+    first_unread = section["content"].splitlines()[0]
+    # No gap: the section starts on the line right after the truncated payload.
+    assert cut.splitlines()[-1] == source.splitlines()[resume - 2]
+    assert first_unread == source.splitlines()[resume - 1]
+    # No overlap: that line was not part of what the caller already received.
+    assert cut.splitlines()[built.header_lines :] == source.splitlines()[: resume - 1]
