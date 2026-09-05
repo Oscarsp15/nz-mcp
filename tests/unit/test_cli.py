@@ -11,6 +11,7 @@ from nz_mcp import __version__
 from nz_mcp.auth import get_password, store_password
 from nz_mcp.cli import app
 from nz_mcp.config import get_profile, list_profile_names, load_profiles_file
+from nz_mcp.errors import ConnectionError as NzConnectionError
 from nz_mcp.errors import CredentialNotFoundError, KeyringUnavailableError
 
 runner = CliRunner()
@@ -197,6 +198,33 @@ def test_test_connection_open_connection_error(
     result = runner.invoke(app, ["test-connection"])
     assert result.exit_code == 1
     assert "timeout" in result.stdout + result.stderr
+
+
+def test_test_connection_prints_cause_hint(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """A failure carrying a per-cause hint shows it as its own actionable line."""
+    store_password("dev", "devpass123")
+    monkeypatch.setenv("NZ_MCP_LANG", "en")
+
+    def _boom(_p: object, _w: str) -> None:
+        raise NzConnectionError(
+            host="h",
+            port=1,
+            database="d",
+            user="u",
+            detail="Error in handshake: hentication failed for user 'U'",
+            cause="AUTH_REJECTED",
+            hint_es="Netezza rechazó las credenciales.",
+            hint_en="Netezza rejected the credentials.",
+        )
+
+    monkeypatch.setattr("nz_mcp.profile_check.open_connection", _boom)
+    result = runner.invoke(app, ["test-connection"])
+    combined = result.stdout + result.stderr
+
+    assert result.exit_code == 1
+    assert "HINT: Netezza rejected the credentials." in combined
 
 
 # --- profile lifecycle: add-profile / remove-profile --------------------------

@@ -56,6 +56,10 @@ class CheckOutcome:
     status: CheckStatus
     detail: str = ""
     count: int = 0
+    # Localized "what to do next" for a connect failure, straight from ConnectionError.
+    # Empty for every other level and for successful checks.
+    hint_es: str = ""
+    hint_en: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,7 +87,12 @@ def run_checks(
         connection: Any = open_connection(profile, password)
     except NzConnectionError as exc:
         detail = str(exc.context.get("detail", "")) or str(exc)
-        return _report_of_connect_failure(detail, levels)
+        return _report_of_connect_failure(
+            detail,
+            levels,
+            hint_es=str(exc.context.get("hint_es", "")),
+            hint_en=str(exc.context.get("hint_en", "")),
+        )
     try:
         return _run_levels(connection, profile, password, levels)
     finally:
@@ -114,9 +123,13 @@ def _run_levels(connection: Any, profile: Profile, password: str, levels: int) -
     return ValidationReport(tuple(outcomes))
 
 
-def _report_of_connect_failure(detail: str, levels: int) -> ValidationReport:
+def _report_of_connect_failure(
+    detail: str, levels: int, *, hint_es: str = "", hint_en: str = ""
+) -> ValidationReport:
     """Build a report where ``connect`` failed and the remaining levels are skipped."""
-    head = CheckOutcome(level="connect", status="failed", detail=detail)
+    head = CheckOutcome(
+        level="connect", status="failed", detail=detail, hint_es=hint_es, hint_en=hint_en
+    )
     tail = [CheckOutcome(level=level, status="skipped") for level in CHECK_LEVELS[1:levels]]
     return ValidationReport((head, *tail))
 

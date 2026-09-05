@@ -94,6 +94,27 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "No se pudo abrir conexión a Netezza ({host}:{port}/{database}): {detail}",
         "en": "Could not open Netezza connection ({host}:{port}/{database}): {detail}",
     },
+    # One actionable hint per connection failure cause (see connection.CAUSE_*).
+    "CONNECTION_FAILED.HINT.AUTH_REJECTED": {
+        "es": "Netezza rechazó las credenciales del usuario '{user}'. Vuelve a guardar la contraseña con 'nz-mcp add-profile' y comprueba que la cuenta no esté bloqueada o caducada.",
+        "en": "Netezza rejected the credentials for user '{user}'. Store the password again with 'nz-mcp add-profile' and check the account is not locked or expired.",
+    },
+    "CONNECTION_FAILED.HINT.DATABASE_UNAVAILABLE": {
+        "es": "La base de datos '{database}' no existe o el usuario '{user}' no tiene permiso sobre ella. Verifica el nombre en el perfil y los grants del usuario.",
+        "en": "Database '{database}' does not exist or user '{user}' has no permission on it. Check the name in the profile and the user's grants.",
+    },
+    "CONNECTION_FAILED.HINT.HOST_UNREACHABLE": {
+        "es": "No hubo respuesta de {host}:{port}. Comprueba la VPN, que el host resuelva por DNS y que el puerto esté abierto.",
+        "en": "No response from {host}:{port}. Check the VPN, that the host resolves via DNS, and that the port is open.",
+    },
+    "CONNECTION_FAILED.HINT.TLS_FAILED": {
+        "es": "Falló la negociación TLS con {host}:{port}. Revisa 'ca_certs' del perfil o ajusta 'security_level' si el servidor no ofrece SSL.",
+        "en": "TLS negotiation with {host}:{port} failed. Review the profile 'ca_certs' or adjust 'security_level' if the server does not offer SSL.",
+    },
+    "CONNECTION_FAILED.HINT.UNKNOWN": {
+        "es": "No se pudo clasificar el fallo de conexión a {host}:{port}/{database}. Ejecuta 'nz-mcp test-connection' y revisa el detalle del driver.",
+        "en": "The connection failure against {host}:{port}/{database} could not be classified. Run 'nz-mcp test-connection' and review the driver detail.",
+    },
     "NETEZZA_ERROR": {
         "es": "Netezza devolvió un error durante '{operation}': {detail}",
         "en": "Netezza returned an error during '{operation}': {detail}",
