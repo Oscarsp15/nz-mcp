@@ -7,6 +7,9 @@
                   │ integration  │  pocos, locales con VPN
                   └──────────────┘
               ┌──────────────────────┐
+              │  scenarios por rol   │  uno por rol, en CI
+              └──────────────────────┘
+              ┌──────────────────────┐
               │     contract MCP     │  algunos, en CI
               └──────────────────────┘
         ┌──────────────────────────────────┐
@@ -22,10 +25,46 @@
 | `contract` | Conformidad MCP JSON-RPC | ✅ |
 | `adversarial` | Intentos de bypass de seguridad | ✅ |
 | `property` | Property-based con `hypothesis` | ✅ |
+| `scenario` | Recorrido por rol encadenando tools sobre el doble del driver | ✅ |
 | `integration` | Requiere Netezza real (con VPN) | ❌ (v0.1) |
 | `slow` | > 5 s | opt-in (`pytest -m slow`) |
 
 Definidos en `pyproject.toml` con `--strict-markers`.
+
+## Escenarios por rol (`tests/scenarios/`)
+
+Nivel nuevo entre contract e integration. Un archivo por rol de usuario (analista,
+data engineer, mantenedor de procedimientos, operador). Correr solo estos:
+`pytest -m scenario`.
+
+**Qué prueba un escenario y un unitario no**: el **encadenamiento**. Un escenario llama
+a `server.call_tool` como lo hace un cliente y usa la salida de una tool como entrada de
+la siguiente, **sin reformatear el identificador**. Fija cosas que ninguna tool puede
+comprobar sola:
+
+- que el nombre que devuelve un listado es válido como argumento de la tool siguiente;
+- que el `hint` de una tool truncada apunta a la línea exacta donde continuar
+  (numeraciones distintas entre el DDL reconstruido y `PROCEDURESOURCE`);
+- que el `dry_run` describe lo que hace la ejecución real;
+- que el objeto que crea una tool es el que encuentra la siguiente;
+- que cambiar de perfil o de base afecta ya a la llamada siguiente.
+
+**Cuándo basta un unitario**: una tool aislada, una rama de error, un parser, un límite.
+Si el aserto no habla de **dos tools**, es un unitario.
+
+**Reglas**:
+
+- El único doble es `nzpy.connect`, sustituido por `tests/scenarios/netezza_double.py`.
+  Ninguna tool ni función de catálogo se mockea: si el escenario pasa, pasó por
+  `sql_guard`, por la puerta de permisos y por la capa de catálogo de verdad.
+- El doble vive en **un solo sitio**; los archivos de escenario no definen el suyo.
+- El doble **falla ruidosamente** (`FakeNetezzaError`) ante SQL que no entiende: un
+  escenario nunca debe pasar porque el doble devolvió vacío en silencio.
+- Cada rol incluye al menos un caso negativo: el mismo recorrido con un modo
+  insuficiente se detiene donde debe y **no llega SQL al driver**.
+- Sin red, sin `sleep`, sin dependencia de orden entre escenarios.
+- Si un escenario destapa un bug real, se abre issue aparte; el test queda marcado con
+  la referencia a ese issue, no se arregla la tool en el mismo PR.
 
 ## Cobertura
 
