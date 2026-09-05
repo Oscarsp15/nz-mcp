@@ -13,6 +13,7 @@ import nzpy
 from nz_mcp.errors import ConnectionError as NzConnectionError
 from nz_mcp.i18n import both
 from nz_mcp.logging_utils import sanitize
+from nz_mcp.secret import Secret
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -206,7 +207,16 @@ def _connection_failure(
 
 
 def open_connection(profile: Profile, password: str) -> object:
-    """Open a Netezza connection with bounded timeout and fixed app name."""
+    """Open a Netezza connection with bounded timeout and fixed app name.
+
+    ``password`` may be any ``str``; it is re-bound to a ``Secret`` before anything else
+    happens, so a caller that still holds a plain ``str`` cannot leak it from here down.
+    """
+    # Re-binding the *argument name* is the point, not making a copy: traceback
+    # renderers print the current value of each frame argument, so the plain str must
+    # not survive in this frame nor in the nzpy frames it is handed to. Structural by
+    # construction: it cannot be forgotten at a call site because there is none.
+    password = Secret(password)
     # nzpy >=1.17.7 aborts the SSL handshake unless a CA bundle is given via
     # ``ssl={"ca_certs": ...}`` or ``skipCertVerification=True`` is passed (a top-level
     # connect kwarg, not an ``ssl`` key). Verification is opt-in per profile; see

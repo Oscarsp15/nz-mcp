@@ -9,6 +9,7 @@ import pytest
 
 from nz_mcp.cli import _claude_desktop_snippet, _ensure_config_dir, _ProfileDraft, _write_profile
 from nz_mcp.config import PermissionMode, get_profile, list_profile_names, load_profiles_file
+from nz_mcp.secret import Secret
 
 
 def _draft(
@@ -26,7 +27,7 @@ def _draft(
         port=port,
         database=database,
         user=user,
-        password="pw123456",  # noqa: S106 - fixture value, not a real credential
+        password=Secret("pw123456"),
         mode=mode,
         security_level=security_level,
         ca_certs=ca_certs,

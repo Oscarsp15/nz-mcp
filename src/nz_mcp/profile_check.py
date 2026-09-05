@@ -33,6 +33,7 @@ from nz_mcp.connection import open_connection
 from nz_mcp.errors import ConnectionError as NzConnectionError
 from nz_mcp.errors import NzMcpError
 from nz_mcp.logging_utils import sanitize
+from nz_mcp.secret import Secret
 
 CheckLevel = Literal["connect", "catalog_read", "default_database"]
 CheckStatus = Literal["ok", "failed", "empty", "skipped"]
@@ -82,7 +83,13 @@ def run_checks(
     *,
     levels: int = len(CHECK_LEVELS),
 ) -> ValidationReport:
-    """Run the first ``levels`` checks over a single connection and report each one."""
+    """Run the first ``levels`` checks over a single connection and report each one.
+
+    The wizard passes a draft password that never reached the keyring, so it is re-bound
+    to a ``Secret`` here for the same reason as in ``open_connection``: this function and
+    every helper below it carries the credential as a frame argument (ADR 0026).
+    """
+    password = Secret(password)
     try:
         connection: Any = open_connection(profile, password)
     except NzConnectionError as exc:

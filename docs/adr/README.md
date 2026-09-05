@@ -59,5 +59,8 @@ Ver [tech-lead.md](../roles/tech-lead.md#plantilla-adr-para-copiar-a-docsadrnnnn
 | 0021 | [Diagnóstico real del fallo de conexión: capturar el logger de nzpy](0021-diagnostico-fallo-conexion.md) | aceptado | 2026-09-05 |
 | 0022 | [Validar el SQL de `catalog_overrides` con `sql_guard`](0022-validar-catalog-overrides.md) | aceptado | 2026-09-05 |
 | 0023 | [Mensajes de error accionables: detalle localizado + hint específico o nada](0023-mensajes-error-accionables.md) | aceptado | 2026-09-05 |
+| 0024 | [El SQL que se ejecuta es el que validó el guard, nunca uno re-serializado](0024-sql-ejecutado-sin-reserializar.md) | aceptado | 2026-09-05 |
+| 0025 | [Eliminar `on_conflict="skip"` de `nz_insert`](0025-on-conflict-skip-eliminado.md) | aceptado | 2026-09-05 |
+| 0026 | [La password viaja como `Secret`, nunca como `str` desnuda](0026-secret-sin-password-en-trazas.md) | aceptado | 2026-09-05 |
 
 > **Colisión de numeración**: dos ADR comparten el número `0014`. Las referencias en prosa a "ADR 0014" del CHANGELOG y de la ADR 0015 apuntan a [`0014-tool-execute-ddl.md`](0014-tool-execute-ddl.md). No se renumeran para no romper esos enlaces.
