@@ -30,20 +30,37 @@ nz-mcp init        # interactive wizard
 
 > Development version (latest `main`, bypassing PyPI): `pipx install git+https://github.com/Oscarsp15/nz-mcp.git`
 
-Optional per-profile fields in `~/.nz-mcp/profiles.toml` (edited by hand): `security_level` (0-3, default `2` = negotiate SSL with cleartext fallback; `3` = SSL required) and `ca_certs` (path to a PEM CA bundle used to **verify** the server certificate; when omitted, the SSL connection is established without certificate verification). Details in [docs/architecture/security-model.md](docs/architecture/security-model.md).
+Per-profile fields in `~/.nz-mcp/profiles.toml` the wizard now asks for: `security_level` (0-3, default `2` = negotiate SSL with cleartext fallback; `3` = SSL required) and `ca_certs` (path to a PEM CA bundle used to **verify** the server certificate; when omitted, the SSL connection is established without certificate verification). Details in [docs/architecture/security-model.md](docs/architecture/security-model.md).
 
 ## Profile management
 
 Each profile lives in `~/.nz-mcp/profiles.toml`; the password goes to the OS keyring, never to the file.
 
 ```bash
-nz-mcp add-profile prod --active      # interactive wizard: host, port, database, user, password, mode
+nz-mcp add-profile prod --active      # guided wizard: host, port, database, user, password, mode, security
 nz-mcp list-profiles                  # configured names
+nz-mcp switch-profile prod            # change the active profile
 nz-mcp edit-profile prod --mode read  # change single fields, password untouched
 nz-mcp remove-profile prod            # delete the profile and its keyring password
 ```
 
-`add-profile` with an existing name asks for confirmation (default `No`) and, when accepted, **replaces** every field of that section instead of duplicating it.
+`add-profile` with an existing name asks for confirmation (default `No`) and, when accepted, **replaces** the fields of that section instead of duplicating it; the current values are offered as the default of every question.
+
+### The guided wizard step by step
+
+`nz-mcp init` and `nz-mcp add-profile <name>` explain every non-obvious concept in one line before asking for it:
+
+- **Mode**: `read` queries only, `write` adds data writes, `admin` adds DDL. The mode **grants** no Netezza privilege: it only narrows the ones your user already has.
+- **Security level** (`security_level`, default `2`): whether the connection is encrypted and whether TLS is mandatory.
+- **`ca_certs`**: optional, press Enter to skip; without it the channel is still encrypted but the certificate is not verified.
+
+Before writing anything to `profiles.toml` or to the keyring, the wizard offers to **validate the profile in three levels**, each reported separately:
+
+1. **Connection** — opens the session and reads `VERSION()`: credentials, network and TLS negotiation.
+2. **Catalog read** — lists databases: the account really reads, it does not just authenticate.
+3. **Visibility in the default database** — lists its schemas: catches the silent failure of connecting without holding any `GRANT`.
+
+If a level fails **nothing you typed is lost**: you can retry, fix a single field (the rest is kept), save anyway — configuring a profile with the VPN down is a normal case — or cancel leaving no trace. On success it prints the JSON block ready to paste into `claude_desktop_config.json` with the profile name already substituted.
 
 `remove-profile` asks for explicit confirmation before deleting the TOML section and the keyring password. If the deleted profile was the active one, the file is left without `active`: pick another one with the `NZ_MCP_PROFILE` variable or by editing the `active` field.
 

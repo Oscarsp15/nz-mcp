@@ -44,20 +44,37 @@ Servidor MCP (Model Context Protocol) para **IBM Netezza Performance Server**. P
 
 Rutas completas al ejecutable para Claude Desktop (pipx vs `.venv`) y ejemplos de `claude_desktop_config.json`: [docs/guides/claude-desktop-setup.md](docs/guides/claude-desktop-setup.md).
 
-Campos opcionales por perfil en `~/.nz-mcp/profiles.toml` (se editan a mano): `security_level` (0-3, default `2` = negocia SSL con fallback a claro; `3` = SSL obligatorio) y `ca_certs` (ruta a un bundle CA en PEM para **verificar** el certificado del servidor; si se omite, la conexión SSL se establece sin verificar el certificado). Detalle en [docs/architecture/security-model.md](docs/architecture/security-model.md).
+Campos por perfil en `~/.nz-mcp/profiles.toml` que el asistente ya pregunta: `security_level` (0-3, default `2` = negocia SSL con fallback a claro; `3` = SSL obligatorio) y `ca_certs` (ruta a un bundle CA en PEM para **verificar** el certificado del servidor; si se omite, la conexión SSL se establece sin verificar el certificado). Detalle en [docs/architecture/security-model.md](docs/architecture/security-model.md).
 
 ## Gestión de perfiles
 
 Cada perfil vive en `~/.nz-mcp/profiles.toml`; la password va al keyring del SO, nunca al archivo.
 
 ```bash
-nz-mcp add-profile prod --active      # alta interactiva: host, puerto, BD, usuario, password, modo
+nz-mcp add-profile prod --active      # alta guiada: host, puerto, BD, usuario, password, modo, seguridad
 nz-mcp list-profiles                  # nombres configurados
+nz-mcp switch-profile prod            # cambia el perfil activo
 nz-mcp edit-profile prod --mode read  # cambia campos sueltos, sin tocar la password
 nz-mcp remove-profile prod            # borra el perfil y su password del keyring
 ```
 
-`add-profile` con un nombre que ya existe pide confirmación (default `No`) y, si aceptas, **reemplaza** todos los campos de esa sección en vez de duplicarla.
+`add-profile` con un nombre que ya existe pide confirmación (default `No`) y, si aceptas, **reemplaza** los campos de esa sección en vez de duplicarla; los valores actuales se ofrecen como default de cada pregunta.
+
+### El asistente guiado paso a paso
+
+`nz-mcp init` y `nz-mcp add-profile <nombre>` explican en una línea cada concepto no obvio antes de preguntarlo:
+
+- **Modo**: `read` solo consultas, `write` añade escritura de datos, `admin` añade DDL. El modo **no otorga** permisos en Netezza: solo recorta los que ya tenga tu usuario.
+- **Nivel de seguridad** (`security_level`, default `2`): si la conexión viaja cifrada y si se exige TLS.
+- **`ca_certs`**: opcional, Enter para omitir; sin él el canal sigue cifrado pero no se verifica el certificado.
+
+Antes de escribir nada en `profiles.toml` ni en el keyring, el asistente ofrece **validar el perfil en tres niveles**, cada uno reportado por separado:
+
+1. **Conexión** — abre la sesión y lee `VERSION()`: credenciales, red y negociación TLS.
+2. **Lectura del catálogo** — lista bases de datos: la cuenta lee de verdad, no solo autentica.
+3. **Visibilidad en la base por defecto** — lista sus esquemas: detecta el fallo silencioso de conectar sin tener ningún `GRANT`.
+
+Si algún nivel falla **no se pierde nada de lo escrito**: puedes reintentar, corregir un solo campo (el resto se conserva), guardar de todos modos —configurar un perfil sin la VPN levantada es un caso normal— o cancelar sin dejar rastro. Al terminar imprime el bloque JSON listo para pegar en `claude_desktop_config.json` con el nombre del perfil ya sustituido.
 
 `remove-profile` pide confirmación explícita antes de borrar la sección del TOML y la password del keyring. Si el perfil borrado era el activo, el archivo se queda sin `active`: elige otro con la variable `NZ_MCP_PROFILE` o editando el campo `active`.
 

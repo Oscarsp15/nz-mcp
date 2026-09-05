@@ -40,7 +40,7 @@ Perfiles que **omiten** `security_level` pasan de `1` (claro) a `2` (SSL preferi
 1. **Default `3` (only-secured)** — rechazado como default: rompería cualquier on-prem sin SSL (sin fallback). Correcto como valor explícito para SaaS, no como default global.
 2. **Mantener default `1` y solo hacerlo configurable** — rechazado: el issue exige default seguro; dejar `1` perpetúa el tráfico en claro por defecto.
 3. **Campo `ssl: bool`** — rechazado: pierde la granularidad de los 4 niveles de nzpy (preferred vs only, secured vs unsecured); un entero mapeado 1:1 a `securityLevel` es más fiel al driver.
-4. **Exponer `security_level` en el wizard CLI `add-profile`** — diferido: fuera del alcance mínimo del issue (que pide campo + propagación + doc + test). Por ahora se setea editando `profiles.toml`; follow-up si se pide.
+4. **Exponer `security_level` en el wizard CLI `add-profile`** — se difirió aquí como fuera del alcance mínimo del issue (campo + propagación + doc + test), con la nota "follow-up si se pide". **Diferimiento retirado** por la enmienda 2026-09-04 (#168): el wizard pregunta `security_level` y `ca_certs`.
 
 ## Consequences
 
@@ -118,4 +118,32 @@ nzpy 1.17.7) fallaba contra appliances con SSL habilitado, incluso con el defaul
 - Quien disponga del certificado del appliance obtiene verificación real con una línea en
   `profiles.toml`. Sin `ca_certs`, el canal va cifrado pero es vulnerable a MITM con certificado
   falso (misma exposición que con nzpy 1.17.4); documentado en `security-model.md`.
-- Exponer `ca_certs` en el wizard `add-profile` sigue **diferido** (§4 de esta ADR).
+- Exponer `ca_certs` en el wizard `add-profile` se resuelve en la enmienda siguiente (#168).
+
+## Enmienda 2026-09-04 (#168): el wizard pregunta `security_level` y `ca_certs`
+
+### Contexto
+
+La alternativa 4 de esta ADR difirió exponer `security_level` en el asistente del CLI con un
+"follow-up si se pide", y la enmienda de #160 arrastró el mismo diferimiento para `ca_certs`.
+El issue #168 lo pide: configurar el nivel de seguridad exigía editar `profiles.toml` a mano,
+justo el archivo que el asistente acaba de escribir.
+
+### Decisión
+
+- `nz-mcp init` / `nz-mcp add-profile` preguntan **`security_level`** (default `DEFAULT_SECURITY_LEVEL`
+  = 2, el mismo de `Profile`) y **`ca_certs`** (opcional; Enter lo omite), tras una línea que explica
+  qué significa cada uno. Ambos se persisten en el perfil.
+- Los valores pasan a ser **propiedad del wizard**: al sobrescribir un perfil se reemplazan como
+  host o puerto, con el valor actual ofrecido como default de la pregunta. Antes se preservaban a
+  ciegas porque el wizard no los preguntaba (#167). Los campos que el wizard sigue sin preguntar
+  (`catalog_overrides` y cualquiera que se añada después) se preservan igual que hasta ahora.
+- Sin `ca_certs`, la clave no se escribe en el TOML: un valor vacío significa "no verificar",
+  no "conservar el anterior".
+
+### Consecuencias
+
+- Los defaults del modelo (`DEFAULT_SECURITY_LEVEL`, `MIN/MAX_SECURITY_LEVEL`) son ahora
+  constantes de `config.py` reutilizadas por el `Profile` y por el wizard: un solo sitio que
+  cambiar si se revisan los niveles.
+- El diferimiento de §4 queda **retirado**; esta ADR ya no tiene follow-ups pendientes.
