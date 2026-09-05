@@ -379,3 +379,44 @@ def test_list_procedures_pattern_is_case_insensitive(
     assert out and out[0]["name"] == "PI_BASEREPERFILAMIENTOGENERAL"
     assert fake.executed_sql is not None
     assert "LIKE UPPER(?)" in " ".join(fake.executed_sql.split())
+
+
+# ── truncate_procedure_ddl (issue #165) ──────────────────────────────────────
+
+_DDL_HEADER = "CREATE OR REPLACE PROCEDURE S.P()@LANGUAGE NZPLSQL AS@"
+
+
+def _ddl(source_lines: int) -> str:
+    body = "@".join(f"  line {i}" for i in range(source_lines))
+    return (_DDL_HEADER + body).replace("@", "\n")
+
+
+def test_truncate_procedure_ddl_noop_when_under_budget() -> None:
+    ddl = _ddl(5)
+    text, resume = proc.truncate_procedure_ddl(ddl, 10_000)
+    assert text == ddl
+    assert resume == 0
+
+
+def test_truncate_procedure_ddl_resume_line_is_source_relative() -> None:
+    ddl = _ddl(200)
+    text, resume = proc.truncate_procedure_ddl(ddl, 200)
+    assert len(text.encode("utf-8")) <= 200
+    kept_lines = len(text.splitlines())
+    # Two header lines precede PROCEDURESOURCE line 1.
+    assert resume == kept_lines - 1
+    assert text.splitlines()[-1] == f"  line {resume - 2}"
+
+
+def test_truncate_procedure_ddl_cuts_on_line_boundaries() -> None:
+    ddl = _ddl(200)
+    text, _ = proc.truncate_procedure_ddl(ddl, 200)
+    assert ddl.startswith(text)
+    assert not text.splitlines()[-1].endswith(" ")
+
+
+def test_truncate_procedure_ddl_minified_single_line() -> None:
+    ddl = "X" * 5000
+    text, resume = proc.truncate_procedure_ddl(ddl, 1024)
+    assert len(text.encode("utf-8")) == 1024
+    assert resume == 1

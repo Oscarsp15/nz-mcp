@@ -45,3 +45,4 @@ Ver [tech-lead.md](../roles/tech-lead.md#plantilla-adr-para-copiar-a-docsadrnnnn
 | 0008 | [`required_approving_review_count = 0` mientras solo haya un mantenedor humano](0008-required-reviews-cero-solo-dev.md) | aceptado | 2026-04-17 |
 | 0009 | [Catálogo de tools: bulk INSERT…SELECT y CTAS](0009-tool-catalog-bulk-ctas.md) | aceptado | 2026-04-17 |
 | 0014 | [Perfiles de agente IA en `.claude/agents/` + whitelist hygiene](0014-claude-agents-whitelist.md) | aceptado | 2026-06-26 |
+| 0018 | [Acotar la salida de `nz_list_procedures` y `nz_get_procedure_ddl`](0018-cap-procedures-output.md) | aceptado | 2026-09-04 |

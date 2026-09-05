@@ -79,3 +79,24 @@ def test_both_returns_both_locales() -> None:
 def test_both_truncation_by_bytes() -> None:
     out = both("HINT.RESULT_TRUNCATED_BY_BYTES", max_kb=100)
     assert "100" in out["es"] and "100" in out["en"]
+
+
+def test_truncation_hints_render_in_both_locales() -> None:
+    """Issue #165 hints must format with the same placeholders in ES and EN."""
+    list_fmt = {"n": 5, "total": 714, "cap": 1000}
+    ddl_fmt = {
+        "returned_kb": 100,
+        "total_kb": 143,
+        "max_kb": 100,
+        "from_line": 1501,
+        "to_line": 2000,
+        "step": 500,
+    }
+    for loc in ("es", "en"):
+        listed = t("HINT.PROCEDURE_LIST_TRUNCATED", loc, **list_fmt)
+        assert "714" in listed
+        assert "pattern" in listed
+        ddl = t("HINT.PROCEDURE_DDL_TRUNCATED", loc, **ddl_fmt)
+        assert "nz_get_procedure_size" in ddl
+        assert "from_line=1501" in ddl
+        assert "to_line=2000" in ddl

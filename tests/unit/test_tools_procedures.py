@@ -5,9 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
+from nz_mcp.config import MAX_ROWS_CAP
 from nz_mcp.tools.procedures import (
+    PROC_DDL_DEFAULT_MAX_BYTES,
     PROC_DDL_LARGE_WARNING,
+    PROC_DDL_MAX_BYTES_CAP,
+    PROC_DDL_MIN_MAX_BYTES,
     PROC_DDL_WARN_BYTES,
     DescribeProcedureInput,
     GetProcedureDdlInput,
@@ -103,6 +108,7 @@ def test_nz_get_procedure_ddl_happy(monkeypatch: pytest.MonkeyPatch, two_profile
 def test_nz_get_procedure_ddl_large_emits_warning(
     monkeypatch: pytest.MonkeyPatch, two_profiles: Path
 ) -> None:
+    """Raising max_bytes above the warn threshold still surfaces the size warning."""
     big = "P" * (PROC_DDL_WARN_BYTES + 1)
 
     def _fake_ddl(*_a: object, **_k: object) -> str:
@@ -110,10 +116,17 @@ def test_nz_get_procedure_ddl_large_emits_warning(
 
     monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl", _fake_ddl)
     out = nz_get_procedure_ddl(
-        GetProcedureDdlInput(database="D", procedure_schema="PUBLIC", procedure="SP"),
+        GetProcedureDdlInput(
+            database="D",
+            procedure_schema="PUBLIC",
+            procedure="SP",
+            max_bytes=PROC_DDL_MAX_BYTES_CAP,
+        ),
         config_path=two_profiles,
     )
     assert out.warning == PROC_DDL_LARGE_WARNING
+    assert out.truncated is False
+    assert out.hint is None
     assert out.size_bytes == len(big.encode("utf-8"))
 
 
@@ -423,3 +436,154 @@ def test_nz_get_procedure_size_with_overload(
         config_path=two_profiles,
     )
     assert out.signature == "SP_OVERLOAD(INT)"
+
+
+# ── issue #165: output caps for nz_list_procedures / nz_get_procedure_ddl ────
+
+
+def _fake_rows(count: int) -> list[dict[str, str]]:
+    return [
+        {
+            "name": f"SP{i}",
+            "owner": "ADMIN",
+            "language": "NZPLSQL",
+            "arguments": "(INT)",
+            "returns": "INT",
+        }
+        for i in range(count)
+    ]
+
+
+def _patch_list(monkeypatch: pytest.MonkeyPatch, count: int) -> None:
+    rows = _fake_rows(count)
+    monkeypatch.setattr(
+        "nz_mcp.tools.procedures.list_procedures",
+        lambda *_a, **_k: rows,
+    )
+
+
+def test_nz_list_procedures_under_cap_is_not_truncated(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    _patch_list(monkeypatch, 3)
+    out = nz_list_procedures(
+        ListProceduresInput(database="D", procedure_schema="PUBLIC", max_rows=10),
+        config_path=two_profiles,
+    )
+    assert len(out.procedures) == 3
+    assert out.truncated is False
+    assert out.hint is None
+
+
+def test_nz_list_procedures_truncates_and_hints(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    _patch_list(monkeypatch, 714)
+    out = nz_list_procedures(
+        ListProceduresInput(database="D", procedure_schema="PUBLIC", max_rows=5),
+        config_path=two_profiles,
+    )
+    assert len(out.procedures) == 5
+    assert out.procedures[0].name == "SP0"
+    assert out.truncated is True
+    assert out.hint is not None
+    assert "714" in out.hint
+    assert "pattern" in out.hint
+    assert "max_rows" in out.hint
+
+
+def test_nz_list_procedures_defaults_to_profile_max_rows(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """Without max_rows the active profile default (100) applies."""
+    _patch_list(monkeypatch, 101)
+    out = nz_list_procedures(
+        ListProceduresInput(database="D", procedure_schema="PUBLIC"),
+        config_path=two_profiles,
+    )
+    assert len(out.procedures) == 100
+    assert out.truncated is True
+
+
+def test_list_procedures_input_rejects_max_rows_over_cap() -> None:
+    with pytest.raises(ValidationError):
+        ListProceduresInput.model_validate(
+            {"database": "D", "schema": "PUBLIC", "max_rows": MAX_ROWS_CAP + 1},
+        )
+
+
+def _big_ddl(source_lines: int) -> str:
+    body = "\n".join(f"  x := {i}; -- filler comment padding the line" for i in range(source_lines))
+    return f"CREATE OR REPLACE PROCEDURE S.P()\nLANGUAGE NZPLSQL AS\nBEGIN_PROC\n{body}\nEND_PROC;"
+
+
+def test_nz_get_procedure_ddl_truncates_by_default_and_hints(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    ddl = _big_ddl(4000)
+    assert len(ddl.encode("utf-8")) > PROC_DDL_DEFAULT_MAX_BYTES
+    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl", lambda *_a, **_k: ddl)
+
+    out = nz_get_procedure_ddl(
+        GetProcedureDdlInput(database="D", procedure_schema="PUBLIC", procedure="P"),
+        config_path=two_profiles,
+    )
+    assert out.truncated is True
+    assert out.size_bytes <= PROC_DDL_DEFAULT_MAX_BYTES
+    assert out.size_bytes_raw == len(ddl.encode("utf-8"))
+    assert out.hint is not None
+    assert "nz_get_procedure_size" in out.hint
+    assert "nz_get_procedure_section" in out.hint
+    assert "from_line=" in out.hint
+    # The DDL header (2 lines) is not counted in the source resume line.
+    resume = int(out.hint.split("from_line=")[1].split(",")[0])
+    assert resume == len(out.ddl.splitlines()) - 1
+
+
+def test_nz_get_procedure_ddl_under_cap_keeps_full_text(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    ddl = _big_ddl(10)
+    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl", lambda *_a, **_k: ddl)
+
+    out = nz_get_procedure_ddl(
+        GetProcedureDdlInput(database="D", procedure_schema="PUBLIC", procedure="P"),
+        config_path=two_profiles,
+    )
+    assert out.ddl == ddl
+    assert out.truncated is False
+    assert out.hint is None
+
+
+def test_nz_get_procedure_ddl_clean_variant_respects_max_bytes(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    ddl = _big_ddl(4000)
+    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl", lambda *_a, **_k: ddl)
+
+    out = nz_get_procedure_ddl(
+        GetProcedureDdlInput(
+            database="D",
+            procedure_schema="PUBLIC",
+            procedure="P",
+            variant="clean",
+            max_bytes=PROC_DDL_MIN_MAX_BYTES,
+        ),
+        config_path=two_profiles,
+    )
+    assert out.truncated is True
+    assert out.size_bytes <= PROC_DDL_MIN_MAX_BYTES
+    assert "-- filler" not in out.ddl
+    assert out.hint is not None
+
+
+def test_get_procedure_ddl_input_rejects_max_bytes_over_cap() -> None:
+    with pytest.raises(ValidationError):
+        GetProcedureDdlInput.model_validate(
+            {
+                "database": "D",
+                "schema": "PUBLIC",
+                "procedure": "P",
+                "max_bytes": PROC_DDL_MAX_BYTES_CAP + 1,
+            },
+        )
