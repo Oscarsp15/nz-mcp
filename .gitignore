@@ -54,3 +54,6 @@ uv.lock
 # Logs
 *.log
 logs/
+
+# Worktrees temporales de agentes
+.claude/worktrees/
