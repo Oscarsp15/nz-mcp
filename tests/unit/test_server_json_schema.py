@@ -126,14 +126,17 @@ def test_inline_refs_unresolved_ref_walks_other_keys() -> None:
     assert out["properties"]["bad"]["x"] == 1
 
 
-def test_to_mcp_tool_output_schema_no_refs_for_list_databases() -> None:
+def test_to_mcp_tool_input_schema_no_refs_for_query_select() -> None:
     listings = {x.name: x for x in list_tools()}
-    listing = listings["nz_list_databases"]
-    tool = _to_mcp_tool(listing)
-    assert tool.outputSchema is not None
-    result = tool.outputSchema["properties"]["result"]
-    _assert_no_defs_refs(result)
-    assert "#/$defs/" not in json.dumps(tool.outputSchema)
+    tool = _to_mcp_tool(listings["nz_query_select"])
+    _assert_no_defs_refs(tool.inputSchema)
+    assert "#/$defs/" not in json.dumps(tool.inputSchema)
+
+
+def test_to_mcp_tool_does_not_advertise_output_schema() -> None:
+    """ADR 0019: outputSchema is optional in MCP and we do not send it."""
+    for listing in list_tools():
+        assert _to_mcp_tool(listing).outputSchema is None
 
 
 @pytest.mark.contract
@@ -144,8 +147,8 @@ def test_mcp_tool_model_validate_list_tools() -> None:
         types.Tool.model_validate(tool.model_dump())
 
 
-def test_all_tool_output_schemas_inline_internal_refs() -> None:
+def test_all_tool_input_schemas_inline_internal_refs() -> None:
     for spec in TOOLS.values():
-        raw = spec.output_model.model_json_schema()
+        raw = spec.input_model.model_json_schema()
         inlined = _inline_refs(raw)
         assert "#/$defs/" not in json.dumps(inlined)

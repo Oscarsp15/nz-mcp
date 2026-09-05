@@ -65,9 +65,11 @@ def test_mcp_tools_list_and_call(two_profiles: Path) -> None:
             current = by_name["nz_current_profile"]
             assert current.description
             assert current.inputSchema.get("type") == "object"
-            assert current.outputSchema is not None
             assert current.annotations is not None
             assert current.annotations.readOnlyHint is True
+
+            # ADR 0019: no tool advertises an output schema.
+            assert all(tool.outputSchema is None for tool in listing.tools)
 
             call_ok: CallToolResult = await client.call_tool("nz_current_profile", {})
             assert call_ok.structuredContent is not None
@@ -109,5 +111,8 @@ def test_mcp_nz_export_ddl_embedded_resource(
             assert res.structuredContent["meta"]["schema"] == "PUB"
             assert len(res.content) == 2
             assert res.content[0].type == "resource"
+
+            # ADR 0019: the blocks are not mirrored back into structuredContent.
+            assert set(res.structuredContent) == {"meta"}
 
     anyio.run(_run)

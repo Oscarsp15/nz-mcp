@@ -109,7 +109,7 @@ def test_guard_rejects(sql, code):
 - Cliente fake que envía `initialize`, `tools/list`, `tools/call`.
 - Verifica:
   - 16 tools exactas en `tools/list`.
-  - Cada tool tiene `inputSchema`, `outputSchema`, `description`, `annotations`.
+  - Cada tool tiene `inputSchema`, `description`, `annotations`. `outputSchema` NO se declara (ADR 0019).
   - Errores con la estructura del contrato (campo `code`, mensajes ES/EN).
 
 ## Tests de integración (local con VPN)

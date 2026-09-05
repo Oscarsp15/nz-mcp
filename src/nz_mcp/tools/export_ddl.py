@@ -157,7 +157,11 @@ class ExportDdlMeta(BaseModel):
 
 
 class ExportDdlToolOutput(BaseModel):
-    """Wire shape for ``structuredContent`` on success (matches ``call_tool``)."""
+    """Success shape of the in-process :func:`nz_mcp.server.call_tool` helper.
+
+    On the MCP wire the blocks travel in ``content`` and only ``meta`` is mirrored into
+    ``structuredContent`` (see ``docs/adr/0019-sin-output-schema.md``).
+    """
 
     model_config = ConfigDict(extra="forbid")
     content: list[dict[str, object]] = Field(
