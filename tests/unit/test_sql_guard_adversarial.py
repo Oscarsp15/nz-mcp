@@ -230,6 +230,17 @@ def test_confirm_full_table_does_not_waive_the_where_requirement() -> None:
 
 
 @pytest.mark.adversarial
+def test_mode_rejection_wins_over_tautology_hint() -> None:
+    """A caller who may not DELETE is told that, not invited to retry with the flag.
+
+    ``confirm_full_table`` cannot rescue a statement the mode forbids, so suggesting it
+    would send the model down a path that fails again (audit of PR #173).
+    """
+    with pytest.raises(GuardRejectedError) as excinfo:
+        validate("DELETE FROM t WHERE 1 = 1", mode="read")
+    assert excinfo.value.code == "STATEMENT_NOT_ALLOWED"
+
+
 def test_confirm_full_table_does_not_grant_mode_privileges() -> None:
     with pytest.raises(GuardRejectedError) as exc:
         validate("DELETE FROM t WHERE 1 = 1", mode="read", confirm_full_table=True)

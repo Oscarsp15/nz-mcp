@@ -154,8 +154,10 @@ def validate(
     kind = _classify(expr)
     has_where = _has_where(expr)
 
-    _assert_selective_where(expr, kind=kind, confirm_full_table=confirm_full_table)
+    # Permission mode is checked first on purpose: a caller who may not run the statement
+    # at all must be told that, not invited to retry with ``confirm_full_table``.
     _enforce(kind=kind, has_where=has_where, mode=mode)
+    _assert_selective_where(expr, kind=kind, confirm_full_table=confirm_full_table)
 
     return ParsedStatement(kind=kind, has_where=has_where, raw=sql)
 
