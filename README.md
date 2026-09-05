@@ -26,11 +26,11 @@ Servidor MCP (Model Context Protocol) para **IBM Netezza Performance Server**. P
 1. **Recomendada — [pipx](https://pypa.github.io/pipx/)** (aisla dependencias; evita choques de `typer`/`click` con otros CLI globales):
 
    ```bash
-   pipx install git+https://github.com/Oscarsp15/nz-mcp.git
+   pipx install nz-mcp
    nz-mcp init
    ```
 
-   > Cuando exista release en PyPI: `pipx install nz-mcp`.
+   > Versión de desarrollo (último `main`, sin pasar por PyPI): `pipx install git+https://github.com/Oscarsp15/nz-mcp.git`.
 
 2. **Desarrollo** — clona el repo y usa un venv:
 
