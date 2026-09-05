@@ -15,16 +15,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Skip for bots
-        if: github.actor == 'dependabot[bot]'
-        run: echo "Skipping for ${{ github.actor }} — bots use their own naming."
+        if: startsWith(github.head_ref, 'dependabot/')
+        run: echo "Skipping ${{ github.head_ref }} — bots use their own naming."
       - uses: actions/checkout@v6
-        if: github.actor != 'dependabot[bot]'
+        if: ${{ !startsWith(github.head_ref, 'dependabot/') }}
       - uses: actions/setup-python@v6
-        if: github.actor != 'dependabot[bot]'
+        if: ${{ !startsWith(github.head_ref, 'dependabot/') }}
         with:
           python-version: "3.11"
       - name: Validate branch name
-        if: github.actor != 'dependabot[bot]'
+        if: ${{ !startsWith(github.head_ref, 'dependabot/') }}
         run: |
           BRANCH="${{ github.head_ref }}"
           echo "Branch: $BRANCH"
@@ -66,10 +66,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Skip for bots
-        if: github.actor == 'dependabot[bot]'
-        run: echo "Skipping for ${{ github.actor }} — bots have their own PR body format."
+        if: startsWith(github.head_ref, 'dependabot/')
+        run: echo "Skipping ${{ github.head_ref }} — bots have their own PR body format."
       - name: Verify Closes #N or Refs #N
-        if: github.actor != 'dependabot[bot]'
+        if: ${{ !startsWith(github.head_ref, 'dependabot/') }}
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
@@ -86,16 +86,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Skip for bots
-        if: github.actor == 'dependabot[bot]'
-        run: echo "Skipping for ${{ github.actor }} — bots have their own PR body format."
+        if: startsWith(github.head_ref, 'dependabot/')
+        run: echo "Skipping ${{ github.head_ref }} — bots have their own PR body format."
       - uses: actions/checkout@v6
-        if: github.actor != 'dependabot[bot]'
+        if: ${{ !startsWith(github.head_ref, 'dependabot/') }}
       - uses: actions/setup-python@v6
-        if: github.actor != 'dependabot[bot]'
+        if: ${{ !startsWith(github.head_ref, 'dependabot/') }}
         with:
           python-version: "3.11"
       - name: Validate required template headings
-        if: github.actor != 'dependabot[bot]'
+        if: ${{ !startsWith(github.head_ref, 'dependabot/') }}
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: python scripts/check_pr_body.py
