@@ -11,7 +11,9 @@ from nz_mcp.config import (
     get_profile,
     list_profile_names,
     load_profiles_file,
+    remove_profile,
     update_profile_fields,
+    upsert_profile,
 )
 from nz_mcp.errors import InvalidProfileError, ProfileNotFoundError
 
@@ -138,3 +140,84 @@ def test_unknown_profile_field_still_rejected(tmp_profiles: Path) -> None:
     # extra="forbid" is preserved: typos or unsupported keys must not pass silently.
     with pytest.raises(InvalidProfileError):
         get_profile("bad", path=tmp_profiles)
+
+
+# --- upsert_profile -----------------------------------------------------------
+
+
+def _block(**overrides: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "host": "h",
+        "port": 5480,
+        "database": "DB",
+        "user": "u",
+        "mode": "read",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_upsert_profile_creates_section(tmp_profiles: Path) -> None:
+    upsert_profile("dev", _block(), path=tmp_profiles, set_active=True)
+    file = load_profiles_file(tmp_profiles)
+    assert file.active == "dev"
+    assert list(file.profiles) == ["dev"]
+
+
+def test_upsert_profile_replaces_instead_of_duplicating(tmp_profiles: Path) -> None:
+    upsert_profile("dev", _block(), path=tmp_profiles)
+    upsert_profile("dev", _block(host="h2", mode="write"), path=tmp_profiles)
+    content = tmp_profiles.read_text(encoding="utf-8")
+    assert content.count("[profiles.dev]") == 1
+    profile = get_profile("dev", path=tmp_profiles)
+    assert profile.host == "h2"
+    assert profile.mode == "write"
+
+
+def test_upsert_profile_keeps_other_profiles(two_profiles: Path) -> None:
+    upsert_profile("dev", _block(host="new-host"), path=two_profiles)
+    assert list_profile_names(two_profiles) == ["dev", "prod"]
+    assert get_profile("prod", path=two_profiles).host == "nz-prod.example.com"
+
+
+def test_upsert_profile_invalid_block_leaves_file_untouched(two_profiles: Path) -> None:
+    before = two_profiles.read_text(encoding="utf-8")
+    with pytest.raises(InvalidProfileError):
+        upsert_profile("dev", _block(port=0), path=two_profiles)
+    assert two_profiles.read_text(encoding="utf-8") == before
+
+
+# --- remove_profile -----------------------------------------------------------
+
+
+def test_remove_profile_deletes_section(two_profiles: Path) -> None:
+    was_active = remove_profile("prod", path=two_profiles)
+    assert was_active is False
+    assert list_profile_names(two_profiles) == ["dev"]
+    assert "[profiles.prod]" not in two_profiles.read_text(encoding="utf-8")
+
+
+def test_remove_profile_clears_active_when_it_was_active(two_profiles: Path) -> None:
+    was_active = remove_profile("dev", path=two_profiles)
+    assert was_active is True
+    file = load_profiles_file(two_profiles)
+    assert file.active is None
+    assert list(file.profiles) == ["prod"]
+
+
+def test_remove_profile_unknown_raises(two_profiles: Path) -> None:
+    with pytest.raises(ProfileNotFoundError):
+        remove_profile("ghost", path=two_profiles)
+
+
+def test_remove_profile_missing_file_raises(tmp_profiles: Path) -> None:
+    with pytest.raises(ProfileNotFoundError):
+        remove_profile("dev", path=tmp_profiles)
+
+
+def test_remove_last_profile_leaves_loadable_file(tmp_profiles: Path) -> None:
+    upsert_profile("only", _block(), path=tmp_profiles, set_active=True)
+    remove_profile("only", path=tmp_profiles)
+    file = load_profiles_file(tmp_profiles)
+    assert file.profiles == {}
+    assert file.active is None

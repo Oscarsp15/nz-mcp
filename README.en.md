@@ -32,6 +32,21 @@ nz-mcp init        # interactive wizard
 
 Optional per-profile fields in `~/.nz-mcp/profiles.toml` (edited by hand): `security_level` (0-3, default `2` = negotiate SSL with cleartext fallback; `3` = SSL required) and `ca_certs` (path to a PEM CA bundle used to **verify** the server certificate; when omitted, the SSL connection is established without certificate verification). Details in [docs/architecture/security-model.md](docs/architecture/security-model.md).
 
+## Profile management
+
+Each profile lives in `~/.nz-mcp/profiles.toml`; the password goes to the OS keyring, never to the file.
+
+```bash
+nz-mcp add-profile prod --active      # interactive wizard: host, port, database, user, password, mode
+nz-mcp list-profiles                  # configured names
+nz-mcp edit-profile prod --mode read  # change single fields, password untouched
+nz-mcp remove-profile prod            # delete the profile and its keyring password
+```
+
+`add-profile` with an existing name asks for confirmation (default `No`) and, when accepted, **replaces** every field of that section instead of duplicating it.
+
+`remove-profile` asks for explicit confirmation before deleting the TOML section and the keyring password. If the deleted profile was the active one, the file is left without `active`: pick another one with the `NZ_MCP_PROFILE` variable or by editing the `active` field.
+
 ## Quick setup in Claude Desktop
 
 `claude_desktop_config.json`:

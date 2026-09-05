@@ -178,6 +178,80 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Archivo escrito: {path} ({bytes_written} bytes, sha256={sha256}).",
         "en": "File written: {path} ({bytes_written} bytes, sha256={sha256}).",
     },
+    # nz-mcp profile lifecycle (CLI wizard: add-profile / remove-profile)
+    "CLI.PROFILE_ALREADY_EXISTS": {
+        "es": "El perfil '{profile}' ya existe en {path}.",
+        "en": "Profile '{profile}' already exists in {path}.",
+    },
+    "CLI.PROFILE_OVERWRITE_CONFIRM": {
+        "es": (
+            "¿Sobrescribirlo? Se reemplazarán host, puerto, base de datos, usuario, "
+            "modo y password; el resto de campos del perfil se conserva"
+        ),
+        "en": (
+            "Overwrite it? Host, port, database, user, mode and password will be "
+            "replaced; every other profile field is kept"
+        ),
+    },
+    "CLI.PROFILE_OVERWRITE_CANCELLED": {
+        "es": (
+            "Cancelado: el perfil '{profile}' no se ha modificado. "
+            "Cambia campos sueltos con: nz-mcp edit-profile {profile} --mode read. "
+            "Bórralo con: nz-mcp remove-profile {profile}."
+        ),
+        "en": (
+            "Cancelled: profile '{profile}' was left unchanged. "
+            "Change single fields with: nz-mcp edit-profile {profile} --mode read. "
+            "Delete it with: nz-mcp remove-profile {profile}."
+        ),
+    },
+    "CLI.PROFILE_SAVED": {
+        "es": "Perfil '{profile}' guardado en {path}.",
+        "en": "Profile '{profile}' saved to {path}.",
+    },
+    "CLI.PROFILE_NEXT_STEP": {
+        "es": "Siguiente paso: prueba la conexión con: nz-mcp test-connection --profile {profile}",
+        "en": "Next step: verify the connection with: nz-mcp test-connection --profile {profile}",
+    },
+    "CLI.PROFILE_REMOVE_CONFIRM": {
+        "es": "Se borrará el perfil '{profile}' de {path} y su password del keyring. ¿Continuar?",
+        "en": (
+            "Profile '{profile}' will be deleted from {path} and its password removed "
+            "from the keyring. Continue?"
+        ),
+    },
+    "CLI.PROFILE_REMOVE_CANCELLED": {
+        "es": "Cancelado: el perfil '{profile}' sigue configurado.",
+        "en": "Cancelled: profile '{profile}' is still configured.",
+    },
+    "CLI.PROFILE_REMOVED": {
+        "es": "Perfil '{profile}' eliminado de {path}.",
+        "en": "Profile '{profile}' removed from {path}.",
+    },
+    "CLI.PROFILE_PASSWORD_DELETED": {
+        "es": "Password del perfil '{profile}' borrada del keyring.",
+        "en": "Password of profile '{profile}' deleted from the keyring.",
+    },
+    "CLI.PROFILE_PASSWORD_DELETE_FAILED": {
+        "es": (
+            "No se pudo borrar la password del perfil '{profile}' del keyring: {detail}. "
+            "Bórrala a mano en el gestor de credenciales del sistema."
+        ),
+        "en": (
+            "Could not delete the password of profile '{profile}' from the keyring: {detail}. "
+            "Delete it by hand in your OS credential manager."
+        ),
+    },
+    "CLI.ACTIVE_PROFILE_CLEARED": {
+        "es": (
+            "Era el perfil activo: ya no hay ninguno. Si queda más de un perfil, elige cuál "
+            "usar con la variable NZ_MCP_PROFILE o con el campo 'active' de {path}."
+        ),
+        "en": (
+            "It was the active profile: there is none now. If more than one profile remains, "
+            "pick one with the NZ_MCP_PROFILE variable or the 'active' field in {path}."
+        ),
+    },
     # nz-mcp doctor (CLI diagnostics — no secrets)
     "DOCTOR.HEADER": {
         "es": "Diagnóstico local (nz-mcp doctor)",
