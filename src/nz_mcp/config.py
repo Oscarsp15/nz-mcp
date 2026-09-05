@@ -22,6 +22,11 @@ DEFAULT_MAX_ROWS: Final[int] = 100
 DEFAULT_TIMEOUT_S: Final[int] = 30
 MAX_ROWS_CAP: Final[int] = 1000
 TIMEOUT_S_CAP: Final[int] = 300
+# nzpy SSL negotiation levels; see ``Profile.security_level`` and docs/adr/0017-*.md.
+MIN_SECURITY_LEVEL: Final[int] = 0
+MAX_SECURITY_LEVEL: Final[int] = 3
+DEFAULT_SECURITY_LEVEL: Final[int] = 2
+DEFAULT_PORT: Final[int] = 5480
 
 
 def config_dir() -> Path:
@@ -50,7 +55,9 @@ class Profile(BaseModel):
     # 2 preferred-secured (SSL, falls back), 3 only-secured (SSL required). Default 2 is
     # secure-by-default and non-breaking (falls back to unsecured where SSL is unavailable);
     # 1 (cleartext) is opt-in only, for a trusted lab network. See docs/adr/0017-*.md.
-    security_level: int = Field(default=2, ge=0, le=3)
+    security_level: int = Field(
+        default=DEFAULT_SECURITY_LEVEL, ge=MIN_SECURITY_LEVEL, le=MAX_SECURITY_LEVEL
+    )
     # Path to a CA bundle (PEM) used to verify the server certificate during SSL negotiation.
     # Opt-in: when unset, certificate verification is skipped (nzpy >=1.17.7 otherwise aborts
     # the handshake, and on-prem appliances rarely ship a trusted CA). See ADR 0017 (#160).

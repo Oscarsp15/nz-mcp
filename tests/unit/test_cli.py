@@ -130,7 +130,7 @@ def test_test_connection_ok(monkeypatch: pytest.MonkeyPatch, two_profiles: Path)
     def _open(_prof: object, _pwd: str) -> _FakeConn:
         return _FakeConn()
 
-    monkeypatch.setattr("nz_mcp.cli.open_connection", _open)
+    monkeypatch.setattr("nz_mcp.profile_check.open_connection", _open)
     result = runner.invoke(app, ["test-connection"])
     assert result.exit_code == 0
     assert "OK: connected to" in result.stdout
@@ -146,7 +146,7 @@ def test_test_connection_profile_flag_ok(
     def _open(_prof: object, _pwd: str) -> _FakeConn:
         return _FakeConn()
 
-    monkeypatch.setattr("nz_mcp.cli.open_connection", _open)
+    monkeypatch.setattr("nz_mcp.profile_check.open_connection", _open)
     result = runner.invoke(app, ["test-connection", "--profile", "prod"])
     assert result.exit_code == 0
     assert "svc_prod" in result.stdout
@@ -157,7 +157,9 @@ def test_test_connection_execute_error_redacts_password(
 ) -> None:
     store_password("dev", "devpass123")
 
-    monkeypatch.setattr("nz_mcp.cli.open_connection", lambda _p, _w: _FakeConn(fail_execute=True))
+    monkeypatch.setattr(
+        "nz_mcp.profile_check.open_connection", lambda _p, _w: _FakeConn(fail_execute=True)
+    )
     result = runner.invoke(app, ["test-connection"])
     assert result.exit_code == 1
     combined = result.stdout + result.stderr
@@ -191,7 +193,7 @@ def test_test_connection_open_connection_error(
     def _boom(_p: object, _w: str) -> None:
         raise ConnErr(host="h", port=1, database="d", user="u", detail="timeout")
 
-    monkeypatch.setattr("nz_mcp.cli.open_connection", _boom)
+    monkeypatch.setattr("nz_mcp.profile_check.open_connection", _boom)
     result = runner.invoke(app, ["test-connection"])
     assert result.exit_code == 1
     assert "timeout" in result.stdout + result.stderr
@@ -199,7 +201,9 @@ def test_test_connection_open_connection_error(
 
 # --- profile lifecycle: add-profile / remove-profile --------------------------
 
-_WIZARD_INPUT = "nz.example.com\n5480\nDB\nsvc\npw123456\npw123456\nread\n"
+# host, port, database, user, password x2, mode, security_level, ca_certs (skip),
+# and "no" to the pre-save validation (no Netezza reachable from a unit test).
+_WIZARD_INPUT = "nz.example.com\n5480\nDB\nsvc\npw123456\npw123456\nread\n2\n\nn\n"
 
 
 def test_add_profile_creates_it_and_suggests_test_connection(tmp_profiles: Path) -> None:
@@ -287,3 +291,40 @@ def test_remove_profile_warns_but_proceeds_when_keyring_fails(
     assert result.exit_code == 0
     assert list_profile_names(two_profiles) == ["dev"]
     assert "no backend available" in result.stdout + result.stderr
+
+
+# --- switch-profile -----------------------------------------------------------
+
+
+def test_switch_profile_sets_the_active_one(two_profiles: Path) -> None:
+    result = runner.invoke(app, ["switch-profile", "prod"])
+    assert result.exit_code == 0
+    assert "prod" in result.stdout
+    assert load_profiles_file(two_profiles).active == "prod"
+
+
+def test_switch_profile_reports_the_granted_mode(two_profiles: Path) -> None:
+    result = runner.invoke(app, ["edit-profile", "prod", "--mode", "write"])
+    assert result.exit_code == 0
+    result = runner.invoke(app, ["switch-profile", "prod"])
+    assert result.exit_code == 0
+    assert "write" in result.stdout
+
+
+def test_switch_profile_unknown_lists_existing_ones(two_profiles: Path) -> None:
+    result = runner.invoke(app, ["switch-profile", "ghost"])
+    assert result.exit_code == 1
+    combined = result.stdout + result.stderr
+    assert "ghost" in combined
+    assert "dev, prod" in combined
+    assert load_profiles_file(two_profiles).active == "dev"
+
+
+def test_switch_profile_reports_unparseable_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_profiles: Path
+) -> None:
+    monkeypatch.setenv("NZ_MCP_LANG", "en")
+    tmp_profiles.write_text('[profiles.dev]\nhost = "a"\nport = "nope"\n', encoding="utf-8")
+    result = runner.invoke(app, ["switch-profile", "dev"])
+    assert result.exit_code == 1
+    assert "configuration file is invalid" in result.stdout + result.stderr

@@ -5,6 +5,7 @@ Commands:
 - ``add-profile``        add another profile.
 - ``remove-profile``     delete a profile and its keyring password.
 - ``list-profiles``      list configured profiles.
+- ``switch-profile``     make an existing profile the active one.
 - ``edit-profile``       update an existing profile (mode, database, limits).
 - ``doctor``             print local diagnostics (no Netezza connection).
 - ``probe-catalog``      execute every catalog query with dummy parameters (validates overrides).
@@ -17,7 +18,8 @@ from __future__ import annotations
 
 import contextlib
 import json
-from typing import Any, cast
+from dataclasses import dataclass
+from typing import Any, Final, cast
 
 import typer
 
@@ -26,8 +28,13 @@ from nz_mcp.auth import delete_password, get_password, store_password
 from nz_mcp.catalog.probe import probe_has_hard_failure, probe_run_to_json_dict, run_probe_catalog
 from nz_mcp.config import (
     DEFAULT_MAX_ROWS,
+    DEFAULT_PORT,
+    DEFAULT_SECURITY_LEVEL,
     DEFAULT_TIMEOUT_S,
+    MAX_SECURITY_LEVEL,
+    MIN_SECURITY_LEVEL,
     PermissionMode,
+    Profile,
     ProfilesFile,
     config_dir,
     get_active_profile,
@@ -39,10 +46,8 @@ from nz_mcp.config import (
     update_profile_fields,
     upsert_profile,
 )
-from nz_mcp.connection import open_connection
 from nz_mcp.diagnostic import collect_diagnostic, format_diagnostic_report
 from nz_mcp.errors import (
-    ConnectionError,
     CredentialNotFoundError,
     InvalidProfileError,
     KeyringUnavailableError,
@@ -51,7 +56,9 @@ from nz_mcp.errors import (
 from nz_mcp.i18n import MESSAGES, Locale, resolve_locale, t
 from nz_mcp.logging_config import configure_logging_for_stdio
 from nz_mcp.logging_utils import sanitize
+from nz_mcp.profile_check import CheckOutcome, ValidationReport, run_checks
 from nz_mcp.server import run_stdio_server
+from nz_mcp.tools.session import SwitchProfileInput, nz_switch_profile
 
 app = typer.Typer(
     name="nz-mcp",
@@ -70,9 +77,10 @@ def version_cmd() -> None:
 @app.command("init")
 def init_cmd() -> None:
     """Interactive wizard: create the first profile."""
+    locale = resolve_locale()
     typer.secho("nz-mcp init", bold=True)
-    typer.echo("Esto crea el primer perfil. Las credenciales irán a tu keyring del SO.")
-    name = typer.prompt("Nombre del perfil", default="default")
+    typer.echo(t("CLI.INIT_INTRO", locale))
+    name = str(typer.prompt(t("CLI.INIT_NAME_PROMPT", locale), default="default"))
     _add_profile_interactive(name=name, set_active=True)
 
 
@@ -127,6 +135,29 @@ def list_profiles_cmd() -> None:
         raise typer.Exit(code=0)
     for n in names:
         typer.echo(n)
+
+
+@app.command("switch-profile")
+def switch_profile_cmd(
+    name: str = typer.Argument(..., help="Existing profile name to activate"),
+) -> None:
+    """Make an existing profile the active one (same logic as the nz_switch_profile tool)."""
+    locale = resolve_locale()
+    try:
+        # Single source of truth: the CLI delegates to the MCP tool instead of
+        # re-implementing "validate the name, then persist active=..." on its own.
+        result = nz_switch_profile(SwitchProfileInput(profile=name))
+    except ProfileNotFoundError as exc:
+        typer.secho(_format_profile_not_found_cli(locale, exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+    except InvalidProfileError as exc:
+        typer.secho(t("INVALID_CONFIG", locale, detail=str(exc)), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+    typer.secho(
+        t("CLI.PROFILE_SWITCHED", locale, profile=result.switched_to, mode=result.mode),
+        fg=typer.colors.GREEN,
+    )
+    raise typer.Exit(code=0)
 
 
 @app.command("edit-profile")
@@ -235,9 +266,6 @@ def probe_catalog_cmd(
     raise typer.Exit(code=code)
 
 
-_VERSION_SQL = "SELECT CAST(VERSION() AS VARCHAR(200)) AS v"
-
-
 @app.command("test-connection")
 def test_connection_cmd(
     profile: str | None = typer.Option(
@@ -262,29 +290,12 @@ def test_connection_cmd(
         typer.secho(f"FAIL: {detail}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
 
-    try:
-        conn: Any = open_connection(prof, password)
-    except ConnectionError as exc:
-        detail = str(exc.context.get("detail", "")) or str(exc)
-        typer.secho(f"FAIL: {detail}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
-
-    try:
-        with contextlib.closing(conn.cursor()) as cur:
-            cur.execute(_VERSION_SQL)
-            row = cur.fetchone()
-    except Exception as exc:
-        detail = sanitize(str(exc), known_secrets={password})
-        typer.secho(f"FAIL: {detail}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
-    finally:
-        with contextlib.suppress(Exception):  # pragma: no cover - driver-specific close
-            conn.close()
-
-    version_text = "unknown"
-    if row is not None:
-        version_text = str(row[0] or "").strip()
-    typer.secho(f"OK: connected to {version_text} as {prof.user}", fg=typer.colors.GREEN)
+    # Level 1 of the validation ladder the wizard also runs (profile_check.run_checks).
+    outcome = run_checks(prof, password, levels=1).outcomes[0]
+    if outcome.status != "ok":
+        typer.secho(f"FAIL: {outcome.detail}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    typer.secho(f"OK: connected to {outcome.detail} as {prof.user}", fg=typer.colors.GREEN)
     raise typer.Exit(code=0)
 
 
@@ -359,50 +370,301 @@ def _delete_password_or_warn(name: str, locale: Locale) -> None:
     typer.echo(t("CLI.PROFILE_PASSWORD_DELETED", locale, profile=name))
 
 
+@dataclass
+class _ProfileDraft:
+    """Everything the wizard collected, held in memory until validation is settled.
+
+    A failed validation must never discard what the user already typed: the draft is
+    what makes "retry", "fix one field" and "save anyway" possible without asking for
+    the rest again. ``password`` is part of the draft so it can be corrected too, but
+    it is never written to profiles.toml — it goes to the OS keyring.
+    """
+
+    host: str
+    port: int
+    database: str
+    user: str
+    password: str
+    mode: PermissionMode
+    security_level: int
+    ca_certs: str | None
+
+
+_MODES: Final[tuple[str, ...]] = ("read", "write", "admin")
+_DRAFT_FIELDS: Final[tuple[str, ...]] = (
+    "host",
+    "port",
+    "database",
+    "user",
+    "password",
+    "mode",
+    "security_level",
+    "ca_certs",
+)
+
+
 def _add_profile_interactive(*, name: str, set_active: bool) -> None:
     locale = resolve_locale()
     file = _load_profiles_or_exit(locale)
     if name in file.profiles:
         _confirm_overwrite_or_exit(name, locale)
-    host = typer.prompt("Host Netezza")
-    port = typer.prompt("Puerto", default=5480, type=int)
-    database = typer.prompt("Base de datos por defecto")
-    user = typer.prompt("Usuario")
-    password = typer.prompt("Password", hide_input=True, confirmation_prompt=True)
-    mode = cast(
-        PermissionMode,
-        typer.prompt(
-            "Modo (read|write|admin)",
-            default="read",
-            show_choices=False,
-        )
-        .strip()
-        .lower(),
-    )
-    if mode not in ("read", "write", "admin"):
+    previous = file.profiles.get(name, {})
+    typer.echo(t("CLI.WIZARD_INTRO", locale, profile=name))
+    draft = _prompt_draft(locale, previous)
+
+    if not _validate_before_saving(name, draft, previous, locale):
         typer.secho(
-            f"Modo inválido: {mode!r}. Use read|write|admin.",
-            fg=typer.colors.RED,
-            err=True,
+            t("CLI.WIZARD_CANCELLED", locale, path=profiles_path()),
+            fg=typer.colors.YELLOW,
         )
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=1)
 
     _ensure_config_dir()
-    _write_profile(
-        name=name,
-        host=host,
-        port=int(port),
-        database=database,
-        user=user,
-        mode=mode,
-        set_active=set_active,
-    )
-    store_password(name, password)
+    _write_profile(name=name, draft=draft, set_active=set_active)
+    store_password(name, draft.password)
     typer.secho(
         t("CLI.PROFILE_SAVED", locale, profile=name, path=profiles_path()),
         fg=typer.colors.GREEN,
     )
     typer.echo(t("CLI.PROFILE_NEXT_STEP", locale, profile=name))
+    typer.echo(t("CLI.CLAUDE_CONFIG_HEADER", locale))
+    typer.echo(_claude_desktop_snippet(name))
+    typer.echo(t("CLI.PROBE_SUGGESTION", locale, profile=name))
+
+
+# --- wizard prompts (one explanation per non-obvious concept) ------------------
+
+
+def _prompt_draft(locale: Locale, previous: dict[str, object]) -> _ProfileDraft:
+    """Ask for every field, defaulting to the current value when overwriting a profile."""
+    return _ProfileDraft(
+        host=typer.prompt(t("CLI.WIZARD_HOST_PROMPT", locale), default=_text(previous, "host")),
+        port=_prompt_port(locale, _number(previous, "port", DEFAULT_PORT)),
+        database=_prompt_database(locale, _text(previous, "database")),
+        user=typer.prompt(t("CLI.WIZARD_USER_PROMPT", locale), default=_text(previous, "user")),
+        password=_prompt_password(locale),
+        mode=_prompt_mode(locale, str(previous.get("mode") or "read")),
+        security_level=_prompt_security_level(
+            locale, _number(previous, "security_level", DEFAULT_SECURITY_LEVEL)
+        ),
+        ca_certs=_prompt_ca_certs(locale, _text(previous, "ca_certs")),
+    )
+
+
+def _text(previous: dict[str, object], key: str) -> str | None:
+    value = previous.get(key)
+    return str(value) if isinstance(value, str) and value else None
+
+
+def _number(previous: dict[str, object], key: str, fallback: int) -> int:
+    value = previous.get(key)
+    return value if isinstance(value, int) else fallback
+
+
+def _prompt_port(locale: Locale, default: int) -> int:
+    return int(typer.prompt(t("CLI.WIZARD_PORT_PROMPT", locale), default=default, type=int))
+
+
+def _prompt_database(locale: Locale, default: str | None) -> str:
+    typer.echo(t("CLI.WIZARD_DATABASE_EXPLAIN", locale))
+    return str(typer.prompt(t("CLI.WIZARD_DATABASE_PROMPT", locale), default=default))
+
+
+def _prompt_password(locale: Locale) -> str:
+    typer.echo(t("CLI.WIZARD_PASSWORD_EXPLAIN", locale))
+    return str(
+        typer.prompt(
+            t("CLI.WIZARD_PASSWORD_PROMPT", locale),
+            hide_input=True,
+            confirmation_prompt=True,
+        )
+    )
+
+
+def _prompt_mode(locale: Locale, default: str) -> PermissionMode:
+    typer.echo(t("CLI.WIZARD_MODE_EXPLAIN", locale))
+    while True:
+        raw = str(
+            typer.prompt(t("CLI.WIZARD_MODE_PROMPT", locale), default=default, show_choices=False)
+        )
+        value = raw.strip().lower()
+        if value in _MODES:
+            return cast(PermissionMode, value)
+        typer.secho(t("CLI.WIZARD_MODE_INVALID", locale, value=raw), fg=typer.colors.RED, err=True)
+
+
+def _prompt_security_level(locale: Locale, default: int) -> int:
+    typer.echo(t("CLI.WIZARD_SECURITY_EXPLAIN", locale))
+    while True:
+        raw = str(typer.prompt(t("CLI.WIZARD_SECURITY_PROMPT", locale), default=str(default)))
+        value = raw.strip()
+        if value.isdigit() and MIN_SECURITY_LEVEL <= int(value) <= MAX_SECURITY_LEVEL:
+            return int(value)
+        typer.secho(
+            t("CLI.WIZARD_SECURITY_INVALID", locale, value=raw), fg=typer.colors.RED, err=True
+        )
+
+
+def _prompt_ca_certs(locale: Locale, default: str | None) -> str | None:
+    typer.echo(t("CLI.WIZARD_CA_CERTS_EXPLAIN", locale))
+    raw = str(
+        typer.prompt(
+            t("CLI.WIZARD_CA_CERTS_PROMPT", locale),
+            default=default or "",
+            show_default=bool(default),
+        )
+    )
+    return raw.strip() or None
+
+
+# --- validation before persisting ---------------------------------------------
+
+
+def _validate_before_saving(
+    name: str,
+    draft: _ProfileDraft,
+    previous: dict[str, object],
+    locale: Locale,
+) -> bool:
+    """Run the ladder before writing anything. Return ``True`` when the profile must be saved.
+
+    No branch loses the collected data: on failure the user retries, fixes a single
+    field, saves anyway (legitimate: configuring a profile without the VPN up), or cancels.
+    """
+    if not typer.confirm(t("CLI.VALIDATE_ASK", locale), default=True):
+        typer.echo(t("CLI.VALIDATE_NOT_RUN", locale))
+        return True
+    while True:
+        typer.secho(t("CLI.VALIDATE_HEADER", locale), bold=True)
+        report = _run_ladder(name, draft, previous)
+        _print_report(report, draft.database, locale)
+        if report.ok:
+            typer.secho(t("CLI.VALIDATE_ALL_OK", locale), fg=typer.colors.GREEN)
+            return True
+        typer.echo(t("CLI.VALIDATE_MENU", locale))
+        choice = _prompt_failure_choice(locale)
+        if choice == "g":
+            typer.secho(
+                t("CLI.VALIDATE_SAVED_ANYWAY", locale, profile=name), fg=typer.colors.YELLOW
+            )
+            return True
+        if choice == "x":
+            return False
+        if choice == "c":
+            _fix_one_field(draft, locale)
+
+
+def _run_ladder(name: str, draft: _ProfileDraft, previous: dict[str, object]) -> ValidationReport:
+    """Validate the draft as if it were already a profile, without persisting it."""
+    overrides = previous.get("catalog_overrides")
+    profile = Profile(
+        name=name,
+        host=draft.host,
+        port=draft.port,
+        database=draft.database,
+        user=draft.user,
+        mode=draft.mode,
+        security_level=draft.security_level,
+        ca_certs=draft.ca_certs,
+        catalog_overrides=cast(dict[str, str], overrides) if isinstance(overrides, dict) else {},
+    )
+    return run_checks(profile, draft.password)
+
+
+_OUTCOME_MESSAGE_KEYS: Final[dict[tuple[str, str], str]] = {
+    ("connect", "ok"): "CLI.VALIDATE_CONNECT_OK",
+    ("connect", "failed"): "CLI.VALIDATE_CONNECT_FAIL",
+    ("connect", "empty"): "CLI.VALIDATE_CONNECT_FAIL",
+    ("catalog_read", "ok"): "CLI.VALIDATE_CATALOG_OK",
+    ("catalog_read", "failed"): "CLI.VALIDATE_CATALOG_FAIL",
+    ("catalog_read", "empty"): "CLI.VALIDATE_CATALOG_EMPTY",
+    ("catalog_read", "skipped"): "CLI.VALIDATE_CATALOG_SKIPPED",
+    ("default_database", "ok"): "CLI.VALIDATE_DATABASE_OK",
+    ("default_database", "failed"): "CLI.VALIDATE_DATABASE_FAIL",
+    ("default_database", "empty"): "CLI.VALIDATE_DATABASE_EMPTY",
+    ("default_database", "skipped"): "CLI.VALIDATE_DATABASE_SKIPPED",
+}
+
+
+def _print_report(report: ValidationReport, database: str, locale: Locale) -> None:
+    """Report every level on its own line: what failed and what that means."""
+    for outcome in report.outcomes:
+        typer.secho(_render_outcome(outcome, database, locale), fg=_outcome_color(outcome))
+
+
+def _render_outcome(outcome: CheckOutcome, database: str, locale: Locale) -> str:
+    key = _OUTCOME_MESSAGE_KEYS[(outcome.level, outcome.status)]
+    return t(key, locale, detail=outcome.detail, count=outcome.count, database=database)
+
+
+def _outcome_color(outcome: CheckOutcome) -> str:
+    if outcome.status == "ok":
+        return typer.colors.GREEN
+    if outcome.status == "skipped":
+        return typer.colors.YELLOW
+    return typer.colors.RED
+
+
+def _prompt_failure_choice(locale: Locale) -> str:
+    while True:
+        raw = str(typer.prompt(t("CLI.VALIDATE_MENU_PROMPT", locale), default="r"))
+        choice = raw.strip().lower()
+        if choice in ("r", "c", "g", "x"):
+            return choice
+        typer.secho(
+            t("CLI.VALIDATE_MENU_INVALID", locale, value=raw), fg=typer.colors.RED, err=True
+        )
+
+
+def _fix_one_field(draft: _ProfileDraft, locale: Locale) -> None:
+    """Re-ask a single field, keeping every other value already typed."""
+    fields = ", ".join(_DRAFT_FIELDS)
+    while True:
+        raw = str(
+            typer.prompt(t("CLI.VALIDATE_FIELD_PROMPT", locale, fields=fields), default="host")
+        )
+        field = raw.strip().lower()
+        if field in _DRAFT_FIELDS:
+            _reprompt_field(draft, field, locale)
+            return
+        typer.secho(
+            t("CLI.VALIDATE_FIELD_INVALID", locale, value=raw, fields=fields),
+            fg=typer.colors.RED,
+            err=True,
+        )
+
+
+def _reprompt_field(draft: _ProfileDraft, field: str, locale: Locale) -> None:
+    if field == "host":
+        draft.host = str(typer.prompt(t("CLI.WIZARD_HOST_PROMPT", locale), default=draft.host))
+    elif field == "port":
+        draft.port = _prompt_port(locale, draft.port)
+    elif field == "database":
+        draft.database = _prompt_database(locale, draft.database)
+    elif field == "user":
+        draft.user = str(typer.prompt(t("CLI.WIZARD_USER_PROMPT", locale), default=draft.user))
+    elif field == "password":
+        draft.password = _prompt_password(locale)
+    elif field == "mode":
+        draft.mode = _prompt_mode(locale, draft.mode)
+    elif field == "security_level":
+        draft.security_level = _prompt_security_level(locale, draft.security_level)
+    else:
+        draft.ca_certs = _prompt_ca_certs(locale, draft.ca_certs)
+
+
+def _claude_desktop_snippet(profile: str) -> str:
+    """Render the claude_desktop_config.json block with the profile name substituted."""
+    block = {
+        "mcpServers": {
+            "netezza": {
+                "command": "nz-mcp",
+                "args": ["serve"],
+                "env": {"NZ_MCP_PROFILE": profile},
+            }
+        }
+    }
+    return json.dumps(block, indent=2, ensure_ascii=False)
 
 
 def _ensure_config_dir() -> None:
@@ -412,32 +674,45 @@ def _ensure_config_dir() -> None:
         cfg.chmod(0o700)
 
 
-def _write_profile(
-    *,
-    name: str,
-    host: str,
-    port: int,
-    database: str,
-    user: str,
-    mode: PermissionMode,
-    set_active: bool,
-) -> None:
+# Keys the wizard asks for and therefore owns on overwrite. ``ca_certs`` is listed even
+# though it is only written when set: leaving it out would resurrect a stale path after
+# the user cleared it with an empty answer.
+_WIZARD_OWNED_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "host",
+        "port",
+        "database",
+        "user",
+        "mode",
+        "security_level",
+        "ca_certs",
+        "max_rows_default",
+        "timeout_s_default",
+    }
+)
+
+
+def _write_profile(*, name: str, draft: _ProfileDraft, set_active: bool) -> None:
+    """Persist the draft. The password is not part of the block: it goes to the keyring."""
     block: dict[str, Any] = {
-        "host": host,
-        "port": port,
-        "database": database,
-        "user": user,
-        "mode": mode,
+        "host": draft.host,
+        "port": draft.port,
+        "database": draft.database,
+        "user": draft.user,
+        "mode": draft.mode,
+        "security_level": draft.security_level,
         "max_rows_default": DEFAULT_MAX_ROWS,
         "timeout_s_default": DEFAULT_TIMEOUT_S,
     }
+    if draft.ca_certs:
+        block["ca_certs"] = draft.ca_certs
     current = load_profiles_file()
     # ``--active`` only elects a profile when none is declared yet: switching the active
     # profile of an existing setup is an explicit action, not a side effect of add-profile.
     elect_active = set_active and current.active is None
     # Overwriting must not silently drop hand-edited configuration the wizard does not ask
-    # for (security_level, ca_certs, catalog_overrides, and any field added later): carry
-    # every key the wizard does not set over to the replacement section.
+    # for (catalog_overrides and any field added later): carry every key the wizard does
+    # not own over to the replacement section.
     previous = current.profiles.get(name, {})
-    preserved = {k: v for k, v in previous.items() if k not in block and k != "name"}
+    preserved = {k: v for k, v in previous.items() if k not in _WIZARD_OWNED_KEYS and k != "name"}
     upsert_profile(name, {**preserved, **block}, set_active=elect_active)

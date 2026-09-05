@@ -264,6 +264,286 @@ MESSAGES: Final[dict[str, Message]] = {
             "pick one with the NZ_MCP_PROFILE variable or the 'active' field in {path}."
         ),
     },
+    "CLI.PROFILE_SWITCHED": {
+        "es": (
+            "Perfil activo: '{profile}' (modo {mode}). Los procesos nz-mcp que arranques "
+            "a partir de ahora lo usarán."
+        ),
+        "en": (
+            "Active profile: '{profile}' (mode {mode}). Every nz-mcp process you start "
+            "from now on will use it."
+        ),
+    },
+    # nz-mcp init / add-profile (guided wizard: one explanation per non-obvious concept)
+    "CLI.INIT_INTRO": {
+        "es": "Esto crea el primer perfil. La password irá al keyring de tu sistema operativo.",
+        "en": "This creates the first profile. The password goes to your OS keyring.",
+    },
+    "CLI.INIT_NAME_PROMPT": {
+        "es": "Nombre del perfil",
+        "en": "Profile name",
+    },
+    "CLI.WIZARD_INTRO": {
+        "es": (
+            "Configurando el perfil '{profile}'. Nada se guarda hasta el final: primero "
+            "pregunto los datos, después los valido contra Netezza."
+        ),
+        "en": (
+            "Configuring profile '{profile}'. Nothing is saved until the end: I ask for the "
+            "data first, then validate it against Netezza."
+        ),
+    },
+    "CLI.WIZARD_HOST_PROMPT": {
+        "es": "Host de Netezza",
+        "en": "Netezza host",
+    },
+    "CLI.WIZARD_PORT_PROMPT": {
+        "es": "Puerto",
+        "en": "Port",
+    },
+    "CLI.WIZARD_DATABASE_EXPLAIN": {
+        "es": (
+            "La base de datos por defecto es contra la que se resuelven los nombres sin "
+            "calificar; puedes cambiarla luego sin rehacer el perfil."
+        ),
+        "en": (
+            "The default database is the one unqualified names resolve against; you can "
+            "change it later without recreating the profile."
+        ),
+    },
+    "CLI.WIZARD_DATABASE_PROMPT": {
+        "es": "Base de datos por defecto",
+        "en": "Default database",
+    },
+    "CLI.WIZARD_USER_PROMPT": {
+        "es": "Usuario",
+        "en": "User",
+    },
+    "CLI.WIZARD_PASSWORD_EXPLAIN": {
+        "es": "La password nunca se escribe en profiles.toml: se guarda en el keyring del SO.",
+        "en": "The password is never written to profiles.toml: it is stored in the OS keyring.",
+    },
+    "CLI.WIZARD_PASSWORD_PROMPT": {
+        "es": "Password",
+        "en": "Password",
+    },
+    "CLI.WIZARD_MODE_EXPLAIN": {
+        "es": (
+            "El modo limita lo que la IA podrá hacer con este perfil: 'read' solo consultas, "
+            "'write' añade escritura de datos (INSERT/UPDATE/DELETE), 'admin' añade DDL "
+            "(CREATE/ALTER/DROP). El modo no otorga permisos en Netezza: solo recorta los "
+            "que ya tenga tu usuario."
+        ),
+        "en": (
+            "The mode limits what the AI may do with this profile: 'read' queries only, "
+            "'write' adds data writes (INSERT/UPDATE/DELETE), 'admin' adds DDL "
+            "(CREATE/ALTER/DROP). The mode grants no Netezza privilege: it only narrows the "
+            "ones your user already has."
+        ),
+    },
+    "CLI.WIZARD_MODE_PROMPT": {
+        "es": "Modo (read|write|admin)",
+        "en": "Mode (read|write|admin)",
+    },
+    "CLI.WIZARD_MODE_INVALID": {
+        "es": "Modo inválido: {value}. Usa read, write o admin.",
+        "en": "Invalid mode: {value}. Use read, write or admin.",
+    },
+    "CLI.WIZARD_SECURITY_EXPLAIN": {
+        "es": (
+            "El nivel de seguridad decide si la conexión viaja cifrada (TLS): 0 prefiere sin "
+            "cifrar, 1 solo sin cifrar (red de laboratorio), 2 prefiere cifrado y cae a claro "
+            "si el servidor no lo ofrece (recomendado), 3 exige cifrado (SaaS/nube)."
+        ),
+        "en": (
+            "The security level decides whether the connection is encrypted (TLS): 0 prefers "
+            "unsecured, 1 unsecured only (lab network), 2 prefers encryption and falls back to "
+            "cleartext when the server offers none (recommended), 3 requires encryption "
+            "(SaaS/cloud)."
+        ),
+    },
+    "CLI.WIZARD_SECURITY_PROMPT": {
+        "es": "Nivel de seguridad de la conexión (0-3)",
+        "en": "Connection security level (0-3)",
+    },
+    "CLI.WIZARD_SECURITY_INVALID": {
+        "es": "Nivel de seguridad inválido: {value}. Usa un entero de 0 a 3.",
+        "en": "Invalid security level: {value}. Use an integer from 0 to 3.",
+    },
+    "CLI.WIZARD_CA_CERTS_EXPLAIN": {
+        "es": (
+            "Un bundle CA (archivo PEM) permite verificar el certificado del servidor. Sin él "
+            "el canal sigue cifrado, pero no se comprueba con quién hablas. Es opcional: pulsa "
+            "Enter para omitirlo."
+        ),
+        "en": (
+            "A CA bundle (PEM file) lets nz-mcp verify the server certificate. Without it the "
+            "channel is still encrypted, but you do not check who you are talking to. It is "
+            "optional: press Enter to skip it."
+        ),
+    },
+    "CLI.WIZARD_CA_CERTS_PROMPT": {
+        "es": "Ruta al bundle CA en PEM (Enter para omitir)",
+        "en": "Path to the PEM CA bundle (Enter to skip)",
+    },
+    # Validation ladder run before persisting the profile
+    "CLI.VALIDATE_ASK": {
+        "es": (
+            "¿Valido el perfil contra Netezza antes de guardarlo? Necesita red o VPN; si "
+            "respondes que no, se guarda sin comprobar"
+        ),
+        "en": (
+            "Validate the profile against Netezza before saving it? It needs network or VPN; "
+            "answering no saves it unchecked"
+        ),
+    },
+    "CLI.VALIDATE_HEADER": {
+        "es": "Validando en tres niveles (todavía no se ha guardado nada):",
+        "en": "Validating in three levels (nothing has been saved yet):",
+    },
+    "CLI.VALIDATE_CONNECT_OK": {
+        "es": "1/3 Conexión: OK — Netezza responde: {detail}",
+        "en": "1/3 Connection: OK — Netezza answers: {detail}",
+    },
+    "CLI.VALIDATE_CONNECT_FAIL": {
+        "es": (
+            "1/3 Conexión: FALLA — {detail}. Significa que no se pudo abrir la sesión: revisa "
+            "host, puerto, usuario, password, la VPN y el nivel de seguridad."
+        ),
+        "en": (
+            "1/3 Connection: FAIL — {detail}. It means the session could not be opened: check "
+            "host, port, user, password, the VPN and the security level."
+        ),
+    },
+    "CLI.VALIDATE_CATALOG_OK": {
+        "es": "2/3 Lectura del catálogo: OK — el usuario ve {count} bases de datos.",
+        "en": "2/3 Catalog read: OK — the user sees {count} databases.",
+    },
+    "CLI.VALIDATE_CATALOG_FAIL": {
+        "es": (
+            "2/3 Lectura del catálogo: FALLA — {detail}. Significa que la sesión abre pero la "
+            "consulta a _v_database no funciona: revisa los permisos de lectura del catálogo."
+        ),
+        "en": (
+            "2/3 Catalog read: FAIL — {detail}. It means the session opens but the _v_database "
+            "query does not work: check the catalog read privileges."
+        ),
+    },
+    "CLI.VALIDATE_CATALOG_EMPTY": {
+        "es": (
+            "2/3 Lectura del catálogo: FALLA — el usuario no ve ninguna base de datos. La "
+            "cuenta existe pero no tiene permisos reales de lectura: pídeselos al DBA."
+        ),
+        "en": (
+            "2/3 Catalog read: FAIL — the user sees no database at all. The account exists but "
+            "holds no real read privilege: ask your DBA for one."
+        ),
+    },
+    "CLI.VALIDATE_CATALOG_SKIPPED": {
+        "es": "2/3 Lectura del catálogo: omitido porque falló el nivel anterior.",
+        "en": "2/3 Catalog read: skipped because the previous level failed.",
+    },
+    "CLI.VALIDATE_DATABASE_OK": {
+        "es": "3/3 Visibilidad en {database}: OK — el usuario ve {count} esquemas.",
+        "en": "3/3 Visibility in {database}: OK — the user sees {count} schemas.",
+    },
+    "CLI.VALIDATE_DATABASE_FAIL": {
+        "es": (
+            "3/3 Visibilidad en {database}: FALLA — {detail}. Significa que no se pudieron "
+            "listar los esquemas de esa base: comprueba que el nombre existe y que tu usuario "
+            "puede leerla."
+        ),
+        "en": (
+            "3/3 Visibility in {database}: FAIL — {detail}. It means the schemas of that "
+            "database could not be listed: check that the name exists and that your user can "
+            "read it."
+        ),
+    },
+    "CLI.VALIDATE_DATABASE_EMPTY": {
+        "es": (
+            "3/3 Visibilidad en {database}: FALLA — el usuario no ve ningún esquema ahí. "
+            "Conecta bien, pero no tiene GRANT sobre nada de esa base: pide permisos o elige "
+            "otra base por defecto."
+        ),
+        "en": (
+            "3/3 Visibility in {database}: FAIL — the user sees no schema there. It connects "
+            "fine but holds no GRANT on anything in that database: ask for privileges or pick "
+            "another default database."
+        ),
+    },
+    "CLI.VALIDATE_DATABASE_SKIPPED": {
+        "es": "3/3 Visibilidad en {database}: omitido porque falló un nivel anterior.",
+        "en": "3/3 Visibility in {database}: skipped because an earlier level failed.",
+    },
+    "CLI.VALIDATE_ALL_OK": {
+        "es": "Validación completa: los tres niveles han pasado.",
+        "en": "Validation complete: the three levels passed.",
+    },
+    "CLI.VALIDATE_NOT_RUN": {
+        "es": "Validación omitida: el perfil se guarda sin comprobar.",
+        "en": "Validation skipped: the profile is saved unchecked.",
+    },
+    "CLI.VALIDATE_MENU": {
+        "es": (
+            "Nada de lo que has escrito se pierde. Puedes: [r] reintentar, [c] corregir un "
+            "campo, [g] guardar de todos modos, [x] cancelar."
+        ),
+        "en": (
+            "Nothing you typed is lost. You can: [r] retry, [c] fix one field, [g] save "
+            "anyway, [x] cancel."
+        ),
+    },
+    "CLI.VALIDATE_MENU_PROMPT": {
+        "es": "Opción [r/c/g/x]",
+        "en": "Choice [r/c/g/x]",
+    },
+    "CLI.VALIDATE_MENU_INVALID": {
+        "es": "Opción no válida: {value}. Usa r, c, g o x.",
+        "en": "Invalid choice: {value}. Use r, c, g or x.",
+    },
+    "CLI.VALIDATE_FIELD_PROMPT": {
+        "es": "Campo a corregir ({fields})",
+        "en": "Field to fix ({fields})",
+    },
+    "CLI.VALIDATE_FIELD_INVALID": {
+        "es": "Campo desconocido: {value}. Campos válidos: {fields}.",
+        "en": "Unknown field: {value}. Valid fields: {fields}.",
+    },
+    "CLI.VALIDATE_SAVED_ANYWAY": {
+        "es": (
+            "Guardado pese al fallo de validación: es lo normal si aún no tienes la VPN "
+            "levantada. Cuando la tengas: nz-mcp test-connection --profile {profile}"
+        ),
+        "en": (
+            "Saved despite the failed validation: that is expected when the VPN is not up "
+            "yet. Once it is: nz-mcp test-connection --profile {profile}"
+        ),
+    },
+    "CLI.WIZARD_CANCELLED": {
+        "es": "Cancelado: no se ha escrito nada en {path} ni en el keyring.",
+        "en": "Cancelled: nothing was written to {path} nor to the keyring.",
+    },
+    "CLI.CLAUDE_CONFIG_HEADER": {
+        "es": (
+            "Último paso — pega esto en claude_desktop_config.json (Claude Desktop > Ajustes > "
+            "Desarrollador > Editar configuración) y reinicia Claude Desktop:"
+        ),
+        "en": (
+            "Last step — paste this into claude_desktop_config.json (Claude Desktop > Settings "
+            "> Developer > Edit config) and restart Claude Desktop:"
+        ),
+    },
+    "CLI.PROBE_SUGGESTION": {
+        "es": (
+            "Opcional, solo si algo se comporta raro: 'nz-mcp probe-catalog --profile {profile}' "
+            "ejecuta todas las consultas del catálogo (lento y verboso; no hace falta para "
+            "empezar)."
+        ),
+        "en": (
+            "Optional, only if something behaves oddly: 'nz-mcp probe-catalog --profile "
+            "{profile}' runs every catalog query (slow and noisy; not needed to get started)."
+        ),
+    },
     # nz-mcp doctor (CLI diagnostics — no secrets)
     "DOCTOR.HEADER": {
         "es": "Diagnóstico local (nz-mcp doctor)",
