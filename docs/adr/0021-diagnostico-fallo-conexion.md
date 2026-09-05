@@ -18,7 +18,7 @@ El motivo real sí existe, pero nzpy **lo loggea**, no lo propaga: `handshake.py
 
 Ese texto se clasifica en una causa estable mediante una **tabla de reglas ordenadas** (`_CAUSE_RULES`): `TLS_FAILED`, `AUTH_REJECTED`, `DATABASE_UNAVAILABLE`, `HOST_UNREACHABLE` y `UNKNOWN` como último recurso. Añadir un mensaje nuevo del driver cuesta una entrada en la tupla, no una rama nueva.
 
-El `ConnectionError` resultante lleva en su `context` la `cause` y los hints accionables `hint_es` / `hint_en` (catálogo i18n `CONNECTION_FAILED.HINT.<cause>`, con test de paridad). El servidor MCP ya expone el `context` entero en el payload de error, así que la mejora llega a la vez a `nz-mcp test-connection`, al asistente de perfiles y a todas las tools sin tocar ninguna de ellas.
+El `ConnectionError` resultante lleva en su `context` la `cause` y los hints accionables `hint_es` / `hint_en` (catálogo i18n `CONNECTION_FAILED.HINT.<cause>`, con test de paridad). El servidor MCP ya expone el `context` entero en el payload de error, así que la mejora llega a la vez a `nz-mcp test-connection`, al asistente de perfiles y a todas las tools sin tocar ninguna de ellas. **Enmienda (#142, ADR 0023):** desde entonces el servidor **promociona** `hint_es`/`hint_en` al nivel superior del payload en vez de dejarlos solo dentro del `context`; el mecanismo de esta ADR no cambia, solo dónde aterrizan los hints.
 
 La firma pública de `open_connection` y el comportamiento de conexión no cambian.
 
