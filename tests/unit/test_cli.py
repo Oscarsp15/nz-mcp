@@ -8,9 +8,10 @@ import pytest
 from typer.testing import CliRunner
 
 from nz_mcp import __version__
-from nz_mcp.auth import store_password
+from nz_mcp.auth import get_password, store_password
 from nz_mcp.cli import app
-from nz_mcp.errors import CredentialNotFoundError
+from nz_mcp.config import get_profile, list_profile_names, load_profiles_file
+from nz_mcp.errors import CredentialNotFoundError, KeyringUnavailableError
 
 runner = CliRunner()
 
@@ -194,3 +195,95 @@ def test_test_connection_open_connection_error(
     result = runner.invoke(app, ["test-connection"])
     assert result.exit_code == 1
     assert "timeout" in result.stdout + result.stderr
+
+
+# --- profile lifecycle: add-profile / remove-profile --------------------------
+
+_WIZARD_INPUT = "nz.example.com\n5480\nDB\nsvc\npw123456\npw123456\nread\n"
+
+
+def test_add_profile_creates_it_and_suggests_test_connection(tmp_profiles: Path) -> None:
+    result = runner.invoke(app, ["add-profile", "dev", "--active"], input=_WIZARD_INPUT)
+    assert result.exit_code == 0
+    assert "nz-mcp test-connection --profile dev" in result.stdout
+    assert load_profiles_file(tmp_profiles).active == "dev"
+    assert get_profile("dev", path=tmp_profiles).host == "nz.example.com"
+    assert get_password("dev") == "pw123456"
+
+
+def test_add_profile_duplicate_declined_keeps_previous(two_profiles: Path) -> None:
+    result = runner.invoke(app, ["add-profile", "dev"], input="n\n")
+    assert result.exit_code == 1
+    assert "nz-mcp remove-profile dev" in result.stdout + result.stderr
+    assert get_profile("dev", path=two_profiles).host == "nz-dev.example.com"
+
+
+def test_add_profile_duplicate_confirmed_replaces_section(two_profiles: Path) -> None:
+    result = runner.invoke(app, ["add-profile", "dev"], input="y\n" + _WIZARD_INPUT)
+    assert result.exit_code == 0
+    assert two_profiles.read_text(encoding="utf-8").count("[profiles.dev]") == 1
+    assert list_profile_names(two_profiles) == ["dev", "prod"]
+    assert get_profile("dev", path=two_profiles).host == "nz.example.com"
+    assert load_profiles_file(two_profiles).active == "dev"
+
+
+def test_add_profile_reports_unparseable_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_profiles: Path
+) -> None:
+    monkeypatch.setenv("NZ_MCP_LANG", "en")
+    tmp_profiles.write_text(
+        '[profiles.dev]\nhost = "a"\n[profiles.dev]\nhost = "b"\n', encoding="utf-8"
+    )
+    result = runner.invoke(app, ["add-profile", "dev"], input=_WIZARD_INPUT)
+    assert result.exit_code == 1
+    assert "configuration file is invalid" in result.stdout + result.stderr
+
+
+def test_remove_profile_deletes_section_and_password(two_profiles: Path) -> None:
+    store_password("prod", "prodpass456")
+    result = runner.invoke(app, ["remove-profile", "prod"], input="y\n")
+    assert result.exit_code == 0
+    assert list_profile_names(two_profiles) == ["dev"]
+    assert load_profiles_file(two_profiles).active == "dev"
+    with pytest.raises(CredentialNotFoundError):
+        get_password("prod")
+
+
+def test_remove_profile_clears_active_when_it_was_active(two_profiles: Path) -> None:
+    store_password("dev", "devpass123")
+    result = runner.invoke(app, ["remove-profile", "dev"], input="y\n")
+    assert result.exit_code == 0
+    file = load_profiles_file(two_profiles)
+    assert file.active is None
+    assert list(file.profiles) == ["prod"]
+    assert "NZ_MCP_PROFILE" in result.stdout + result.stderr
+
+
+def test_remove_profile_declined_changes_nothing(two_profiles: Path) -> None:
+    store_password("dev", "devpass123")
+    result = runner.invoke(app, ["remove-profile", "dev"], input="n\n")
+    assert result.exit_code == 1
+    assert list_profile_names(two_profiles) == ["dev", "prod"]
+    assert get_password("dev") == "devpass123"
+
+
+def test_remove_profile_unknown_lists_existing_ones(two_profiles: Path) -> None:
+    result = runner.invoke(app, ["remove-profile", "ghost"], input="y\n")
+    assert result.exit_code == 1
+    combined = result.stdout + result.stderr
+    assert "ghost" in combined
+    assert "dev, prod" in combined
+    assert list_profile_names(two_profiles) == ["dev", "prod"]
+
+
+def test_remove_profile_warns_but_proceeds_when_keyring_fails(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    def _boom(name: str) -> None:
+        raise KeyringUnavailableError(profile=name, detail="no backend available")
+
+    monkeypatch.setattr("nz_mcp.cli.delete_password", _boom)
+    result = runner.invoke(app, ["remove-profile", "prod"], input="y\n")
+    assert result.exit_code == 0
+    assert list_profile_names(two_profiles) == ["dev"]
+    assert "no backend available" in result.stdout + result.stderr

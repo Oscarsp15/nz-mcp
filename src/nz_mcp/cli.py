@@ -3,6 +3,7 @@
 Commands:
 - ``init``               first-time wizard: creates the first profile.
 - ``add-profile``        add another profile.
+- ``remove-profile``     delete a profile and its keyring password.
 - ``list-profiles``      list configured profiles.
 - ``edit-profile``       update an existing profile (mode, database, limits).
 - ``doctor``             print local diagnostics (no Netezza connection).
@@ -16,24 +17,27 @@ from __future__ import annotations
 
 import contextlib
 import json
-from pathlib import Path
 from typing import Any, cast
 
 import typer
 
 from nz_mcp import __version__
-from nz_mcp.auth import get_password, store_password
+from nz_mcp.auth import delete_password, get_password, store_password
 from nz_mcp.catalog.probe import probe_has_hard_failure, probe_run_to_json_dict, run_probe_catalog
 from nz_mcp.config import (
     DEFAULT_MAX_ROWS,
     DEFAULT_TIMEOUT_S,
     PermissionMode,
+    ProfilesFile,
     config_dir,
     get_active_profile,
     get_profile,
     list_profile_names,
+    load_profiles_file,
     profiles_path,
+    remove_profile,
     update_profile_fields,
+    upsert_profile,
 )
 from nz_mcp.connection import open_connection
 from nz_mcp.diagnostic import collect_diagnostic, format_diagnostic_report
@@ -44,7 +48,7 @@ from nz_mcp.errors import (
     KeyringUnavailableError,
     ProfileNotFoundError,
 )
-from nz_mcp.i18n import MESSAGES, resolve_locale, t
+from nz_mcp.i18n import MESSAGES, Locale, resolve_locale, t
 from nz_mcp.logging_config import configure_logging_for_stdio
 from nz_mcp.logging_utils import sanitize
 from nz_mcp.server import run_stdio_server
@@ -83,6 +87,35 @@ def add_profile_cmd(
 ) -> None:
     """Add a new profile (interactive)."""
     _add_profile_interactive(name=name, set_active=set_active)
+
+
+@app.command("remove-profile")
+def remove_profile_cmd(
+    name: str = typer.Argument(..., help="Profile name to delete"),
+) -> None:
+    """Delete a profile from profiles.toml and its password from the OS keyring."""
+    locale = resolve_locale()
+    file = _load_profiles_or_exit(locale)
+    if name not in file.profiles:
+        exc = _profile_not_found(name, list(file.profiles))
+        typer.secho(_format_profile_not_found_cli(locale, exc), err=True)
+        raise typer.Exit(code=1)
+    prompt = t("CLI.PROFILE_REMOVE_CONFIRM", locale, profile=name, path=profiles_path())
+    if not typer.confirm(prompt, default=False):
+        typer.secho(t("CLI.PROFILE_REMOVE_CANCELLED", locale, profile=name), fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
+    _delete_password_or_warn(name, locale)
+    was_active = remove_profile(name)
+    typer.secho(
+        t("CLI.PROFILE_REMOVED", locale, profile=name, path=profiles_path()),
+        fg=typer.colors.GREEN,
+    )
+    if was_active:
+        typer.secho(
+            t("CLI.ACTIVE_PROFILE_CLEARED", locale, path=profiles_path()),
+            fg=typer.colors.YELLOW,
+        )
+    raise typer.Exit(code=0)
 
 
 @app.command("list-profiles")
@@ -278,7 +311,59 @@ def _format_profile_not_found_cli(locale: str, exc: ProfileNotFoundError) -> str
     )
 
 
+def _profile_not_found(name: str, available: list[str]) -> ProfileNotFoundError:
+    """Build a ProfileNotFoundError whose hint lists the profiles that do exist."""
+    joined = ", ".join(sorted(available))
+    return ProfileNotFoundError(
+        profile=name,
+        hint_es=f" Perfiles existentes: {joined}." if joined else "",
+        hint_en=f" Existing profiles: {joined}." if joined else "",
+    )
+
+
+def _load_profiles_or_exit(locale: Locale) -> ProfilesFile:
+    """Load profiles.toml, exiting with an actionable message when it cannot be parsed."""
+    try:
+        return load_profiles_file()
+    except InvalidProfileError as exc:
+        typer.secho(t("INVALID_CONFIG", locale, detail=str(exc)), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+
+def _confirm_overwrite_or_exit(name: str, locale: Locale) -> None:
+    """Ask before replacing an existing profile; abort (exit 1) unless confirmed."""
+    typer.secho(
+        t("CLI.PROFILE_ALREADY_EXISTS", locale, profile=name, path=profiles_path()),
+        fg=typer.colors.YELLOW,
+    )
+    if not typer.confirm(t("CLI.PROFILE_OVERWRITE_CONFIRM", locale), default=False):
+        typer.secho(
+            t("CLI.PROFILE_OVERWRITE_CANCELLED", locale, profile=name),
+            fg=typer.colors.YELLOW,
+        )
+        raise typer.Exit(code=1)
+
+
+def _delete_password_or_warn(name: str, locale: Locale) -> None:
+    """Drop the keyring entry; a broken keyring must not block removing the profile."""
+    try:
+        delete_password(name)
+    except KeyringUnavailableError as exc:
+        detail = sanitize(str(exc), known_secrets=())
+        typer.secho(
+            t("CLI.PROFILE_PASSWORD_DELETE_FAILED", locale, profile=name, detail=detail),
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+        return
+    typer.echo(t("CLI.PROFILE_PASSWORD_DELETED", locale, profile=name))
+
+
 def _add_profile_interactive(*, name: str, set_active: bool) -> None:
+    locale = resolve_locale()
+    file = _load_profiles_or_exit(locale)
+    if name in file.profiles:
+        _confirm_overwrite_or_exit(name, locale)
     host = typer.prompt("Host Netezza")
     port = typer.prompt("Puerto", default=5480, type=int)
     database = typer.prompt("Base de datos por defecto")
@@ -313,7 +398,11 @@ def _add_profile_interactive(*, name: str, set_active: bool) -> None:
         set_active=set_active,
     )
     store_password(name, password)
-    typer.secho(f"Perfil '{name}' guardado en {profiles_path()}", fg=typer.colors.GREEN)
+    typer.secho(
+        t("CLI.PROFILE_SAVED", locale, profile=name, path=profiles_path()),
+        fg=typer.colors.GREEN,
+    )
+    typer.echo(t("CLI.PROFILE_NEXT_STEP", locale, profile=name))
 
 
 def _ensure_config_dir() -> None:
@@ -333,28 +422,16 @@ def _write_profile(
     mode: PermissionMode,
     set_active: bool,
 ) -> None:
-    target = profiles_path()
-    existing = target.read_text(encoding="utf-8") if target.exists() else ""
-    block = (
-        f"\n[profiles.{name}]\n"
-        f'host = "{host}"\n'
-        f"port = {port}\n"
-        f'database = "{database}"\n'
-        f'user = "{user}"\n'
-        f'mode = "{mode}"\n'
-        f"max_rows_default = {DEFAULT_MAX_ROWS}\n"
-        f"timeout_s_default = {DEFAULT_TIMEOUT_S}\n"
-    )
-    new_content = existing + block
-    if set_active:
-        active_line = f'active = "{name}"\n'
-        new_content = active_line + new_content if "active = " not in new_content else new_content
-    _atomic_write(target, new_content)
-    with contextlib.suppress(OSError):  # pragma: no cover - Windows ACLs differ
-        target.chmod(0o600)
-
-
-def _atomic_write(target: Path, content: str) -> None:
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    tmp.replace(target)
+    block: dict[str, Any] = {
+        "host": host,
+        "port": port,
+        "database": database,
+        "user": user,
+        "mode": mode,
+        "max_rows_default": DEFAULT_MAX_ROWS,
+        "timeout_s_default": DEFAULT_TIMEOUT_S,
+    }
+    # ``--active`` only elects a profile when none is declared yet: switching the active
+    # profile of an existing setup is an explicit action, not a side effect of add-profile.
+    elect_active = set_active and load_profiles_file().active is None
+    upsert_profile(name, block, set_active=elect_active)
