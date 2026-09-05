@@ -9,12 +9,13 @@ from typing import Any, Final, Protocol, cast
 
 import sqlglot
 from nzpy import ProgrammingError
+from sqlglot import Token, TokenType
 from sqlglot import expressions as exp
 
 from nz_mcp.auth import get_password
 from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
-from nz_mcp.errors import NetezzaError
+from nz_mcp.errors import GuardRejectedError, NetezzaError
 from nz_mcp.logging_utils import sanitize
 
 FETCH_BATCH: Final[int] = 200
@@ -51,23 +52,106 @@ class _ConnectionLike(Protocol):
     def close(self) -> None: ...
 
 
+def _statement_body(sql: str, tokens: list[Token]) -> str:
+    """Return ``sql`` without its trailing semicolon, so a clause can be appended."""
+    if tokens and tokens[-1].token_type is TokenType.SEMICOLON:
+        return sql[: tokens[-1].start].rstrip()
+    return sql.rstrip()
+
+
+def _top_level_limit_index(tokens: list[Token]) -> int | None:
+    """Return the index of the statement-level ``LIMIT`` keyword, if there is one.
+
+    A ``LIMIT`` inside parentheses belongs to a subquery or a CTE and is left alone.
+    """
+    depth = 0
+    for index, tok in enumerate(tokens):
+        if tok.token_type is TokenType.L_PAREN:
+            depth += 1
+        elif tok.token_type is TokenType.R_PAREN:
+            depth -= 1
+        elif tok.token_type is TokenType.LIMIT and depth == 0:
+            return index
+    return None
+
+
+def _limit_value_span(
+    tokens: list[Token],
+    limit_index: int,
+    limit: exp.Limit | None,
+) -> tuple[int, int, int | None]:
+    """Return ``(start, end, row_count)`` for a ``LIMIT`` whose value is a single token.
+
+    ``row_count`` is ``None`` for ``LIMIT ALL`` (unbounded). The offsets are returned only
+    when the token right after ``LIMIT`` is provably the **whole** value: it is either the
+    ``ALL`` keyword, or an integer literal that the parse tree backs with the very same
+    digits. Every other shape is rejected instead of rewritten: an in-place rewrite by
+    offset cannot cover an arbitrary expression, and a span that guesses where the
+    expression ends turns ``LIMIT (1 + 2)`` into ``LIMIT 101 + 2)``.
+
+    ``LIMIT ALL`` is recognized on the **token**, never on the tree: how sqlglot models it
+    changes between releases (30.4.3 keeps a ``Column(Identifier(ALL))`` in
+    ``Limit.expression``, 30.18.0 drops the clause and leaves no ``Limit`` node at all),
+    while ``ALL`` is a single reserved-word token in every one of them.
+    """
+    if limit_index + 1 >= len(tokens):
+        raise _limit_not_a_literal()
+    value_tok = tokens[limit_index + 1]
+    span = (value_tok.start, value_tok.end + 1)
+    if value_tok.token_type is TokenType.ALL:
+        return (*span, None)
+    if limit is None:
+        raise _limit_not_a_literal()
+    count = limit.expression
+    if (
+        isinstance(count, exp.Literal)
+        and not count.is_string
+        and value_tok.token_type is TokenType.NUMBER
+        and value_tok.text.isdigit()
+        and value_tok.text == str(count.this)
+    ):
+        return (*span, int(value_tok.text))
+    raise _limit_not_a_literal()
+
+
+def _limit_not_a_literal() -> GuardRejectedError:
+    """Refuse to bound a statement whose ``LIMIT`` cannot be rewritten token by token."""
+    return GuardRejectedError(code="LIMIT_NOT_A_LITERAL")
+
+
 def inject_limit(sql: str, max_rows: int) -> str:
-    """Return SQL with ``LIMIT`` applied or lowered to ``max_rows`` when already present."""
+    """Return ``sql`` bounded by a statement-level ``LIMIT`` of at most ``max_rows``.
+
+    The statement is **never re-serialized**: sqlglot only reads it, to confirm it is a
+    SELECT / UNION and to locate an existing ``LIMIT``. What reaches Netezza is the text
+    the caller wrote and ``sql_guard`` validated, with at most the ``LIMIT`` value edited
+    in place. Re-printing the tree with the postgres dialect rewrote Netezza SQL on its
+    way out (``NVL`` to ``COALESCE``, ``DECODE`` / ``NVL2`` to ``CASE``, ``STRPOS`` to
+    ``POSITION``, ``LAST_DAY`` to a ``DATE_TRUNC`` expression, dropped ``NULLS LAST``)
+    and, because the limit literal was read from the wrong argument, silently raised a
+    caller's ``LIMIT 3`` to ``max_rows`` (issue #137).
+
+    Raises ``GuardRejectedError`` when the statement carries a ``LIMIT`` whose value is
+    not a single-token integer literal (nor ``ALL``): such a statement cannot be bounded
+    by an in-place rewrite, and running it unbounded is not an option.
+    """
     expr = sqlglot.parse_one(sql, read="postgres")
     if not isinstance(expr, (exp.Select, exp.Union)):
         raise ValueError("inject_limit expects a SELECT or UNION statement")
-    current: int | None = None
-    lim = expr.args.get("limit")
-    if isinstance(lim, exp.Limit):
-        lit = lim.this
-        if isinstance(lit, exp.Literal):
-            try:
-                current = int(lit.this)
-            except (TypeError, ValueError):
-                current = None
-    applied = max_rows if current is None else min(current, max_rows)
-    limited = expr.limit(applied)
-    return limited.sql(dialect="postgres")
+    tokens = sqlglot.tokenize(sql, read="postgres")
+    limit_index = _top_level_limit_index(tokens)
+    if limit_index is None:
+        # A newline, not a space: a trailing line comment would swallow the clause.
+        return f"{_statement_body(sql, tokens)}\nLIMIT {max_rows}"
+    limit = expr.args.get("limit")
+    start, end, current = _limit_value_span(
+        tokens,
+        limit_index,
+        limit if isinstance(limit, exp.Limit) else None,
+    )
+    if current is not None and current <= max_rows:
+        return sql
+    return f"{sql[:start]}{max_rows}{sql[end:]}"
 
 
 def execute_select(

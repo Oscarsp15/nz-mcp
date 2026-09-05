@@ -134,6 +134,20 @@ def test_the_only_exempt_key_is_exempt_because_its_hint_is_per_locale() -> None:
     assert _placeholders(msg["es"]) - _placeholders(msg["en"]) == frozenset(["hint_es"])
 
 
+def test_non_literal_limit_rejection_renders_in_both_locales() -> None:
+    """The rejection must reach the AI as a sentence it can act on, not as its own code."""
+    from nz_mcp.errors import GuardRejectedError
+    from nz_mcp.server import _error_response
+
+    exc = GuardRejectedError(code="LIMIT_NOT_A_LITERAL")
+    payload = _error_response(exc.code, **exc.context)["error"]
+
+    assert payload["code"] == "LIMIT_NOT_A_LITERAL"
+    for message in (payload["message_es"], payload["message_en"]):
+        assert message != "LIMIT_NOT_A_LITERAL"
+        assert "LIMIT 100" in message
+
+
 def test_catalog_override_rejection_renders_in_both_locales() -> None:
     """The rejection context must satisfy the placeholders of the ES and EN messages.
 

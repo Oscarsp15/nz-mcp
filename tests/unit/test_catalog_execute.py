@@ -7,41 +7,205 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+import sqlglot
 from nzpy import ProgrammingError
+from sqlglot import expressions as exp
 
 from nz_mcp.catalog import execute as execute_mod
 from nz_mcp.catalog.execute import (
     _column_meta_from_cursor,
+    _limit_value_span,
     _type_label_from_oid_cell,
     execute_select,
     fetch_explain_text,
     inject_limit,
 )
 from nz_mcp.config import Profile
-from nz_mcp.errors import NetezzaError
+from nz_mcp.errors import GuardRejectedError, NetezzaError
 
 
 def test_inject_limit_adds_limit_when_missing() -> None:
     out = inject_limit("SELECT a FROM t", 42)
-    assert "LIMIT" in out.upper()
-    assert "42" in out
+    assert out == "SELECT a FROM t\nLIMIT 42"
 
 
 def test_inject_limit_lowers_existing_limit() -> None:
     out = inject_limit("SELECT 1 LIMIT 999", 50)
-    assert "LIMIT" in out.upper()
-    assert "50" in out
+    assert out == "SELECT 1 LIMIT 50"
 
 
 def test_inject_limit_union() -> None:
     out = inject_limit("SELECT 1 UNION ALL SELECT 2", 7)
-    assert "LIMIT" in out.upper()
-    assert "7" in out
+    assert out == "SELECT 1 UNION ALL SELECT 2\nLIMIT 7"
 
 
 def test_inject_limit_not_select_raises() -> None:
     with pytest.raises(ValueError):
         inject_limit("DELETE FROM t WHERE id = 1", 10)
+
+
+# Issue #137: the executed text must be the text sql_guard validated. Re-serializing the
+# sqlglot tree with the postgres dialect rewrote Netezza SQL on its way to the server.
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT NVL(NOMBRE, 'x') AS N FROM DBO.T",
+        "SELECT DECODE(ESTADO, 1, 'A', 2, 'B', 'Z') AS E FROM DBO.T",
+        "SELECT NVL2(ID, 'a', 'b') AS V FROM DBO.T",
+        "SELECT ID FROM DBO.T ORDER BY ID NULLS LAST",
+        "SELECT ID FROM DBO.T WHERE regexp_like(NOMBRE, '^A')",
+        "SELECT STRPOS(NOMBRE, 'a') AS P FROM DBO.T",
+        "SELECT INSTR(NOMBRE, 'a') AS P FROM DBO.T",
+        "SELECT LAST_DAY(FECHA) AS V FROM DBO.T",
+        "SELECT DATE_PART('year', FECHA) AS V FROM DBO.T",
+        "SELECT SUBSTR(NOMBRE, 2, 3) AS V FROM DBO.T",
+        "SELECT ID FROM DBO.T WHERE X = 'it''s'",
+        'SELECT "MiCol" FROM DBO.T',
+    ],
+)
+def test_inject_limit_preserves_original_statement(sql: str) -> None:
+    assert inject_limit(sql, 100) == f"{sql}\nLIMIT 100"
+
+
+def test_inject_limit_keeps_a_lower_user_limit() -> None:
+    """A caller asking for 3 rows must not silently get ``max_rows`` rows."""
+    assert inject_limit("SELECT ID FROM DBO.T LIMIT 3", 100) == "SELECT ID FROM DBO.T LIMIT 3"
+
+
+def test_inject_limit_does_not_duplicate_limit() -> None:
+    out = inject_limit("SELECT ID FROM DBO.T LIMIT 999", 100)
+    assert out.upper().count("LIMIT") == 1
+    assert out == "SELECT ID FROM DBO.T LIMIT 100"
+
+
+def test_inject_limit_keeps_offset_when_lowering() -> None:
+    out = inject_limit("SELECT ID FROM DBO.T LIMIT 999 OFFSET 20", 50)
+    assert out == "SELECT ID FROM DBO.T LIMIT 50 OFFSET 20"
+
+
+def test_inject_limit_replaces_limit_all() -> None:
+    out = inject_limit("SELECT ID FROM DBO.T LIMIT ALL", 50)
+    assert out == "SELECT ID FROM DBO.T LIMIT 50"
+
+
+def test_inject_limit_replaces_limit_all_when_the_parser_keeps_it_as_a_column(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``LIMIT ALL`` must be bounded under either shape sqlglot gives it.
+
+    sqlglot 30.18.0 parses the clause away and leaves no ``Limit`` node; 30.4.3 keeps
+    ``Limit(expression=Column(Identifier(ALL)))``. The pin is a floor without a ceiling, so
+    both shapes are live and the tree cannot be the source of truth here.
+    """
+    unpatched = sqlglot.parse_one
+
+    def _parse_like_30_4_3(sql: str, read: str) -> Any:
+        parsed = unpatched(sql, read=read)
+        parsed.set("limit", exp.Limit(expression=exp.column("ALL")))
+        return parsed
+
+    monkeypatch.setattr(sqlglot, "parse_one", _parse_like_30_4_3)
+    assert inject_limit("SELECT ID FROM DBO.T LIMIT ALL", 50) == "SELECT ID FROM DBO.T LIMIT 50"
+
+
+def test_limit_value_span_reads_limit_all_off_the_token_not_the_tree() -> None:
+    """Both parse shapes of ``LIMIT ALL`` must yield the same unbounded span."""
+    sql = "SELECT ID FROM DBO.T LIMIT ALL"
+    tokens = sqlglot.tokenize(sql, read="postgres")
+    limit_index = len(tokens) - 2
+
+    dropped_by_the_parser = _limit_value_span(tokens, limit_index, None)
+    kept_as_a_column = _limit_value_span(
+        tokens, limit_index, exp.Limit(expression=exp.column("ALL"))
+    )
+
+    assert dropped_by_the_parser == kept_as_a_column == (sql.index("ALL"), len(sql), None)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT a FROM (SELECT b FROM t LIMIT 5) x",
+        "WITH c AS (SELECT b FROM t LIMIT 5) SELECT * FROM c",
+    ],
+)
+def test_inject_limit_ignores_limit_inside_parentheses(sql: str) -> None:
+    assert inject_limit(sql, 10) == f"{sql}\nLIMIT 10"
+
+
+def test_inject_limit_keeps_limit_zero() -> None:
+    """``LIMIT 0`` asks for the column metadata only; it is already under any cap."""
+    assert inject_limit("SELECT ID FROM DBO.T LIMIT 0", 100) == "SELECT ID FROM DBO.T LIMIT 0"
+
+
+# A LIMIT whose value is not one integer token cannot be bounded by an in-place rewrite:
+# the span would have to guess where the expression ends, which produced the malformed
+# "SELECT a FROM t LIMIT 101+2)" for "LIMIT (1+2)".
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT a FROM t LIMIT (1+2)",
+        "SELECT a FROM t LIMIT (1 + 2)",
+        "SELECT a FROM t LIMIT (SELECT 5)",
+        "SELECT a FROM t LIMIT $1",
+        "SELECT a FROM t LIMIT NULL",
+        "SELECT a FROM t LIMIT 1e2",
+        "SELECT a FROM t LIMIT 3.0",
+        "SELECT a FROM t LIMIT 2, 5",
+        "SELECT 1 UNION ALL SELECT 2 LIMIT (1+2)",
+    ],
+)
+def test_inject_limit_rejects_a_non_literal_limit(sql: str) -> None:
+    with pytest.raises(GuardRejectedError) as excinfo:
+        inject_limit(sql, 10)
+    assert excinfo.value.code == "LIMIT_NOT_A_LITERAL"
+
+
+def test_inject_limit_never_returns_malformed_sql_for_a_computed_limit() -> None:
+    """Regression: the rewrite used to eat the opening parenthesis and leave the rest."""
+    with pytest.raises(GuardRejectedError):
+        inject_limit("SELECT a FROM t LIMIT (1+2)", 10)
+
+
+def test_inject_limit_rejects_mysql_style_offset_comma_count() -> None:
+    """``LIMIT 2, 5`` returns 5 rows, not 2: reading the first token would under-count."""
+    with pytest.raises(GuardRejectedError):
+        inject_limit("SELECT a FROM t LIMIT 2, 5", 3)
+
+
+def test_limit_value_span_rejects_a_limit_with_nothing_after_it() -> None:
+    """Defensive: ``parse_one`` rejects ``... LIMIT`` first, but the helper must not index
+    past the end of the token list."""
+    tokens = sqlglot.tokenize("SELECT a FROM t LIMIT", read="postgres")
+    with pytest.raises(GuardRejectedError):
+        _limit_value_span(tokens, len(tokens) - 1, None)
+
+
+def test_limit_value_span_rejects_a_value_the_tree_does_not_back() -> None:
+    """Only ``LIMIT ALL`` may carry a value token with no row count in the parse tree."""
+    tokens = sqlglot.tokenize("SELECT a FROM t LIMIT 5", read="postgres")
+    with pytest.raises(GuardRejectedError):
+        _limit_value_span(tokens, len(tokens) - 2, None)
+
+
+def test_inject_limit_drops_trailing_semicolon_before_appending() -> None:
+    assert inject_limit("SELECT a FROM t ;", 10) == "SELECT a FROM t\nLIMIT 10"
+
+
+def test_inject_limit_keeps_trailing_semicolon_when_it_touches_nothing() -> None:
+    """Nothing to bound, nothing to edit: the text must travel byte for byte."""
+    sql = "SELECT a FROM t LIMIT 3  ;  \n"
+    assert inject_limit(sql, 100) == sql
+
+
+def test_inject_limit_keeps_trailing_semicolon_when_lowering() -> None:
+    assert inject_limit("SELECT a FROM t LIMIT 999;", 100) == "SELECT a FROM t LIMIT 100;"
+
+
+def test_inject_limit_appends_on_a_new_line_after_a_line_comment() -> None:
+    """A trailing ``--`` comment would swallow a ``LIMIT`` appended on the same line."""
+    out = inject_limit("SELECT a FROM t -- why\n", 10)
+    assert out.splitlines()[-1] == "LIMIT 10"
 
 
 def test_execute_select_streams_rows(monkeypatch: pytest.MonkeyPatch) -> None:
