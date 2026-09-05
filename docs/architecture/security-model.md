@@ -13,6 +13,7 @@
 | Denegación de servicio accidental (full table scan en billones de filas) | `LIMIT` forzado + `timeout_s` + cap de bytes en respuesta |
 | Exfiltración de datos masiva vía prompt injection | Cap bytes + logging estructurado + modo por perfil |
 | Escalación de privilegios por la IA | `switch_profile` jamás eleva `mode`; el humano edita `profiles.toml` |
+| SQL de `catalog_overrides` que nadie revisó (copiado de un tercero, escrito por otro proceso) ejecutado por la IA en una ruta de catálogo | `sql_guard.validate_catalog_override()` en `resolve_query`: `mode="read"` + clase `SELECT` obligatoria |
 | Supply chain (dependencia comprometida) | Deps pineadas, Dependabot, review de ADR para cada dep nueva |
 
 ## Las 3 barreras defensivas
@@ -124,6 +125,17 @@ SELECT * FROM t; SELECT * FROM t2;        -- stacked
 BEGIN; DELETE FROM t; COMMIT;             -- transacción con DML
 ```
 
+Vía `catalog_overrides` de `profiles.toml` (`validate_catalog_override`), además:
+
+```
+DELETE FROM _V_TABLE WHERE 1 = 1          -- DML disfrazado de query de catálogo
+DROP TABLE ADMIN.CUSTOMERS                -- DDL en una ruta read-only
+SELECT DATABASE FROM _V_DATABASE; DROP TABLE ADMIN.T   -- apiladas
+SELECT * INTO ADMIN.EXFIL FROM ADMIN.CUSTOMERS         -- escritura con forma de SELECT
+CREATE OR REPLACE PROCEDURE ... LANGUAGE NZPLSQL AS ... -- SP colado en un override
+SELECT SCHEMA FROM <BD>_V_SCHEMA          -- marcador sin resolver hacia el driver
+```
+
 Cobertura obligatoria de `sql_guard.py`: **100 %**.
 
 ## auth.py: credenciales
@@ -217,17 +229,33 @@ Relajar este patrón requiere ADR y aprobación humana explícita.
 Los perfiles pueden declarar `catalog_overrides` en `profiles.toml` para reemplazar
 queries de catálogo por `query_id`.
 
-Riesgo explícito:
-
-- El SQL de `catalog_overrides` se ejecuta tal cual.
-- Estas queries de catálogo no pasan por `sql_guard`.
-- Se asume que el humano controla su propio `profiles.toml` y sus permisos.
+Ese SQL lo escribe el usuario y lo dispara la IA, así que **pasa por `sql_guard` como
+cualquier otra sentencia**: no es una excepción a la barrera 2 (issue #139, ADR 0022).
 
 Controles implementados:
 
 - Solo se aceptan `query_id` existentes en `CATALOG_QUERY_MAP`.
 - Overrides con `query_id` desconocido fallan con `InvalidProfileError`.
+- `resolve_query` valida **todos** los overrides del perfil con
+  `sql_guard.validate_catalog_override()`, no solo el que resuelve: una entrada rota
+  rompe el perfil entero, en vez de quedar latente hasta que alguien llame justo a esa
+  tool.
+- Un override debe validar en `mode="read"` **y** clasificar como `SELECT`. `SHOW` y
+  `EXPLAIN`, que sí son lecturas legales en cualquier modo, se rechazan aquí: un override
+  de catálogo tiene que devolver las filas que el consumidor desempaqueta.
+- `SELECT ... INTO` se rechaza aunque clasifique como `SELECT`: materializa una tabla.
+- Los marcadores `<BD>..` se renderizan contra una BD ficticia **solo para parsear**; el
+  texto almacenado se devuelve intacto. Un `<BD>` que no sea el sentinela `<BD>..` se
+  rechaza, porque habría llegado al driver sin resolver.
+- Rechazo con `GuardRejectedError(code="CATALOG_OVERRIDE_REJECTED")`, contexto
+  `query_id` / `profile` / `reason` y hint ES/EN que nombra la clave exacta de
+  `profiles.toml`. **El SQL ofensivo no se devuelve** en el mensaje.
 - Si un override incluye `<BD>..` en una query no cross-db, se emite warning.
+
+Lo que este control **no** resuelve: `catalog_overrides` sigue siendo una feature basada
+en la confianza en el usuario. Quien controla `profiles.toml` controla también `mode`,
+`host` y el usuario de conexión; esto no es una barrera contra un atacante con escritura
+sobre el fichero, sino la garantía de que las rutas de catálogo solo pueden leer.
 
 ## Checklist para Security Engineer antes de commit
 

@@ -14,7 +14,12 @@ from nz_mcp.catalog.resolver import resolve_query
 from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
 from nz_mcp.errors import ConnectionError as NzConnectionError
-from nz_mcp.errors import CredentialNotFoundError, InvalidInputError, InvalidProfileError
+from nz_mcp.errors import (
+    CredentialNotFoundError,
+    GuardRejectedError,
+    InvalidInputError,
+    InvalidProfileError,
+)
 from nz_mcp.logging_utils import sanitize
 
 _DUMMY_DATABASE: Final[str] = "D"
@@ -123,7 +128,7 @@ def probe_one_row(
     """Execute one catalog probe using an open cursor."""
     try:
         sql = prepare_sql(profile, cq)
-    except (InvalidProfileError, InvalidInputError) as exc:
+    except (InvalidProfileError, InvalidInputError, GuardRejectedError) as exc:
         return ProbeResult(
             query_id=cq.id,
             status="failure",
@@ -185,7 +190,7 @@ def run_probe_catalog(profile: Profile) -> ProbeRun:
     """Run all catalog probes for ``profile`` using a real Netezza connection."""
     try:
         resolve_query(ALL_QUERIES[0].id, profile)
-    except InvalidProfileError as exc:
+    except (InvalidProfileError, GuardRejectedError) as exc:
         return ProbeRun(profile_name=profile.name, config_error=str(exc), results=())
 
     try:

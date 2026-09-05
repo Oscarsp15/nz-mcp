@@ -60,6 +60,72 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "La tool '{tool}' no acepta sentencias del tipo '{kind}'.",
         "en": "Tool '{tool}' does not accept '{kind}' statements.",
     },
+    "GUARD_REJECTED.CATALOG_OVERRIDE_REJECTED": {
+        "es": (
+            "El override de catálogo '{query_id}' del perfil '{profile}' no es una consulta "
+            "SELECT de solo lectura, así que no se ejecuta (motivo: {reason})."
+        ),
+        "en": (
+            "Catalog override '{query_id}' of profile '{profile}' is not a read-only SELECT, "
+            "so it does not run (reason: {reason})."
+        ),
+    },
+    # One hint per rejection reason: each names the exact profiles.toml key to edit,
+    # because nz-mcp cannot fix the user's own config for them (see error_hints).
+    "GUARD_REJECTED.CATALOG_OVERRIDE_REJECTED.HINT.NOT_A_SELECT": {
+        "es": (
+            "Esa entrada es una sentencia {statement_kind}, y un override de catálogo tiene "
+            "que devolver filas: solo se admite SELECT (incluidos 'WITH ... SELECT' y las "
+            "uniones de SELECT). Corrige catalog_overrides.{query_id} en "
+            "[profiles.{profile}] de profiles.toml, o borra la entrada para volver a la "
+            "consulta integrada."
+        ),
+        "en": (
+            "That entry is a {statement_kind} statement, and a catalog override has to "
+            "return rows: only SELECT is accepted ('WITH ... SELECT' and unions of SELECTs "
+            "included). Fix catalog_overrides.{query_id} under [profiles.{profile}] in "
+            "profiles.toml, or delete the entry to fall back to the built-in query."
+        ),
+    },
+    "GUARD_REJECTED.CATALOG_OVERRIDE_REJECTED.HINT.SELECT_INTO": {
+        "es": (
+            "Esa entrada es un 'SELECT ... INTO': materializa una tabla, o sea que escribe. "
+            "Quita la cláusula INTO de catalog_overrides.{query_id} en [profiles.{profile}] "
+            "de profiles.toml, o borra la entrada para volver a la consulta integrada."
+        ),
+        "en": (
+            "That entry is a 'SELECT ... INTO': it materializes a table, which is a write. "
+            "Drop the INTO clause from catalog_overrides.{query_id} under "
+            "[profiles.{profile}] in profiles.toml, or delete the entry to fall back to the "
+            "built-in query."
+        ),
+    },
+    "GUARD_REJECTED.CATALOG_OVERRIDE_REJECTED.HINT.UNRESOLVED_BD_MARKER": {
+        "es": (
+            "El único marcador de base de datos que nz-mcp sustituye es '<BD>..' (con los "
+            "dos puntos); cualquier otro '<BD>' llegaría al driver sin resolver. Corrígelo "
+            "en catalog_overrides.{query_id} de [profiles.{profile}] en profiles.toml."
+        ),
+        "en": (
+            "The only database marker nz-mcp substitutes is '<BD>..' (with the two dots); "
+            "any other '<BD>' would reach the driver unresolved. Fix it in "
+            "catalog_overrides.{query_id} under [profiles.{profile}] in profiles.toml."
+        ),
+    },
+    "GUARD_REJECTED.CATALOG_OVERRIDE_REJECTED.HINT.GUARD": {
+        "es": (
+            "sql_guard rechazó ese SQL con el código {reason}, igual que si lo hubieras "
+            "enviado por una tool. Corrige catalog_overrides.{query_id} en "
+            "[profiles.{profile}] de profiles.toml hasta que sea un SELECT de solo lectura, "
+            "o borra la entrada para volver a la consulta integrada."
+        ),
+        "en": (
+            "sql_guard rejected that SQL with code {reason}, exactly as if you had sent it "
+            "through a tool. Fix catalog_overrides.{query_id} under [profiles.{profile}] in "
+            "profiles.toml until it is a read-only SELECT, or delete the entry to fall back "
+            "to the built-in query."
+        ),
+    },
     "GUARD_REJECTED.PROD_REF_IN_NONPROD": {
         "es": (
             "El SQL referencia identificadores de producción ({refs}) pero el perfil "

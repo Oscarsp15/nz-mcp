@@ -271,3 +271,54 @@ def test_profile_not_found_keeps_its_hint_inside_the_message(two_profiles: Path)
     assert "dev" in error["message_en"]
     assert error["hint_es"] is None
     assert error["hint_en"] is None
+
+
+# --- catalog_overrides rejection (issue #139, ADR 0022) -----------------------
+
+
+def test_override_hint_names_the_profiles_toml_key_and_the_statement_kind() -> None:
+    """A rejected override is config, not a retryable call: the hint must name the key."""
+    hints = hints_for_error(
+        "CATALOG_OVERRIDE_REJECTED",
+        {
+            "query_id": "list_tables",
+            "profile": "prod",
+            "reason": "NOT_A_SELECT",
+            "statement_kind": "SHOW",
+        },
+    )
+    assert hints is not None
+    for text in hints.values():
+        assert "catalog_overrides.list_tables" in text
+        assert "profiles.prod" in text
+        assert "SHOW" in text
+
+
+def test_override_hint_falls_back_to_quoting_the_guard_code() -> None:
+    """Reasons without a dedicated way out still say which guard rule fired."""
+    hints = hints_for_error(
+        "CATALOG_OVERRIDE_REJECTED",
+        {"query_id": "list_databases", "profile": "dev", "reason": "STACKED_NOT_ALLOWED"},
+    )
+    assert hints is not None
+    for text in hints.values():
+        assert "STACKED_NOT_ALLOWED" in text
+        assert "catalog_overrides.list_databases" in text
+
+
+@pytest.mark.parametrize(
+    ("reason", "needle"),
+    [("SELECT_INTO", "INTO"), ("UNRESOLVED_BD_MARKER", "<BD>..")],
+)
+def test_override_hint_is_specific_per_reason(reason: str, needle: str) -> None:
+    hints = hints_for_error(
+        "CATALOG_OVERRIDE_REJECTED",
+        {"query_id": "list_schemas", "profile": "dev", "reason": reason},
+    )
+    assert hints is not None
+    assert all(needle in text for text in hints.values())
+
+
+def test_no_override_hint_without_a_key_to_point_at() -> None:
+    """Rule of ADR 0023: a hint is specific or absent, never filler."""
+    assert hints_for_error("CATALOG_OVERRIDE_REJECTED", {"reason": "NOT_A_SELECT"}) is None

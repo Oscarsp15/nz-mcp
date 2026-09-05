@@ -17,7 +17,7 @@ from typing import Final
 import sqlglot
 from sqlglot import expressions as exp
 
-from nz_mcp.catalog.identifier import validate_catalog_identifier
+from nz_mcp.catalog.identifier import render_cross_db, validate_catalog_identifier
 from nz_mcp.config import PermissionMode
 from nz_mcp.errors import GuardRejectedError, InvalidInputError, PermissionDeniedError
 from nz_mcp.procedure_head_pattern import PROCEDURE_PARAM_LIST_PATTERN
@@ -91,6 +91,11 @@ _NETEZZA_DROP_TABLE_IF_EXISTS_SUFFIX: Final[re.Pattern[str]] = re.compile(
     r"\s+IF\s+EXISTS\s*$",
     re.IGNORECASE,
 )
+
+# Catalog overrides (``catalog_overrides`` in profiles.toml) replace a registered catalog
+# query, so they are always reads. ``<BD>..`` markers are rendered against this throwaway
+# database name for parsing only; the stored override text is never rewritten.
+_OVERRIDE_PROBE_DATABASE: Final[str] = "NZMCPGUARD"
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +186,62 @@ def assert_env_safe(sql: str, *, active_database: str) -> None:
             refs=", ".join(refs),
             active_database=active_database,
         )
+
+
+def validate_catalog_override(sql: str, *, query_id: str, profile: str) -> ParsedStatement:
+    """Validate a profile ``catalog_overrides`` entry as a read-only ``SELECT``.
+
+    An override is user-supplied SQL that replaces a registered catalog query, so it goes
+    through the same barrier as any other statement (``mode="read"``) plus two extra
+    restrictions: it must classify as ``SELECT`` (``SHOW`` / ``EXPLAIN`` do not return the
+    rows the catalog callers unpack) and it must not carry an ``INTO`` target, which would
+    materialize a table — a write wearing a read's clothes.
+
+    ``query_id`` and ``profile`` are labels only: they name the offending entry in the
+    error so the user knows which line of ``profiles.toml`` to fix. The override SQL is
+    never echoed back.
+    """
+    probe_sql = _render_override_probe(sql, query_id=query_id, profile=profile)
+    try:
+        parsed = validate(probe_sql, mode="read")
+    except (GuardRejectedError, PermissionDeniedError) as exc:
+        raise _override_rejected(query_id, profile, exc.code) from exc
+
+    if parsed.kind is not StatementKind.SELECT:
+        raise _override_rejected(query_id, profile, "NOT_A_SELECT", statement_kind=str(parsed.kind))
+    # ``validate`` already parsed ``probe_sql`` as a single statement, so this cannot raise.
+    if sqlglot.parse_one(probe_sql, read="postgres").args.get("into") is not None:
+        raise _override_rejected(query_id, profile, "SELECT_INTO")
+
+    return ParsedStatement(kind=parsed.kind, has_where=parsed.has_where, raw=sql)
+
+
+def _render_override_probe(sql: str, *, query_id: str, profile: str) -> str:
+    """Resolve ``<BD>..`` markers so the override parses like any other statement."""
+    if "<BD>" not in sql:
+        return sql
+    try:
+        return render_cross_db(sql, _OVERRIDE_PROBE_DATABASE)
+    except InvalidInputError as exc:
+        raise _override_rejected(query_id, profile, "UNRESOLVED_BD_MARKER") from exc
+
+
+def _override_rejected(
+    query_id: str,
+    profile: str,
+    reason: str,
+    *,
+    statement_kind: str | None = None,
+) -> GuardRejectedError:
+    """Build the rejection, keeping ``reason`` a stable token the hint layer can match.
+
+    Any extra detail travels in its own context key (``statement_kind``), never appended
+    to ``reason``: a caller branching on the reason must not have to parse it.
+    """
+    context: dict[str, str] = {"query_id": query_id, "profile": profile, "reason": reason}
+    if statement_kind is not None:
+        context["statement_kind"] = statement_kind
+    return GuardRejectedError(code="CATALOG_OVERRIDE_REJECTED", **context)
 
 
 def _validate_nzplsql_procedure(sql: str, *, mode: PermissionMode) -> ParsedStatement:
