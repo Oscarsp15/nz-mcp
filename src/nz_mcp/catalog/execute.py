@@ -83,20 +83,24 @@ def _limit_value_span(
     """Return ``(start, end, row_count)`` for a ``LIMIT`` whose value is a single token.
 
     ``row_count`` is ``None`` for ``LIMIT ALL`` (unbounded). The offsets are returned only
-    when the token right after ``LIMIT`` is provably the **whole** value: either the parse
-    tree says the row count is an integer literal and that token spells exactly it, or the
-    tree carries no row count at all and the token is the ``ALL`` keyword (sqlglot parses
-    ``LIMIT ALL`` away). Every other shape is rejected instead of rewritten: an in-place
-    rewrite by offset cannot cover an arbitrary expression, and a span that guesses where
-    the expression ends turns ``LIMIT (1 + 2)`` into ``LIMIT 101 + 2)``.
+    when the token right after ``LIMIT`` is provably the **whole** value: it is either the
+    ``ALL`` keyword, or an integer literal that the parse tree backs with the very same
+    digits. Every other shape is rejected instead of rewritten: an in-place rewrite by
+    offset cannot cover an arbitrary expression, and a span that guesses where the
+    expression ends turns ``LIMIT (1 + 2)`` into ``LIMIT 101 + 2)``.
+
+    ``LIMIT ALL`` is recognized on the **token**, never on the tree: how sqlglot models it
+    changes between releases (30.4.3 keeps a ``Column(Identifier(ALL))`` in
+    ``Limit.expression``, 30.18.0 drops the clause and leaves no ``Limit`` node at all),
+    while ``ALL`` is a single reserved-word token in every one of them.
     """
     if limit_index + 1 >= len(tokens):
         raise _limit_not_a_literal()
     value_tok = tokens[limit_index + 1]
     span = (value_tok.start, value_tok.end + 1)
+    if value_tok.token_type is TokenType.ALL:
+        return (*span, None)
     if limit is None:
-        if value_tok.token_type is TokenType.ALL:
-            return (*span, None)
         raise _limit_not_a_literal()
     count = limit.expression
     if (

@@ -9,6 +9,7 @@ from typing import Any, cast
 import pytest
 import sqlglot
 from nzpy import ProgrammingError
+from sqlglot import expressions as exp
 
 from nz_mcp.catalog import execute as execute_mod
 from nz_mcp.catalog.execute import (
@@ -85,6 +86,40 @@ def test_inject_limit_keeps_offset_when_lowering() -> None:
 def test_inject_limit_replaces_limit_all() -> None:
     out = inject_limit("SELECT ID FROM DBO.T LIMIT ALL", 50)
     assert out == "SELECT ID FROM DBO.T LIMIT 50"
+
+
+def test_inject_limit_replaces_limit_all_when_the_parser_keeps_it_as_a_column(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``LIMIT ALL`` must be bounded under either shape sqlglot gives it.
+
+    sqlglot 30.18.0 parses the clause away and leaves no ``Limit`` node; 30.4.3 keeps
+    ``Limit(expression=Column(Identifier(ALL)))``. The pin is a floor without a ceiling, so
+    both shapes are live and the tree cannot be the source of truth here.
+    """
+    unpatched = sqlglot.parse_one
+
+    def _parse_like_30_4_3(sql: str, read: str) -> Any:
+        parsed = unpatched(sql, read=read)
+        parsed.set("limit", exp.Limit(expression=exp.column("ALL")))
+        return parsed
+
+    monkeypatch.setattr(sqlglot, "parse_one", _parse_like_30_4_3)
+    assert inject_limit("SELECT ID FROM DBO.T LIMIT ALL", 50) == "SELECT ID FROM DBO.T LIMIT 50"
+
+
+def test_limit_value_span_reads_limit_all_off_the_token_not_the_tree() -> None:
+    """Both parse shapes of ``LIMIT ALL`` must yield the same unbounded span."""
+    sql = "SELECT ID FROM DBO.T LIMIT ALL"
+    tokens = sqlglot.tokenize(sql, read="postgres")
+    limit_index = len(tokens) - 2
+
+    dropped_by_the_parser = _limit_value_span(tokens, limit_index, None)
+    kept_as_a_column = _limit_value_span(
+        tokens, limit_index, exp.Limit(expression=exp.column("ALL"))
+    )
+
+    assert dropped_by_the_parser == kept_as_a_column == (sql.index("ALL"), len(sql), None)
 
 
 @pytest.mark.parametrize(

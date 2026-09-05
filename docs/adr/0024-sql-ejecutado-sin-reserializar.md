@@ -60,12 +60,18 @@ deja de re-serializar el árbol:
 5. Un `;` final se recorta **solo** cuando hay que anexar la cláusula (caso 2): un
    `LIMIT n` después del `;` no sería la misma sentencia. Es la única forma en que el
    texto ejecutado difiere del validado más allá del valor del `LIMIT`.
-6. El valor del `LIMIT` tiene que ser **un único token**: o el árbol dice que es un
-   literal entero y el token siguiente al `LIMIT` lo escribe exactamente, o el árbol no
-   trae valor y el token es `ALL` (`sqlglot` se come el `LIMIT ALL` al parsear).
-   Cualquier otra forma —`LIMIT (1 + 2)`, `LIMIT (SELECT n)`, `LIMIT $1`, `LIMIT 3.0`, el
-   `LIMIT offset, count` de MySQL que Netezza también acepta— se **rechaza** con
+6. El valor del `LIMIT` tiene que ser **un único token**: o es la palabra `ALL`, o es un
+   literal entero que el árbol respalda con esos mismos dígitos. Cualquier otra forma
+   —`LIMIT (1 + 2)`, `LIMIT (SELECT n)`, `LIMIT $1`, `LIMIT 3.0`, el `LIMIT offset, count`
+   de MySQL que Netezza también acepta— se **rechaza** con
    `GuardRejectedError(code="LIMIT_NOT_A_LITERAL")`.
+7. `LIMIT ALL` se reconoce **por el token, nunca por el árbol**. `sqlglot` cambia cómo lo
+   modela entre versiones: 30.4.3 deja `Limit(expression=Column(Identifier(ALL)))` y
+   30.18.0 se come la cláusula y no deja nodo `Limit`. Preguntarle al árbol hacía que
+   `LIMIT ALL` se rechazara en unas versiones y se acotara en otras, con el mismo código y
+   el mismo SQL. El tokenizador, en cambio, emite `TokenType.ALL` en todas: es la parte
+   estable de la librería y la única que necesitamos, porque `ALL` es un token único y
+   reescribirlo entero es siempre correcto.
 
 El punto 6 es la parte defensiva del diseño. Una reescritura por offset solo es correcta si
 el span cubre **toda** la expresión del valor, y el fin de una expresión arbitraria no se
@@ -104,4 +110,10 @@ que un asistente escriba por accidente— y el coste de rechazarlo es una llamad
 - Aparece un código de error nuevo, `LIMIT_NOT_A_LITERAL` (familia `GuardRejectedError`, ya
   declarada en el contrato de `nz_query_select`), con mensaje ES/EN en el catálogo i18n.
   Antes esas consultas se ejecutaban con el `LIMIT` sustituido por `max_rows`.
+- La dependencia queda acotada a `sqlglot>=26.0,<31`, el rango en el que se ha probado la
+  suite completa (26.0.0, 27.0.0, 28.0.0, 29.0.0, 30.0.0, 30.4.3 y 30.18.0). Con 25.0.0
+  fallan dos adversariales de `sql_guard` —`INTERSECT` y `EXCEPT` no se rechazan—, así que
+  el suelo declarado hasta ahora (`>=25.0`) prometía versiones que no cumplen el modelo de
+  seguridad. CI instala con `pip install -e ".[dev]"` y sin lockfile, de modo que este
+  rango es lo único que ata la versión resuelta (mismo motivo que el PR #163).
 - `sqlglot` sigue siendo la única dependencia de parseo. No se añade ninguna.
