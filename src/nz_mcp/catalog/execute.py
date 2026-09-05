@@ -15,7 +15,7 @@ from sqlglot import expressions as exp
 from nz_mcp.auth import get_password
 from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
-from nz_mcp.errors import NetezzaError
+from nz_mcp.errors import GuardRejectedError, NetezzaError
 from nz_mcp.logging_utils import sanitize
 
 FETCH_BATCH: Final[int] = 200
@@ -59,13 +59,10 @@ def _statement_body(sql: str, tokens: list[Token]) -> str:
     return sql.rstrip()
 
 
-def _top_level_limit_span(tokens: list[Token]) -> tuple[int, int, int | None] | None:
-    """Locate the value of the statement-level ``LIMIT`` in the original text.
+def _top_level_limit_index(tokens: list[Token]) -> int | None:
+    """Return the index of the statement-level ``LIMIT`` keyword, if there is one.
 
-    Returns ``(start, end, value)`` as character offsets of the token right after the
-    first depth-0 ``LIMIT`` keyword, with ``value`` set only when that token is an
-    integer literal (``LIMIT ALL`` yields ``None``). ``LIMIT`` inside parentheses
-    belongs to a subquery or a CTE and is left alone.
+    A ``LIMIT`` inside parentheses belongs to a subquery or a CTE and is left alone.
     """
     depth = 0
     for index, tok in enumerate(tokens):
@@ -73,12 +70,49 @@ def _top_level_limit_span(tokens: list[Token]) -> tuple[int, int, int | None] | 
             depth += 1
         elif tok.token_type is TokenType.R_PAREN:
             depth -= 1
-        elif tok.token_type is TokenType.LIMIT and depth == 0 and index + 1 < len(tokens):
-            value_tok = tokens[index + 1]
-            is_int = value_tok.token_type is TokenType.NUMBER and value_tok.text.isdigit()
-            value = int(value_tok.text) if is_int else None
-            return (value_tok.start, value_tok.end + 1, value)
+        elif tok.token_type is TokenType.LIMIT and depth == 0:
+            return index
     return None
+
+
+def _limit_value_span(
+    tokens: list[Token],
+    limit_index: int,
+    limit: exp.Limit | None,
+) -> tuple[int, int, int | None]:
+    """Return ``(start, end, row_count)`` for a ``LIMIT`` whose value is a single token.
+
+    ``row_count`` is ``None`` for ``LIMIT ALL`` (unbounded). The offsets are returned only
+    when the token right after ``LIMIT`` is provably the **whole** value: either the parse
+    tree says the row count is an integer literal and that token spells exactly it, or the
+    tree carries no row count at all and the token is the ``ALL`` keyword (sqlglot parses
+    ``LIMIT ALL`` away). Every other shape is rejected instead of rewritten: an in-place
+    rewrite by offset cannot cover an arbitrary expression, and a span that guesses where
+    the expression ends turns ``LIMIT (1 + 2)`` into ``LIMIT 101 + 2)``.
+    """
+    if limit_index + 1 >= len(tokens):
+        raise _limit_not_a_literal()
+    value_tok = tokens[limit_index + 1]
+    span = (value_tok.start, value_tok.end + 1)
+    if limit is None:
+        if value_tok.token_type is TokenType.ALL:
+            return (*span, None)
+        raise _limit_not_a_literal()
+    count = limit.expression
+    if (
+        isinstance(count, exp.Literal)
+        and not count.is_string
+        and value_tok.token_type is TokenType.NUMBER
+        and value_tok.text.isdigit()
+        and value_tok.text == str(count.this)
+    ):
+        return (*span, int(value_tok.text))
+    raise _limit_not_a_literal()
+
+
+def _limit_not_a_literal() -> GuardRejectedError:
+    """Refuse to bound a statement whose ``LIMIT`` cannot be rewritten token by token."""
+    return GuardRejectedError(code="LIMIT_NOT_A_LITERAL")
 
 
 def inject_limit(sql: str, max_rows: int) -> str:
@@ -92,20 +126,28 @@ def inject_limit(sql: str, max_rows: int) -> str:
     ``POSITION``, ``LAST_DAY`` to a ``DATE_TRUNC`` expression, dropped ``NULLS LAST``)
     and, because the limit literal was read from the wrong argument, silently raised a
     caller's ``LIMIT 3`` to ``max_rows`` (issue #137).
+
+    Raises ``GuardRejectedError`` when the statement carries a ``LIMIT`` whose value is
+    not a single-token integer literal (nor ``ALL``): such a statement cannot be bounded
+    by an in-place rewrite, and running it unbounded is not an option.
     """
     expr = sqlglot.parse_one(sql, read="postgres")
     if not isinstance(expr, (exp.Select, exp.Union)):
         raise ValueError("inject_limit expects a SELECT or UNION statement")
     tokens = sqlglot.tokenize(sql, read="postgres")
-    body = _statement_body(sql, tokens)
-    span = _top_level_limit_span(tokens)
-    if span is None:
+    limit_index = _top_level_limit_index(tokens)
+    if limit_index is None:
         # A newline, not a space: a trailing line comment would swallow the clause.
-        return f"{body}\nLIMIT {max_rows}"
-    start, end, current = span
+        return f"{_statement_body(sql, tokens)}\nLIMIT {max_rows}"
+    limit = expr.args.get("limit")
+    start, end, current = _limit_value_span(
+        tokens,
+        limit_index,
+        limit if isinstance(limit, exp.Limit) else None,
+    )
     if current is not None and current <= max_rows:
-        return body
-    return f"{body[:start]}{max_rows}{body[end:]}"
+        return sql
+    return f"{sql[:start]}{max_rows}{sql[end:]}"
 
 
 def execute_select(

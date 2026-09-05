@@ -49,3 +49,12 @@ def test_issue137_netezza_functions_reach_the_engine(sql: str, expected: str) ->
 def test_issue137_trailing_semicolon_still_runs() -> None:
     out = nz_query_select(QuerySelectInput(sql="SELECT TABLENAME FROM _V_TABLE;", max_rows=5))
     assert out.row_count == 5
+
+
+@_SKIP
+def test_issue137_untouched_statement_keeps_its_semicolon() -> None:
+    """The engine accepts the trailing ``;`` that the untouched text carries along."""
+    out = nz_query_select(
+        QuerySelectInput(sql="SELECT TABLENAME FROM _V_TABLE LIMIT 3 ;  ", max_rows=100)
+    )
+    assert out.row_count == 3

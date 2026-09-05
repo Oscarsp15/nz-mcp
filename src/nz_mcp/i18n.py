@@ -60,6 +60,20 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "La tool '{tool}' no acepta sentencias del tipo '{kind}'.",
         "en": "Tool '{tool}' does not accept '{kind}' statements.",
     },
+    "GUARD_REJECTED.LIMIT_NOT_A_LITERAL": {
+        "es": (
+            "El LIMIT de la consulta tiene que ser un literal entero o ALL. nz-mcp acota "
+            "el resultado reescribiendo ese valor sobre el SQL original, y no puede "
+            "hacerlo con una expresión calculada ni con un parámetro: sustitúyelo por un "
+            "número (por ejemplo LIMIT 100) y repite la llamada."
+        ),
+        "en": (
+            "The query's LIMIT must be an integer literal or ALL. nz-mcp bounds the result "
+            "by rewriting that value in the original SQL, and cannot do so for a computed "
+            "expression or a parameter: replace it with a number (for example LIMIT 100) "
+            "and call again."
+        ),
+    },
     "GUARD_REJECTED.CATALOG_OVERRIDE_REJECTED": {
         "es": (
             "El override de catálogo '{query_id}' del perfil '{profile}' no es una consulta "

@@ -52,10 +52,29 @@ deja de re-serializar el árbol:
    paréntesis 0; los `LIMIT` de subconsultas y CTE no se tocan).
 2. Sin `LIMIT` propio → se **añade** ` LIMIT n` al final del texto original, en una línea
    nueva (un comentario `--` final se tragaría la cláusula en la misma línea).
-3. Con `LIMIT` propio menor o igual que `max_rows` → el SQL se devuelve **intacto**.
-4. Con `LIMIT` propio mayor, o `LIMIT ALL` → se reescribe **solo el literal**, usando los
-   offsets del token en el texto original. `OFFSET` y el resto de la sentencia sobreviven.
-5. Un `;` final se recorta antes de anexar (el guard lo acepta y Netezza no lo necesita).
+3. Con `LIMIT` propio menor o igual que `max_rows` → el SQL se devuelve **byte a byte**,
+   incluidos el `;` y los espacios finales que traiga.
+4. Con `LIMIT` propio mayor, o `LIMIT ALL` → se reescribe **solo el token del valor**,
+   usando sus offsets en el texto original. `OFFSET`, el `;` final y el resto de la
+   sentencia sobreviven.
+5. Un `;` final se recorta **solo** cuando hay que anexar la cláusula (caso 2): un
+   `LIMIT n` después del `;` no sería la misma sentencia. Es la única forma en que el
+   texto ejecutado difiere del validado más allá del valor del `LIMIT`.
+6. El valor del `LIMIT` tiene que ser **un único token**: o el árbol dice que es un
+   literal entero y el token siguiente al `LIMIT` lo escribe exactamente, o el árbol no
+   trae valor y el token es `ALL` (`sqlglot` se come el `LIMIT ALL` al parsear).
+   Cualquier otra forma —`LIMIT (1 + 2)`, `LIMIT (SELECT n)`, `LIMIT $1`, `LIMIT 3.0`, el
+   `LIMIT offset, count` de MySQL que Netezza también acepta— se **rechaza** con
+   `GuardRejectedError(code="LIMIT_NOT_A_LITERAL")`.
+
+El punto 6 es la parte defensiva del diseño. Una reescritura por offset solo es correcta si
+el span cubre **toda** la expresión del valor, y el fin de una expresión arbitraria no se
+puede deducir de la posición del token siguiente: la primera versión de este cambio tomaba
+el token posterior al `LIMIT` y convertía `SELECT a FROM t LIMIT (1+2)` con `max_rows=10` en
+`SELECT a FROM t LIMIT 101+2)`, SQL malformado que habría llegado al motor. Entre adivinar y
+rechazar, se rechaza: la consulta no se acota mal ni se ejecuta sin acotar, y el mensaje
+(ES/EN) dice qué escribir en su lugar. El caso es marginal —un `LIMIT` calculado no es algo
+que un asistente escriba por accidente— y el coste de rechazarlo es una llamada más.
 
 ## Alternativas descartadas
 
@@ -64,7 +83,12 @@ deja de re-serializar el árbol:
   para SQL arbitrario no es un objetivo alcanzable ni necesario aquí.
 - **Envolver la query (`SELECT * FROM (<sql>) t LIMIT n`)**: preserva el texto pero cambia
   la sentencia (proyecciones duplicadas, `ORDER BY` dentro de una tabla derivada) y hace
-  el SQL menos legible en los logs de Netezza.
+  el SQL menos legible en los logs de Netezza. Tampoco sirve para el `LIMIT` no literal:
+  una tabla derivada exige alias para **todas** las columnas, así que `SELECT MAX(X)` o
+  dos columnas con el mismo nombre fallarían o cambiarían los nombres devueltos.
+- **Adivinar dónde acaba la expresión del `LIMIT`** (leer hasta el siguiente `OFFSET`, `;` o
+  fin de texto): un heurístico sin garantía, que además convierte un error de análisis en
+  SQL malformado enviado al motor. Se prefiere rechazar (punto 6).
 - **No inyectar `LIMIT` y confiar solo en el corte por `max_rows` del streaming**: el corte
   cliente ya existe, pero perder el `LIMIT` quita a Netezza la única pista para no
   materializar el resultado completo.
@@ -77,4 +101,7 @@ deja de re-serializar el árbol:
   (cambio observable).
 - La salida de `inject_limit` deja de estar normalizada; los tests comparan contra el texto
   original más la cláusula, no contra una forma canónica.
+- Aparece un código de error nuevo, `LIMIT_NOT_A_LITERAL` (familia `GuardRejectedError`, ya
+  declarada en el contrato de `nz_query_select`), con mensaje ES/EN en el catálogo i18n.
+  Antes esas consultas se ejecutaban con el `LIMIT` sustituido por `max_rows`.
 - `sqlglot` sigue siendo la única dependencia de parseo. No se añade ninguna.
