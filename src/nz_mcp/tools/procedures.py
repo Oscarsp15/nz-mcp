@@ -7,8 +7,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from nz_mcp.catalog.execute import RESPONSE_BYTES_CAP
 from nz_mcp.catalog.nzplsql_parser import StatementKind, strip_comments
 from nz_mcp.catalog.procedures import (
+    PROCEDURE_SECTION_MAX_LINES,
     describe_procedure,
     find_table_references,
     get_all_procedures_ddl,
@@ -17,9 +19,11 @@ from nz_mcp.catalog.procedures import (
     get_procedure_size,
     get_procedure_table_logic,
     list_procedures,
+    truncate_procedure_ddl,
 )
-from nz_mcp.config import get_active_profile
+from nz_mcp.config import MAX_ROWS_CAP, get_active_profile
 from nz_mcp.errors import ResponseTooLargeError
+from nz_mcp.i18n import t
 from nz_mcp.tools.registry import tool
 from nz_mcp.tools.timing import monotonic_duration_ms, monotonic_start
 
@@ -32,6 +36,13 @@ PROC_DDL_LARGE_WARNING: str = (
 # Hard cap for the structured response of nz_get_procedure_table_logic (issue #109).
 PROC_TABLE_LOGIC_MAX_RESPONSE_BYTES: int = 200 * 1024
 
+# Truncation budget for nz_get_procedure_ddl (issue #165, ADR 0018). The default
+# matches the response cap every other read tool already honours; the ceiling
+# matches the largest response cap already accepted in this module.
+PROC_DDL_DEFAULT_MAX_BYTES: int = RESPONSE_BYTES_CAP
+PROC_DDL_MAX_BYTES_CAP: int = PROC_TABLE_LOGIC_MAX_RESPONSE_BYTES
+PROC_DDL_MIN_MAX_BYTES: int = 1024
+
 
 class ListProceduresInput(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -42,6 +53,15 @@ class ListProceduresInput(BaseModel):
         max_length=128,
     )
     pattern: str | None = Field(default=None, min_length=1, max_length=128)
+    max_rows: int | None = Field(
+        default=None,
+        ge=1,
+        le=MAX_ROWS_CAP,
+        description=(
+            "Maximum number of procedures to return. Defaults to the active profile's "
+            "max_rows_default; always capped at MAX_ROWS_CAP."
+        ),
+    )
 
 
 class ProcedureListItem(BaseModel):
@@ -56,6 +76,14 @@ class ProcedureListItem(BaseModel):
 class ListProceduresOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     procedures: list[ProcedureListItem]
+    truncated: bool = Field(
+        default=False,
+        description="True when the schema holds more procedures than max_rows.",
+    )
+    hint: str | None = Field(
+        default=None,
+        description="Localized guidance on how to reach the procedures left out.",
+    )
     duration_ms: int = Field(ge=0, description="Wall time to run the catalog query (milliseconds).")
 
 
@@ -111,6 +139,15 @@ class GetProcedureDdlInput(BaseModel):
             "for token-efficient AI reasoning."
         ),
     )
+    max_bytes: int = Field(
+        default=PROC_DDL_DEFAULT_MAX_BYTES,
+        ge=PROC_DDL_MIN_MAX_BYTES,
+        le=PROC_DDL_MAX_BYTES_CAP,
+        description=(
+            "Hard cap in UTF-8 bytes for the returned DDL. The text is cut on line "
+            "boundaries and a hint points at nz_get_procedure_section for the rest."
+        ),
+    )
 
 
 class GetProcedureDdlOutput(BaseModel):
@@ -131,6 +168,14 @@ class GetProcedureDdlOutput(BaseModel):
     warning: str | None = Field(
         default=None,
         description="Set when the returned DDL exceeds ~100 KB; prefer nz_get_procedure_section.",
+    )
+    truncated: bool = Field(
+        default=False,
+        description="True when the DDL was cut because it exceeded max_bytes.",
+    )
+    hint: str | None = Field(
+        default=None,
+        description="Localized guidance on how to read the part left out when truncated.",
     )
     duration_ms: int = Field(ge=0, description="Wall time to build DDL (milliseconds.)")
 
@@ -223,7 +268,9 @@ class GetProceduresDdlBatchOutput(BaseModel):
     name="nz_list_procedures",
     description=(
         "List stored procedures in a Netezza schema via _V_PROCEDURE. "
-        "Use to discover procedure names before describing or fetching DDL."
+        "Use to discover procedure names before describing or fetching DDL. "
+        "The result is capped by max_rows (profile default); when truncated, "
+        "narrow the search with pattern instead of raising max_rows blindly."
     ),
     mode="read",
     input_model=ListProceduresInput,
@@ -237,11 +284,20 @@ def nz_list_procedures(
 ) -> ListProceduresOutput:
     start = monotonic_start()
     profile = get_active_profile(path=config_path)
+    requested = params.max_rows if params.max_rows is not None else profile.max_rows_default
+    max_rows = min(requested, MAX_ROWS_CAP)
     rows = list_procedures(
         profile,
         database=params.database,
         schema=params.procedure_schema,
         pattern=params.pattern,
+    )
+    total = len(rows)
+    truncated = total > max_rows
+    hint = (
+        t("HINT.PROCEDURE_LIST_TRUNCATED", None, n=max_rows, total=total, cap=MAX_ROWS_CAP)
+        if truncated
+        else None
     )
     return ListProceduresOutput(
         procedures=[
@@ -252,8 +308,10 @@ def nz_list_procedures(
                 arguments=r["arguments"],
                 returns=r["returns"],
             )
-            for r in rows
+            for r in rows[:max_rows]
         ],
+        truncated=truncated,
+        hint=hint,
         duration_ms=monotonic_duration_ms(start),
     )
 
@@ -297,13 +355,35 @@ def nz_describe_procedure(
     )
 
 
+def _ddl_truncation_hint(
+    returned_bytes: int,
+    total_bytes: int,
+    max_bytes: int,
+    resume_line: int,
+) -> str | None:
+    """Build the localized hint that routes the caller to the section tools."""
+    if resume_line <= 0:
+        return None
+    return t(
+        "HINT.PROCEDURE_DDL_TRUNCATED",
+        None,
+        returned_kb=returned_bytes // 1024,
+        total_kb=total_bytes // 1024,
+        max_kb=max_bytes // 1024,
+        from_line=resume_line,
+        to_line=resume_line + PROCEDURE_SECTION_MAX_LINES - 1,
+        step=PROCEDURE_SECTION_MAX_LINES,
+    )
+
+
 @tool(
     name="nz_get_procedure_ddl",
     description=(
         "Return CREATE OR REPLACE PROCEDURE DDL from catalog. Use variant='clean' to strip "
         "comments for token-efficient reasoning; 'raw' (default) preserves full source. "
-        "Always returns size_bytes_raw and size_bytes_clean. For very large procedures "
-        "prefer nz_get_procedure_section."
+        "Always returns size_bytes_raw and size_bytes_clean. The DDL is truncated at "
+        "max_bytes (~100 KB by default); when truncated, follow the returned hint and "
+        "read the rest with nz_get_procedure_section."
     ),
     mode="read",
     input_model=GetProcedureDdlInput,
@@ -328,8 +408,20 @@ def nz_get_procedure_ddl(
     size_bytes_raw = len(ddl_raw.encode("utf-8"))
     size_bytes_clean = len(ddl_clean.encode("utf-8"))
 
-    ddl = ddl_clean if params.variant == "clean" else ddl_raw
-    size_b = size_bytes_clean if params.variant == "clean" else size_bytes_raw
+    is_clean = params.variant == "clean"
+    full = ddl_clean if is_clean else ddl_raw
+    full_bytes = size_bytes_clean if is_clean else size_bytes_raw
+
+    if full_bytes <= params.max_bytes:
+        ddl, resume_line = full, 0
+    else:
+        # The budget is spent on the raw prefix even for variant='clean' so the
+        # resume line stays valid against PROCEDURESOURCE numbering. Stripping
+        # comments afterwards can only shrink the payload, never overflow it.
+        cut, resume_line = truncate_procedure_ddl(ddl_raw, params.max_bytes)
+        ddl = strip_comments(cut) if is_clean else cut
+
+    size_b = len(ddl.encode("utf-8"))
     warn = PROC_DDL_LARGE_WARNING if size_b > PROC_DDL_WARN_BYTES else None
     return GetProcedureDdlOutput(
         ddl=ddl,
@@ -337,6 +429,8 @@ def nz_get_procedure_ddl(
         size_bytes_raw=size_bytes_raw,
         size_bytes_clean=size_bytes_clean,
         warning=warn,
+        truncated=resume_line > 0,
+        hint=_ddl_truncation_hint(size_b, full_bytes, params.max_bytes, resume_line),
         duration_ms=monotonic_duration_ms(start),
     )
 

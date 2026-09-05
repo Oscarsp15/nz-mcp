@@ -11,7 +11,8 @@
 
 - **`duration_ms`**: entero ≥ 0; tiempo de pared en milisegundos para la mayoría de tools de lectura que abren sesión a Netezza (`nz_list_*`, `nz_describe_*`, `nz_get_*_ddl`, `nz_get_procedure_*`, etc.; también `nz_query_select` / `nz_table_sample`).
 - **`nz_table_stats`**: `skew_class` (`balanced` \| `moderate` \| `severe`) según umbrales documentados en código; `stats_last_analyzed` desde `_v_statistic` cuando exista fila/columna.
-- **`nz_get_procedure_ddl`**: `size_bytes` (UTF-8), `warning` si el DDL supera ~100 KB (sin truncar).
+- **`nz_get_procedure_ddl`**: `size_bytes` (UTF-8) del texto devuelto, `truncated` + `hint` cuando el DDL supera `max_bytes` (default ~100 KB), `warning` cuando el texto devuelto supera ~100 KB (solo posible si se sube `max_bytes`). Ver ADR 0018.
+- **`nz_list_procedures`**: `max_rows` opcional (default = `max_rows_default` del perfil, cap `MAX_ROWS_CAP` = 1000); `truncated` + `hint` cuando el esquema tiene más procedimientos que `max_rows`. Ver ADR 0018.
 - **`nz_get_table_ddl`**: `notes` lista de cadenas i18n; `reconstructed` indica reconstrucción desde catálogo.
 - **`nz_export_ddl`**: respuesta MCP con `content` (bloques `EmbeddedResource` `text/sql` + `TextContent` resumen) y `meta` (incluye `resource_uri` `nz-mcp://ddl/...`, `duration_ms`, y campos opcionales alineados con table/view/procedure). Cuando se pasa `output_path`, `meta` añade `output_path`, `bytes_written`, `sha256` del archivo escrito, `preview`, `resource_in_response` y `header_included`; por default el `EmbeddedResource` se **omite** del response y el archivo lleva un header `SET CATALOG <db>;` (ver § 29).
 - **CLI**: `nz-mcp edit-profile` actualiza campos de un perfil existente (sin password).
@@ -265,6 +266,7 @@ Lista procedimientos almacenados.
 | `database` | string (required) | |
 | `schema` | string (required) | |
 | `pattern` | string (optional) | Filtro `LIKE` por nombre. Match case-insensitive. |
+| `max_rows` | int (optional, 1..1000) | Máximo de procedimientos devueltos. Default = `max_rows_default` del perfil (100); siempre acotado a `MAX_ROWS_CAP` (1000). |
 
 **Output**:
 ```json
@@ -277,9 +279,15 @@ Lista procedimientos almacenados.
       "arguments": "(VARCHAR, INTEGER)",
       "returns": "INTEGER"
     }
-  ]
+  ],
+  "truncated": false,
+  "hint": null,
+  "duration_ms": 42
 }
 ```
+
+- `truncated` — `true` cuando el esquema tiene más procedimientos que `max_rows`; la lista se corta a `max_rows` conservando el orden del catálogo.
+- `hint` — i18n (ES/EN) presente solo si `truncated`; indica el total real y cómo llegar al resto (acotar con `pattern` o subir `max_rows`).
 
 Source: `_v_procedure`.
 
@@ -349,6 +357,7 @@ Devuelve el DDL completo (`CREATE OR REPLACE PROCEDURE ...`).
 | `schema` | string (required) | |
 | `procedure` | string (required) | |
 | `signature` | string (optional) | Para overloads. |
+| `max_bytes` | int (optional, 1024..204800, default 102400) | Tope duro en bytes UTF-8 del `ddl` devuelto. Se corta en frontera de línea. |
 | `variant` | `"raw"` \| `"clean"` (default `"raw"`) | `raw` devuelve el source tal como vive en `_v_procedure` (comentarios incluidos). `clean` elimina comentarios de línea (`--`) y de bloque (`/* … */`) fuera de literales de cadena y de identificadores entrecomillados — optimiza tokens para razonamiento IA. Default `raw` preserva back-compat. |
 
 **Output**:
@@ -359,13 +368,19 @@ Devuelve el DDL completo (`CREATE OR REPLACE PROCEDURE ...`).
   "size_bytes_raw": 4200,
   "size_bytes_clean": 3800,
   "warning": null,
+  "truncated": false,
+  "hint": null,
   "duration_ms": 55
 }
 ```
 
-- `size_bytes` — byte length (UTF-8) del `ddl` devuelto (= `size_bytes_raw` si `variant="raw"`, = `size_bytes_clean` si `variant="clean"`).
-- `size_bytes_raw` y `size_bytes_clean` — siempre presentes en toda llamada, independientemente del `variant`; permiten al cliente decidir la variante antes de cargar el cuerpo completo.
-- `warning` — presente si `size_bytes` > ~100 KB; sugiere usar `nz_get_procedure_section`.
+- `size_bytes` — byte length (UTF-8) del `ddl` **devuelto** (si `truncated=true` es el tamaño del fragmento, no del DDL completo).
+- `size_bytes_raw` y `size_bytes_clean` — tamaño del DDL **completo** en ambas variantes, siempre presentes independientemente del `variant`; permiten al cliente decidir la variante y presupuestar tokens antes de cargar el cuerpo.
+- `truncated` — `true` cuando el DDL completo supera `max_bytes` y se devolvió solo un prefijo.
+- `hint` — i18n (ES/EN) presente solo si `truncated`; remite a `nz_get_procedure_size` y a `nz_get_procedure_section` con `section="range"`, `from_line` y `to_line` concretos (bloques de 500 líneas, numeración de `PROCEDURESOURCE`).
+- `warning` — presente si el texto devuelto supera ~100 KB; solo puede ocurrir si el caller sube `max_bytes` por encima del default.
+
+Con `variant="clean"` y DDL por encima del tope, el recorte se calcula sobre el prefijo **raw** para que `from_line` siga siendo válido contra `PROCEDURESOURCE`; el texto devuelto puede quedar por debajo de `max_bytes` (ADR 0018).
 
 Source: `_v_procedure.PROCEDURESOURCE` + `PROCEDURESIGNATURE`.
 

@@ -150,6 +150,14 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Se alcanzó el límite de tiempo ({timeout_s}s). El resultado puede estar incompleto.",
         "en": "Execution time limit ({timeout_s}s) was reached. The result may be incomplete.",
     },
+    "HINT.PROCEDURE_LIST_TRUNCATED": {
+        "es": "Lista truncada en {n} de {total} procedimientos. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
+        "en": "List truncated at {n} of {total} procedures. Narrow it with 'pattern' or raise 'max_rows' (max {cap}).",
+    },
+    "HINT.PROCEDURE_DDL_TRUNCATED": {
+        "es": "DDL truncado a {returned_kb} KB de {total_kb} KB (tope max_bytes={max_kb} KB). Llama a nz_get_procedure_size para dimensionar el SP y lee el resto con nz_get_procedure_section(section='range', from_line={from_line}, to_line={to_line}), avanzando de {step} en {step} líneas.",
+        "en": "DDL truncated to {returned_kb} KB of {total_kb} KB (max_bytes cap {max_kb} KB). Call nz_get_procedure_size to size the SP up and read the rest with nz_get_procedure_section(section='range', from_line={from_line}, to_line={to_line}), advancing {step} lines at a time.",
+    },
     "NOTE.DDL_RECONSTRUCTED": {
         "es": "DDL reconstruido desde catálogo (SHOW TABLE no disponible en este servidor).",
         "en": "DDL reconstructed from catalogs (SHOW TABLE not available on this server).",

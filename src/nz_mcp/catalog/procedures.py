@@ -32,7 +32,9 @@ from nz_mcp.errors import (
 )
 from nz_mcp.logging_utils import sanitize
 
-_MAX_RANGE_LINES: Final[int] = 500
+# Maximum number of raw source lines returned by ``nz_get_procedure_section``
+# when ``section="range"``. Public because truncation hints elsewhere quote it.
+PROCEDURE_SECTION_MAX_LINES: Final[int] = 500
 _MIN_TOKENS_NAMED_ARG: Final[int] = 2
 
 _ROW_LIST_MIN: Final[int] = 6
@@ -160,6 +162,44 @@ def get_procedure_ddl(
     return _build_procedure_ddl(schema, row)
 
 
+# Line that closes the reconstructed DDL header built by ``_build_procedure_ddl``.
+# Everything after it is verbatim ``PROCEDURESOURCE``, so counting the newlines up
+# to it yields the offset between DDL line numbers and source line numbers.
+_DDL_SOURCE_MARKER: Final[str] = "\nLANGUAGE NZPLSQL AS\n"
+
+
+def truncate_procedure_ddl(ddl: str, max_bytes: int) -> tuple[str, int]:
+    """Cut ``ddl`` down to ``max_bytes`` UTF-8 bytes on raw source line boundaries.
+
+    Returns ``(text, resume_line)`` where ``resume_line`` is the 1-indexed
+    ``PROCEDURESOURCE`` line the caller must continue from with
+    ``nz_get_procedure_section``; it is ``0`` when nothing was dropped.
+
+    Cutting on line boundaries (instead of raw bytes) keeps the returned text
+    readable and lets the resume line be exact.
+    """
+    if len(ddl.encode("utf-8")) <= max_bytes:
+        return ddl, 0
+
+    marker_at = ddl.find(_DDL_SOURCE_MARKER)
+    header_lines = 0 if marker_at < 0 else ddl.count("\n", 0, marker_at + len(_DDL_SOURCE_MARKER))
+
+    kept: list[str] = []
+    used = 0
+    for line in ddl.splitlines(keepends=True):
+        size = len(line.encode("utf-8"))
+        if used + size > max_bytes:
+            break
+        kept.append(line)
+        used += size
+
+    if not kept:
+        # Minified procedure: a single line already exceeds the budget.
+        return ddl.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore"), 1
+
+    return "".join(kept), max(1, len(kept) - header_lines + 1)
+
+
 def get_procedure_size(
     profile: Profile,
     database: str,
@@ -262,8 +302,8 @@ def get_procedure_section(
             )
         if from_line < 1 or to_line < from_line:
             raise InvalidInputError(detail="Invalid line range for section 'range'.")
-        truncated = (to_line - from_line + 1) > _MAX_RANGE_LINES
-        eff_to = min(to_line, from_line + _MAX_RANGE_LINES - 1) if truncated else to_line
+        truncated = (to_line - from_line + 1) > PROCEDURE_SECTION_MAX_LINES
+        eff_to = min(to_line, from_line + PROCEDURE_SECTION_MAX_LINES - 1) if truncated else to_line
         content = line_slice(source, from_line, eff_to)
         return {
             "section": "range",
