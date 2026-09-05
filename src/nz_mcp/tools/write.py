@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -16,6 +16,17 @@ from nz_mcp.catalog.write import (
 from nz_mcp.config import get_active_profile
 from nz_mcp.tools.registry import tool
 
+# ``on_conflict="skip"`` was removed: Netezza does not enforce UNIQUE / PRIMARY KEY
+# constraints, so a duplicate INSERT never raises and nothing was ever skipped. The
+# message points at the composition that does work (docs/adr/0025-on-conflict-skip-eliminado.md).
+_SKIP_REMOVED_MESSAGE: Final[str] = (
+    "on_conflict='skip' is not supported. Netezza does not enforce UNIQUE or PRIMARY KEY "
+    "constraints, so a duplicate INSERT never fails and no row would ever be skipped. "
+    "To insert only the rows that are not there yet, use nz_insert_select with an explicit "
+    "anti-join: SELECT ... FROM source s WHERE NOT EXISTS "
+    "(SELECT 1 FROM schema.target t WHERE t.key = s.key)."
+)
+
 
 class InsertInput(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -23,9 +34,22 @@ class InsertInput(BaseModel):
     table_schema: str = Field(alias="schema", min_length=1, max_length=128)
     table: str = Field(min_length=1, max_length=128)
     rows: list[dict[str, Any]]
-    on_conflict: Literal["error", "skip"] = "error"
+    on_conflict: Literal["error"] = Field(
+        default="error",
+        description=(
+            "Only 'error' is supported: a failing INSERT aborts the whole call. Netezza "
+            "does not enforce uniqueness, so there is no conflict to skip."
+        ),
+    )
     dry_run: bool = True
     confirm: bool = False
+
+    @field_validator("on_conflict", mode="before")
+    @classmethod
+    def reject_removed_skip(cls, v: object) -> object:
+        if isinstance(v, str) and v.strip().lower() == "skip":
+            raise ValueError(_SKIP_REMOVED_MESSAGE)
+        return v
 
 
 class InsertOutput(BaseModel):
@@ -171,7 +195,6 @@ def nz_insert(
         schema=params.table_schema,
         table=params.table,
         rows=list(params.rows),
-        on_conflict=params.on_conflict,
         dry_run=params.dry_run,
         confirm=params.confirm,
     )

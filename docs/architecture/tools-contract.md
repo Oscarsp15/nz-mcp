@@ -553,7 +553,7 @@ Implementación: usa una sola query al catálogo `_V_PROCEDURE` por schema. Emit
 | `schema` | string (required) | |
 | `table` | string (required) | |
 | `rows` | array of objects (required) | Cada objeto es `{columna: valor}`. |
-| `on_conflict` | enum: `error` \| `skip` (default `error`) | |
+| `on_conflict` | enum: `error` (default `error`) | Único valor admitido. `skip` se eliminó: Netezza no impone `UNIQUE` ni `PRIMARY KEY`, así que un `INSERT` duplicado nunca falla y no había nada que saltar (ADR 0025). Para insertar solo lo que falta, usa `nz_insert_select` con un anti-join `WHERE NOT EXISTS (...)`. |
 | `dry_run` | bool (default **true**) | Valida el `INSERT` sin ejecutarlo; devuelve `would_insert`. |
 | `confirm` | bool (**required if** `dry_run=false`) | Debe ser `true` para ejecutar cuando `dry_run=false`. |
 
@@ -563,7 +563,7 @@ Implementación: usa una sola query al catálogo `_V_PROCEDURE` por schema. Emit
 
 Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 
-Implementación: `INSERT INTO ... VALUES (...)` parametrizado. **Prohibido** construir SQL por concatenación de strings de valores (identificadores validados con el validador de catálogo).
+Implementación: una única sentencia parametrizada `INSERT INTO ... (cols) SELECT ? ... UNION ALL SELECT ? ...` (Netezza rechaza las listas `VALUES` multi-fila, issue #133). **Prohibido** construir SQL por concatenación de strings de valores (identificadores validados con el validador de catálogo).
 
 ---
 
