@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from nz_mcp.server import call_tool
 from nz_mcp.tools.write import (
@@ -92,6 +93,42 @@ def test_nz_insert_dry_run_mocked(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     )
     assert out.dry_run is True
     assert out.would_insert == 3
+
+
+def test_nz_insert_rejects_removed_on_conflict_skip() -> None:
+    """Issue #134: ``skip`` never skipped anything; the rejection says why and what to use."""
+    with pytest.raises(ValidationError) as ei:
+        # A caller from an old client sends the removed value; not typeable on purpose.
+        InsertInput.model_validate(
+            {
+                "database": "DEV",
+                "schema": "PUBLIC",
+                "table": "T",
+                "rows": [{"A": 1}],
+                "on_conflict": "skip",
+            },
+        )
+    detail = str(ei.value)
+    assert "does not enforce UNIQUE" in detail
+    assert "nz_insert_select" in detail
+
+
+def test_nz_insert_accepts_on_conflict_error() -> None:
+    params = InsertInput(
+        database="DEV",
+        table_schema="PUBLIC",
+        table="T",
+        rows=[{"A": 1}],
+        on_conflict="error",
+    )
+    assert params.on_conflict == "error"
+
+
+def test_nz_insert_schema_no_longer_offers_skip() -> None:
+    """The advertised schema must not tempt a model with an option that does nothing."""
+    prop = InsertInput.model_json_schema()["properties"]["on_conflict"]
+    allowed = prop.get("enum", [prop["const"]] if "const" in prop else [])
+    assert allowed == ["error"]
 
 
 def test_nz_update_output_dry_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

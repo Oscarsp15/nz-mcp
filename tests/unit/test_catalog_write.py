@@ -32,18 +32,13 @@ def _mock_conn(cursor: MagicMock) -> MagicMock:
 
 def test_execute_insert_empty_rows() -> None:
     with pytest.raises(InvalidInputError):
-        execute_insert(_PROFILE, "DEV", "PUBLIC", "T", [], on_conflict="error")
+        execute_insert(_PROFILE, "DEV", "PUBLIC", "T", [])
 
 
 def test_execute_insert_too_many_rows() -> None:
     rows = [{"A": 1} for _ in range(501)]
     with pytest.raises(InvalidInputError):
-        execute_insert(_PROFILE, "DEV", "PUBLIC", "T", rows, on_conflict="error")
-
-
-def test_execute_insert_on_conflict_invalid() -> None:
-    with pytest.raises(InvalidInputError):
-        execute_insert(_PROFILE, "DEV", "PUBLIC", "T", [{"A": 1}], on_conflict="bogus")
+        execute_insert(_PROFILE, "DEV", "PUBLIC", "T", rows)
 
 
 def test_execute_insert_row_key_mismatch() -> None:
@@ -54,7 +49,6 @@ def test_execute_insert_row_key_mismatch() -> None:
             "PUBLIC",
             "T",
             [{"A": 1}, {"A": 1, "B": 2}],
-            on_conflict="error",
         )
 
 
@@ -70,7 +64,6 @@ def test_execute_insert_batch_error_path(monkeypatch: pytest.MonkeyPatch) -> Non
         "PUBLIC",
         "TAB",
         rows,
-        on_conflict="error",
         dry_run=False,
         confirm=True,
     )
@@ -143,7 +136,6 @@ def test_database_mismatch() -> None:
             "PUBLIC",
             "T",
             [{"A": 1}],
-            on_conflict="error",
         )
 
 
@@ -207,31 +199,26 @@ def test_run_scalar_count_dict_row(monkeypatch: pytest.MonkeyPatch) -> None:
     assert n == 42
 
 
-def test_execute_insert_skip_ignores_duplicate(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_execute_insert_sends_one_statement_for_all_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #134: there is no per-row retry loop left; one INSERT carries every row."""
     cursor = MagicMock()
     conn = _mock_conn(cursor)
-
-    def _exec(sql: str, params: tuple[Any, ...] | None = None) -> None:
-        if "INSERT" in sql and params and params[0] == 2:
-            msg = "duplicate key value violates unique constraint"
-            raise OSError(msg)
-
-    cursor.execute.side_effect = _exec
-
     monkeypatch.setattr("nz_mcp.catalog.write.get_password", lambda _n: "pw")
     monkeypatch.setattr("nz_mcp.catalog.write.open_connection", lambda *_a, **_k: conn)
-    rows = [{"A": 1}, {"A": 2}]
+
     out = execute_insert(
         _PROFILE,
         "DEV",
         "PUBLIC",
         "TAB",
-        rows,
-        on_conflict="skip",
+        [{"A": 1}, {"A": 2}],
         dry_run=False,
         confirm=True,
     )
-    assert out["inserted"] == 1
+    assert out["inserted"] == 2
+    assert cursor.execute.call_count == 1
 
 
 class _NetezzaLikeCursor:
@@ -278,7 +265,6 @@ def test_execute_insert_multirow_uses_union_all_not_values_list(
         "PUBLIC",
         "TAB",
         rows,
-        on_conflict="error",
         dry_run=False,
         confirm=True,
     )
@@ -302,7 +288,6 @@ def test_execute_insert_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
         "PUBLIC",
         "TAB",
         [{"A": 1}],
-        on_conflict="error",
         dry_run=True,
         confirm=False,
     )
@@ -320,7 +305,6 @@ def test_execute_insert_confirm_required(monkeypatch: pytest.MonkeyPatch) -> Non
             "PUBLIC",
             "TAB",
             [{"A": 1}],
-            on_conflict="error",
             dry_run=False,
             confirm=False,
         )

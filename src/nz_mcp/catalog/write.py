@@ -63,23 +63,22 @@ def _insert_select_warnings(select_sql: str, target_columns: list[str] | None) -
     return warnings
 
 
-def _is_duplicate_row_error(exc: BaseException) -> bool:
-    msg = str(exc).lower()
-    return "duplicate" in msg or "unique" in msg or "23505" in msg
-
-
-def execute_insert(  # noqa: PLR0912, PLR0915
+def execute_insert(
     profile: Profile,
     database: str,
     schema: str,
     table: str,
     rows: list[dict[str, Any]],
     *,
-    on_conflict: str,
     dry_run: bool = False,
     confirm: bool = False,
 ) -> dict[str, Any]:
-    """Run ``INSERT`` with ``?`` placeholders; ``on_conflict`` is ``error`` or ``skip``."""
+    """Run a single parameterized ``INSERT`` with ``?`` placeholders for every row.
+
+    There is no conflict handling: Netezza does not enforce ``UNIQUE`` / ``PRIMARY KEY``
+    constraints, so an insert never fails on a duplicate and there is nothing to skip
+    (see docs/adr/0025-on-conflict-skip-eliminado.md).
+    """
     _ensure_session_database(profile, database)
     if not rows:
         raise InvalidInputError(detail="rows must contain at least one object for nz_insert.")
@@ -87,9 +86,6 @@ def execute_insert(  # noqa: PLR0912, PLR0915
         raise InvalidInputError(
             detail=f"Too many rows in one call (max {_MAX_INSERT_ROWS}).",
         )
-    if on_conflict not in ("error", "skip"):
-        raise InvalidInputError(detail="on_conflict must be 'error' or 'skip'.")
-
     first_keys = sorted(rows[0].keys())
     for i, row in enumerate(rows):
         keys = sorted(row.keys())
@@ -100,7 +96,6 @@ def execute_insert(  # noqa: PLR0912, PLR0915
 
     cols = [_validate_column_name(k) for k in first_keys]
     qual = _qualified_table(schema, table)
-    placeholders = "(" + ", ".join(["?"] * len(cols)) + ")"
     # Netezza rejects multi-row "VALUES (..),(..)" lists (issue #133). Insert
     # every row in a single atomic statement via INSERT ... SELECT ? UNION ALL,
     # the idiomatic multi-row form for Netezza.
@@ -141,28 +136,8 @@ def execute_insert(  # noqa: PLR0912, PLR0915
     start = time.monotonic()
     try:
         with closing(connection.cursor()) as cursor:
-            if on_conflict == "error":
-                cursor.execute(parsed.raw, params_tuple)
-                inserted = len(rows)
-            else:
-                inserted = 0
-                single_sql = f"INSERT INTO {qual} ({', '.join(cols)}) VALUES {placeholders}"  # noqa: S608
-                single_parsed = guard_validate(single_sql, mode="write")
-                for row in rows:
-                    p = tuple(row[k] for k in first_keys)
-                    try:
-                        cursor.execute(single_parsed.raw, p)
-                        inserted += 1
-                    except Exception as exc:  # noqa: BLE001, RUF100
-                        if _is_duplicate_row_error(exc):
-                            continue
-                        raise NetezzaError(
-                            operation="execute_insert",
-                            database=database,
-                            detail=sanitize(str(exc), known_secrets={password}),
-                        ) from exc
-    except NetezzaError:
-        raise
+            cursor.execute(parsed.raw, params_tuple)
+            inserted = len(rows)
     except Exception as exc:  # noqa: BLE001, RUF100
         raise NetezzaError(
             operation="execute_insert",
