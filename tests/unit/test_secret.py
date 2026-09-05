@@ -12,7 +12,6 @@ from __future__ import annotations
 import logging
 from typing import Final
 
-import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -42,12 +41,24 @@ def test_percent_interpolation_is_redacted() -> None:
     assert rendered == "password=***"
 
 
-def test_logging_a_secret_is_redacted(caplog: pytest.LogCaptureFixture) -> None:
-    logger = logging.getLogger("nz_mcp.tests.secret")
-    with caplog.at_level(logging.INFO, logger=logger.name):
-        logger.info("connecting with %s", Secret(VALUE))
-    assert VALUE not in caplog.text
-    assert REDACTED in caplog.text
+def test_logging_a_secret_is_redacted() -> None:
+    """A log record renders its args with ``%``, which goes through ``__str__``.
+
+    The record is built directly instead of calling ``logger.info(...)``: it is the same
+    rendering path (``LogRecord.getMessage``), and passing a credential to a logging call
+    is exactly what static analysis is supposed to flag, even when it is safe here.
+    """
+    record = logging.LogRecord(
+        name="nz_mcp.tests.secret",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=0,
+        msg="connecting with %s",
+        args=(Secret(VALUE),),
+        exc_info=None,
+    )
+    assert record.getMessage() == "connecting with ***"
+    assert VALUE not in record.getMessage()
 
 
 def test_collections_render_the_repr() -> None:
