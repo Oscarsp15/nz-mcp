@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
+from typing import cast
 
+import pytest
+from sqlglot import expressions as exp
+
+from nz_mcp import sql_guard
 from nz_mcp.errors import GuardRejectedError, PermissionDeniedError
 from nz_mcp.sql_guard import StatementKind, validate
 
@@ -239,3 +243,75 @@ def test_validate_nzplsql_procedure_with_begin_proc_wrapped_body() -> None:
     )
     parsed = validate(sql, mode="admin")
     assert parsed.kind is StatementKind.CREATE
+
+
+# --- Defensive branches (keeps sql_guard.py coverage at 100 %) -----------------
+
+
+def test_unparsable_sql_is_rejected_as_unknown() -> None:
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("SELECT * FROM (", mode="read")
+    assert exc.value.code == "UNKNOWN_STATEMENT"
+
+
+def test_bare_semicolon_is_an_empty_statement() -> None:
+    with pytest.raises(GuardRejectedError) as exc:
+        validate(";", mode="read")
+    assert exc.value.code == "EMPTY_STATEMENT"
+
+
+def test_cte_without_mutation_passes() -> None:
+    parsed = validate("WITH x AS (SELECT 1) SELECT * FROM x", mode="read")
+    assert parsed.kind is StatementKind.SELECT
+
+
+def test_union_branch_that_is_not_a_select_is_unknown() -> None:
+    """A UNION whose branch is an INTERSECT is not a SELECT-only tree."""
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("SELECT 1 UNION ALL (SELECT 2 INTERSECT SELECT 3)", mode="read")
+    assert exc.value.code == "UNKNOWN_STATEMENT"
+
+
+def test_call_with_invalid_identifier_is_rejected() -> None:
+    with pytest.raises(GuardRejectedError) as exc:
+        validate(f"CALL {'A' * 200}.B(?)", mode="admin")
+    assert exc.value.code == "UNKNOWN_STATEMENT"
+
+
+def test_drop_if_exists_suffix_with_invalid_identifier_is_rejected() -> None:
+    with pytest.raises(GuardRejectedError) as exc:
+        validate(f"DROP TABLE {'A' * 200}.B IF EXISTS", mode="admin")
+    assert exc.value.code == "UNKNOWN_STATEMENT"
+
+
+def test_validate_call_rejects_a_non_matching_statement() -> None:
+    """Defensive re-match: the private helper never trusts its caller."""
+    with pytest.raises(GuardRejectedError) as exc:
+        sql_guard._validate_call("CALL 1bad.proc(?)", mode="admin")
+    assert exc.value.code == "UNKNOWN_STATEMENT"
+
+
+def test_validate_drop_if_exists_suffix_rejects_a_non_matching_statement() -> None:
+    with pytest.raises(GuardRejectedError) as exc:
+        sql_guard._validate_netezza_drop_if_exists_suffix("DROP TABLE t", mode="admin")
+    assert exc.value.code == "UNKNOWN_STATEMENT"
+
+
+def test_enforce_denies_an_unclassified_kind_by_default() -> None:
+    """Default deny: a kind that belongs to no allow-set is rejected."""
+    with pytest.raises(GuardRejectedError) as exc:
+        sql_guard._enforce(
+            kind=cast(StatementKind, "MERGE"),
+            has_where=True,
+            mode="admin",
+        )
+    assert exc.value.code == "STATEMENT_NOT_ALLOWED"
+
+
+def test_number_literal_that_is_not_a_decimal_stays_undecided() -> None:
+    """Defensive: a non-numeric NUMBER token must not fold to a truth value."""
+    node = exp.EQ(
+        this=exp.Literal(this="not-a-number", is_string=False),
+        expression=exp.Literal.number(1),
+    )
+    assert sql_guard._static_truth(node) is None
