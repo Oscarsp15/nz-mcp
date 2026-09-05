@@ -8,6 +8,8 @@ Cada entrada se documenta en **español** y **english**.
 
 ## [Unreleased]
 
+## [0.1.0a3] - 2026-09-05
+
 ### Fixed
 - ES: **`nz-mcp 0.1.0a2` no podía conectar a Netezza.** `Secret` (introducido en #193) redacta `__str__`, y `str.__new__` renderiza su argumento con `str()`: envolver un `Secret` en otro `Secret` guardaba el literal `***` en vez de la credencial. `auth.get_password` ya devuelve un `Secret` y `open_connection` re-liga su argumento con `Secret(password)` de forma incondicional, así que **el doble envoltorio era el camino normal, no un caso raro**: toda conexión enviaba `***` y Netezza respondía `AUTH_REJECTED`. `Secret.__new__` y `SecretBytes.__new__` pasan a copiar el buffer real. La redacción en trazas no cambia. Regresión introducida y publicada en `0.1.0a2`, que queda retirada de PyPI.
 - EN: **`nz-mcp 0.1.0a2` could not connect to Netezza.** `Secret` (added in #193) redacts `__str__`, and `str.__new__` renders its argument through `str()`: wrapping a `Secret` in another `Secret` stored the literal `***` instead of the credential. `auth.get_password` already returns a `Secret` and `open_connection` re-binds its argument with `Secret(password)` unconditionally, so **double wrapping was the normal path, not an edge case**: every connection sent `***` and Netezza answered `AUTH_REJECTED`. `Secret.__new__` and `SecretBytes.__new__` now copy the real buffer. Traceback redaction is unchanged. Regression introduced and shipped in `0.1.0a2`, which is yanked from PyPI.

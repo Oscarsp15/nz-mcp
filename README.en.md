@@ -37,7 +37,7 @@ nz-mcp doctor           # checks the local environment (never touches Netezza)
 
 **There is no install script, on purpose.** pipx already does what that script would do — create an isolated environment and publish the executable on PATH — and `nz-mcp init` already is the configuration wizard. A custom installer would be one more file to maintain per operating system, impossible to test in CI, and it would save no step.
 
-> The published version is an alpha (`0.1.0a2`) and `pip` does not install prereleases by default. If `pipx install nz-mcp` reports that no version matches, use `pipx install nz-mcp --pip-args=--pre` or install from git: `pipx install git+https://github.com/Oscarsp15/nz-mcp.git`.
+> The published version is an alpha (`0.1.0a3`) and `pip` does not install prereleases by default. If `pipx install nz-mcp` reports that no version matches, use `pipx install nz-mcp --pip-args=--pre` or install from git: `pipx install git+https://github.com/Oscarsp15/nz-mcp.git`.
 
 ### Manual install, step by step
 
@@ -77,7 +77,7 @@ No pipx, one dedicated virtual environment. Every step has its own check: if the
 4. **Check the install:**
 
    ```bash
-   nz-mcp version     # prints the installed version, e.g. 0.1.0a2
+   nz-mcp version     # prints the installed version, e.g. 0.1.0a3
    nz-mcp doctor      # local report; exit code 0 when the environment is usable
    ```
 
