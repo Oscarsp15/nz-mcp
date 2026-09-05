@@ -17,6 +17,11 @@ from pydantic import BaseModel, ValidationError
 import nz_mcp.tools  # noqa: F401  (side effect: register tools)
 from nz_mcp import __version__
 from nz_mcp.config import Profile, get_active_profile
+from nz_mcp.error_hints import (
+    hints_for_error,
+    hints_for_validation_error,
+    summarize_validation_error,
+)
 from nz_mcp.errors import InvalidInputError, NzMcpError, PermissionDeniedError
 from nz_mcp.i18n import MESSAGES, both
 from nz_mcp.logging_config import configure_logging_for_stdio
@@ -82,7 +87,14 @@ def _dispatch_tool_call(
     try:
         params = spec.input_model.model_validate(arguments)
     except ValidationError as exc:
-        return _error_response("INVALID_INPUT", detail=str(exc))
+        # Bad arguments are the single most frequent failure, so the payload carries the
+        # compact reason per field plus, when derivable, the fields to add or drop.
+        context: dict[str, Any] = {"detail": summarize_validation_error(exc)}
+        hints = hints_for_validation_error(exc)
+        if hints is not None:
+            context["hint_es"] = hints["es"]
+            context["hint_en"] = hints["en"]
+        return _error_response("INVALID_INPUT", **context)
 
     try:
         raw = _invoke(spec, params, config_path=config_path)
@@ -119,7 +131,9 @@ def _mode_allows(profile_mode: str, required: str) -> bool:
 
 def _error_response(code: str, **context: Any) -> dict[str, Any]:
     key = _i18n_key_for(code)
+    hints: dict[str, str] | None = None
     if key == "PROFILE_NOT_FOUND":
+        # This one interpolates its hint into the message itself, so it is not promoted.
         pnf = MESSAGES["PROFILE_NOT_FOUND"]
         messages = {
             "es": pnf["es"].format(
@@ -131,18 +145,33 @@ def _error_response(code: str, **context: Any) -> dict[str, Any]:
                 hint_en=str(context.get("hint_en", "")),
             ),
         }
-    elif key:
-        messages = both(key, **context)
     else:
-        messages = {"es": code, "en": code}
+        hints = _resolve_hints(code, context)
+        messages = both(key, **context) if key else {"es": code, "en": code}
     return {
         "error": {
             "code": code,
             "message_en": messages["en"],
             "message_es": messages["es"],
+            # Always present, ``None`` when no rule is specific enough: a field that
+            # appears and disappears is harder for a model to branch on than a null.
+            "hint_en": hints["en"] if hints else None,
+            "hint_es": hints["es"] if hints else None,
             "context": context,
         }
     }
+
+
+def _resolve_hints(code: str, context: dict[str, Any]) -> dict[str, str] | None:
+    """Hints built at the raise site win; otherwise derive one from code plus context.
+
+    Promoted out of ``context`` on purpose: the pair travels once, at the top level,
+    where every client reads it, instead of twice in the same payload.
+    """
+    at_raise_site = {loc: context.pop(f"hint_{loc}", None) for loc in ("es", "en")}
+    if at_raise_site["es"] and at_raise_site["en"]:
+        return {"es": str(at_raise_site["es"]), "en": str(at_raise_site["en"])}
+    return hints_for_error(code, context)
 
 
 def _i18n_key_for(code: str) -> str | None:
@@ -154,6 +183,10 @@ def _i18n_key_for(code: str) -> str | None:
         "INVALID_DATABASE_NAME": "INVALID_DATABASE_NAME",
         "CONNECTION_FAILED": "CONNECTION_FAILED",
         "NETEZZA_ERROR": "NETEZZA_ERROR",
+        # Without these two the payload said literally "INVALID_INPUT" and the reason
+        # only survived inside ``context`` (issue #142).
+        "INVALID_INPUT": "INVALID_INPUT",
+        "OBJECT_NOT_FOUND": "OBJECT_NOT_FOUND",
         # sql_guard / tool-specific rejection codes → GUARD_REJECTED.* catalog keys
         "STACKED_NOT_ALLOWED": "GUARD_REJECTED.STACKED_NOT_ALLOWED",
         "STATEMENT_NOT_ALLOWED": "GUARD_REJECTED.STATEMENT_NOT_ALLOWED",
