@@ -48,3 +48,4 @@ Ver [tech-lead.md](../roles/tech-lead.md#plantilla-adr-para-copiar-a-docsadrnnnn
 | 0018 | [Acotar la salida de `nz_list_procedures` y `nz_get_procedure_ddl`](0018-cap-procedures-output.md) | aceptado | 2026-09-04 |
 | 0019 | [Dejar de declarar `outputSchema` en `tools/list`](0019-sin-output-schema.md) | aceptado | 2026-09-04 |
 | 0020 | [Rechazar predicados WHERE siempre verdaderos salvo confirmación explícita](0020-sql-guard-tautological-where.md) | aceptado | 2026-09-04 |
+| 0021 | [Diagnóstico real del fallo de conexión: capturar el logger de nzpy](0021-diagnostico-fallo-conexion.md) | aceptado | 2026-09-05 |

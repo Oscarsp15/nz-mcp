@@ -294,6 +294,9 @@ def test_connection_cmd(
     outcome = run_checks(prof, password, levels=1).outcomes[0]
     if outcome.status != "ok":
         typer.secho(f"FAIL: {outcome.detail}", fg=typer.colors.RED, err=True)
+        hint = outcome.hint_es if locale == "es" else outcome.hint_en
+        if hint:
+            typer.secho(f"HINT: {hint}", fg=typer.colors.YELLOW, err=True)
         raise typer.Exit(code=1)
     typer.secho(f"OK: connected to {outcome.detail} as {prof.user}", fg=typer.colors.GREEN)
     raise typer.Exit(code=0)
