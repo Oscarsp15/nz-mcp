@@ -35,6 +35,11 @@ class SecretBytes(bytes):
 
     __slots__ = ()
 
+    def __new__(cls, value: bytes = b"") -> SecretBytes:
+        # Same trap as ``Secret.__new__``: rebuilding from an instance must copy the
+        # real buffer, never a rendered form.
+        return super().__new__(cls, memoryview(value).tobytes())
+
     def __repr__(self) -> str:
         return f"SecretBytes({REDACTED})"
 
@@ -54,6 +59,14 @@ class Secret(str):
     """
 
     __slots__ = ()
+
+    def __new__(cls, value: str = "") -> Secret:
+        # ``str.__new__`` renders its argument with ``str()``, and ``__str__`` is
+        # redacted here, so wrapping a ``Secret`` again would store the literal
+        # ``***`` and silently destroy the credential. Read the underlying buffer
+        # instead. This is not defensive: ``open_connection`` re-binds its argument
+        # unconditionally, so double wrapping is the normal path, not an edge case.
+        return super().__new__(cls, str.__str__(value) if isinstance(value, str) else value)
 
     def __repr__(self) -> str:
         return f"Secret({REDACTED})"

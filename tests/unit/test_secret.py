@@ -114,3 +114,31 @@ def test_no_rendering_path_reproduces_the_value(value: str) -> None:
     assert repr(secret.encode()) == "SecretBytes(***)"
     # The real value survives only through the explicit door.
     assert secret.reveal() == value
+
+
+def test_wrapping_a_secret_again_keeps_the_real_value() -> None:
+    """Double wrapping must not store the redacted rendering (regression, 0.1.0a2).
+
+    ``open_connection`` re-binds its argument with ``Secret(password)`` unconditionally,
+    and ``auth.get_password`` already returns a ``Secret``. Before the fix, the second
+    wrap stored the literal ``***`` because ``str.__new__`` renders through ``__str__``:
+    every connection sent ``***`` as the password and Netezza answered AUTH_REJECTED.
+    """
+    once = Secret("hunter2")
+    twice = Secret(once)
+    thrice = Secret(twice)
+
+    assert twice.reveal() == "hunter2"
+    assert thrice.reveal() == "hunter2"
+    assert str.__eq__(once, twice)
+    assert str(twice) == "***"
+    assert twice.encode() == b"hunter2"
+
+
+def test_wrapping_secret_bytes_again_keeps_the_real_bytes() -> None:
+    """Same trap on the encoded form."""
+    once = SecretBytes(b"hunter2")
+    twice = SecretBytes(once)
+
+    assert bytes(twice) == b"hunter2"
+    assert repr(twice) == "SecretBytes(***)"
