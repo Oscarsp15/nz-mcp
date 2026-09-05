@@ -156,8 +156,65 @@ def test_guard_rejects(sql, code):
 - Carpeta `tests/integration/`.
 - Marcar **todos** con `@pytest.mark.integration`.
 - Variables de entorno necesarias documentadas en `tests/integration/README.md`.
-- Usar perfil `test` (no `prod`) — requisito documentado.
-- Limpieza: tests de write/DDL crean objetos con sufijo `_nzmcp_test_<uuid>` y los borran al final (fixture `tmp_table`).
+- Usar un perfil de desarrollo (jamás uno que apunte a datos de producción).
+- Limpieza: los tests de write/DDL crean su objeto y lo borran en `finally`; al terminar la
+  suite no debe quedar nada en Netezza.
+
+### Cómo correrlos de verdad
+
+Requisitos, los tres a la vez:
+
+1. **VPN conectada** y el host del perfil alcanzable. Sin VPN los tests fallan en la
+   conexión, no se saltan.
+2. Un perfil configurado en `~/.nz-mcp/profiles.toml` con su password **ya guardada en el
+   keyring** (`nz-mcp set-password <perfil>`). La suite nunca escribe la credencial.
+3. La variable `NZ_MCP_RUN_INTEGRATION=1`.
+
+Comando exacto (bash / Git Bash):
+
+```bash
+NZ_MCP_RUN_INTEGRATION=1 uv run --extra dev pytest -q -m integration
+```
+
+PowerShell:
+
+```powershell
+$env:NZ_MCP_RUN_INTEGRATION = "1"; uv run --extra dev pytest -q -m integration
+```
+
+`--extra dev` no es opcional: sin él `uv run` puede resolver un `pytest` de fuera del
+entorno del proyecto y ejecutar los tests contra otra copia del código y otra versión de
+`nzpy`.
+
+Sin `NZ_MCP_RUN_INTEGRATION=1` los 13 tests se **saltan** (fixture autouse
+`require_live_netezza` en `tests/integration/conftest.py`): no abren socket ni leen el
+keyring. La suite normal (`uv run --extra dev pytest -q`) los deselecciona igual que antes.
+
+### Coordenadas: nunca hardcodeadas
+
+Las fixtures `integration_database` / `integration_schema` toman por defecto la base del
+perfil activo y el esquema `DBO`. Overrides opcionales:
+
+| Variable | Para qué |
+|---|---|
+| `NZ_MCP_RUN_INTEGRATION=1` | Habilita la suite (obligatoria). |
+| `NZ_MCP_INTEGRATION_PROFILE` | Perfil a usar; por defecto, el activo. |
+| `NZ_MCP_INTEGRATION_PROFILES` | Ruta alternativa a `profiles.toml`. |
+| `NZ_MCP_TEST_DATABASE` | Base a consultar; por defecto, la del perfil. |
+| `NZ_MCP_TEST_SCHEMA` | Esquema; por defecto `DBO`. |
+| `NZ_MCP_TEST_TABLE`, `NZ_MCP_TEST_PROCEDURE` | Objetos concretos del smoke de #71. |
+
+Las tools DDL rechazan cualquier base distinta a la del perfil activo, así que el default
+"la base del perfil" es lo único que deja correr lectura y DDL con las mismas coordenadas.
+
+### Keyring: la única excepción a `isolated_keyring`
+
+El fixture autouse `isolated_keyring` (`tests/conftest.py`) sustituye el keyring por uno en
+memoria para **toda** la suite. Los tests de integración necesitan la credencial real, así
+que se exceptúan solo si se cumplen las tres condiciones a la vez: `NZ_MCP_RUN_INTEGRATION=1`,
+marca `integration` y módulo dentro de `tests/integration/`. Aun exceptuados, `set_password`
+y `delete_password` quedan bloqueados: un test de integración **lee** la credencial, nunca la
+escribe ni la borra. Cubierto por `tests/unit/test_keyring_isolation.py`.
 
 ## Tests determinísticos
 
