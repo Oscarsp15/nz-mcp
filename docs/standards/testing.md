@@ -186,6 +186,15 @@ $env:NZ_MCP_RUN_INTEGRATION = "1"; uv run --extra dev pytest -q -m integration
 entorno del proyecto y ejecutar los tests contra otra copia del código y otra versión de
 `nzpy`.
 
+> **Aviso: la password puede aparecer en la traza de un fallo.** Si un test de integración
+> falla dentro de `open_connection` (VPN caída, timeout, credencial rechazada), pytest
+> imprime los argumentos del frame y **la password del perfil sale en claro** en la salida.
+> Hasta ahora era un riesgo dormido, porque estos tests nunca llegaban a conectarse; desde
+> que se pueden ejecutar, cualquier fallo de conexión lo dispara.
+>
+> Mientras el issue #191 siga abierto: no pegues una traza de integración en un issue, un
+> chat ni un log compartido sin revisarla antes. El repositorio es público.
+
 Sin `NZ_MCP_RUN_INTEGRATION=1` los 13 tests se **saltan** (fixture autouse
 `require_live_netezza` en `tests/integration/conftest.py`): no abren socket ni leen el
 keyring. La suite normal (`uv run --extra dev pytest -q`) los deselecciona igual que antes.
