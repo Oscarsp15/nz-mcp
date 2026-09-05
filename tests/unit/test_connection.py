@@ -22,6 +22,7 @@ from nz_mcp.connection import (
 )
 from nz_mcp.errors import ConnectionError as NzConnectionError
 from nz_mcp.i18n import MESSAGES
+from nz_mcp.secret import REDACTED, Secret
 
 
 def _profile(*, security_level: int = 2, ca_certs: str | None = None) -> Profile:
@@ -36,6 +37,35 @@ def _profile(*, security_level: int = 2, ca_certs: str | None = None) -> Profile
         security_level=security_level,
         ca_certs=ca_certs,
     )
+
+
+def test_open_connection_sends_the_real_password_when_given_a_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The driver must receive the credential, not its redacted rendering.
+
+    Regression of 0.1.0a2: ``auth.get_password`` returns a ``Secret`` and this function
+    re-binds its argument with ``Secret(password)``, so the real shape is a double wrap.
+    ``str.__new__`` renders through ``__str__``, which is redacted, so every connection
+    sent ``***`` and Netezza answered AUTH_REJECTED. The suite never caught it because
+    every other test passes a plain ``str``.
+    """
+    captured: dict[str, object] = {}
+    test_secret = Secret("".join(["test", "-pw"]))
+
+    def _fake_connect(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("nz_mcp.connection.nzpy.connect", _fake_connect)
+    open_connection(_profile(), test_secret)
+
+    sent = captured["password"]
+    assert isinstance(sent, Secret)
+    assert sent.reveal() == "test-pw"
+    assert sent.encode() == b"test-pw"
+    # And it still renders redacted, which is the whole point of the wrapper.
+    assert str(sent) == REDACTED
 
 
 def test_open_connection_calls_nzpy_with_expected_parameters(
