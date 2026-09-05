@@ -1,65 +1,53 @@
-# Claude Desktop and nz-mcp
+# Claude Desktop: rutas del ejecutable / executable paths
 
-Use an **isolated** Python environment for `nz-mcp` so `typer` / `click` versions are not pinned by other global CLI tools (e.g. `open-interpreter`, `sqlfluff`).
+> Los pasos de integración (dónde vive `claude_desktop_config.json`, el JSON completo y cómo comprobar que conectó) están en el [README](../../README.md#integración-con-claude-desktop) y en el [README en inglés](../../README.en.md#claude-desktop-setup). Aquí solo queda el detalle que no cabe allí.
+>
+> The integration steps (where `claude_desktop_config.json` lives, the full JSON block and how to check it connected) are in the [README](../../README.md#integración-con-claude-desktop) and its [English version](../../README.en.md#claude-desktop-setup). Only the extra detail lives here.
+>
+> Esta guía es corta y va bilingüe **en un solo archivo**: son rutas y ejemplos idénticos en ambos idiomas, y partirla en dos ficheros solo garantizaría que uno se quede atrás. / This guide is short and bilingual **in a single file**: the paths and examples are identical in both languages, and splitting it would only guarantee that one copy drifts.
 
-## Recommended: pipx
+## Español
 
-Install [pipx](https://pypa.github.io/pipx/) and install from PyPI (when published) or from a git URL:
+Usa siempre un entorno Python **aislado** para `nz-mcp`, para que ningún otro CLI global (`open-interpreter`, `sqlfluff`, …) fije la versión de `typer` / `click`.
 
-```bash
-pipx install git+https://github.com/Oscarsp15/nz-mcp.git
-pipx ensurepath
-```
+### Dónde queda el ejecutable
 
-On Windows, the executable is typically `%USERPROFILE%\.local\bin\nz-mcp.exe` (pipx layout may vary).
+| Instalación | Windows | macOS / Linux |
+|---|---|---|
+| pipx | `%USERPROFILE%\.local\bin\nz-mcp.exe` | `~/.local/bin/nz-mcp` |
+| Entorno virtual | `<venv>\Scripts\nz-mcp.exe` | `<venv>/bin/nz-mcp` |
 
-## Development: virtualenv
+El layout de pipx puede variar según versión y sistema: la fuente de verdad es `pipx list`, o `where.exe nz-mcp` / `which nz-mcp`.
 
-```bash
-python -m venv .venv
-.venv\Scripts\activate   # Windows
-# source .venv/bin/activate  # Linux/macOS
-pip install -e ".[dev]"
-```
+En `claude_desktop_config.json`, `command` apunta a **esa ruta completa**, no a un `nz-mcp` cualquiera del `PATH`: Claude Desktop no arranca con el `PATH` de tu terminal, y un `nz-mcp` instalado globalmente puede ser otro.
 
-The CLI is `.venv\Scripts\nz-mcp.exe` (Windows) or `.venv/bin/nz-mcp`.
+### Export de DDL (`nz_export_ddl`)
 
-## `claude_desktop_config.json`
+La tool de lectura `nz_export_ddl` devuelve el DDL de Netezza como **content blocks** MCP: un **resource** embebido (`text/sql`) con URI estable `nz-mcp://ddl/...` más un **texto** de resumen corto. En Claude Desktop se ve como una tarjeta SQL copiable junto al resumen; úsala después de resolver los nombres de los objetos con las tools de listado y describe.
 
-Point `command` at the **full path** to the `nz-mcp` binary from pipx or venv — not a conflicting global `nz-mcp` on `PATH`.
+### `pip install` global (desaconsejado)
 
-### pipx (Windows example)
+Instalar en el site-packages del sistema o del usuario puede romper otras herramientas que dependan de versiones viejas de `typer` / `click`. Usa pipx o un venv dedicado.
 
-```json
-{
-  "mcpServers": {
-    "netezza": {
-      "command": "C:\\Users\\YOURUSER\\.local\\bin\\nz-mcp.exe",
-      "args": ["serve"]
-    }
-  }
-}
-```
+## English
 
-### venv (Windows example)
+Always use an **isolated** Python environment for `nz-mcp`, so no other global CLI (`open-interpreter`, `sqlfluff`, …) pins the `typer` / `click` version.
 
-```json
-{
-  "mcpServers": {
-    "netezza": {
-      "command": "C:\\path\\to\\nz-mcp\\.venv\\Scripts\\nz-mcp.exe",
-      "args": ["serve"]
-    }
-  }
-}
-```
+### Where the executable lands
 
-Restart Claude Desktop after editing the config.
+| Install | Windows | macOS / Linux |
+|---|---|---|
+| pipx | `%USERPROFILE%\.local\bin\nz-mcp.exe` | `~/.local/bin/nz-mcp` |
+| Virtual environment | `<venv>\Scripts\nz-mcp.exe` | `<venv>/bin/nz-mcp` |
 
-## DDL export (`nz_export_ddl`)
+The pipx layout varies across versions and systems: the source of truth is `pipx list`, or `where.exe nz-mcp` / `which nz-mcp`.
 
-The read tool `nz_export_ddl` returns Netezza DDL as MCP **content blocks**: an embedded **resource** (`text/sql`) with a stable `nz-mcp://ddl/...` URI plus a short **text** summary. In Claude Desktop this typically appears as a copyable SQL card alongside the summary—use it after resolving object names with the list/describe tools.
+In `claude_desktop_config.json`, `command` points at **that full path**, not at whichever `nz-mcp` sits on `PATH`: Claude Desktop does not start with your terminal `PATH`, and a globally installed `nz-mcp` may be a different one.
 
-## Global `pip install` (discouraged)
+### DDL export (`nz_export_ddl`)
 
-Installing into the system or user site-packages can break other tools that depend on older `typer`/`click`. Prefer pipx or a dedicated venv.
+The read tool `nz_export_ddl` returns Netezza DDL as MCP **content blocks**: an embedded **resource** (`text/sql`) with a stable `nz-mcp://ddl/...` URI plus a short **text** summary. In Claude Desktop this appears as a copyable SQL card alongside the summary — use it after resolving object names with the list/describe tools.
+
+### Global `pip install` (discouraged)
+
+Installing into the system or user site-packages can break other tools that depend on older `typer` / `click`. Prefer pipx or a dedicated venv.
