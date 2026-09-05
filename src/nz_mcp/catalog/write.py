@@ -299,8 +299,13 @@ def execute_update(
     *,
     dry_run: bool,
     confirm: bool,
+    confirm_full_table: bool = False,
 ) -> dict[str, Any]:
-    """Run ``UPDATE`` with validation, optional dry-run ``COUNT`` first."""
+    """Run ``UPDATE`` with validation, optional dry-run ``COUNT`` first.
+
+    ``confirm_full_table`` forwards the caller's full-table intent to ``sql_guard``
+    (see docs/adr/0020-sql-guard-tautological-where.md).
+    """
     _ensure_session_database(profile, database)
     if not set_cols:
         raise InvalidInputError(detail="set must contain at least one column.")
@@ -341,7 +346,7 @@ def execute_update(
             detail="confirm=true is required when dry_run=false for nz_update.",
         )
 
-    parsed = guard_validate(update_sql, mode="write")
+    parsed = guard_validate(update_sql, mode="write", confirm_full_table=confirm_full_table)
     if parsed.kind is not StatementKind.UPDATE:
         raise NetezzaError(
             operation="execute_update",
@@ -380,8 +385,13 @@ def execute_delete(
     *,
     dry_run: bool,
     confirm: bool,
+    confirm_full_table: bool = False,
 ) -> dict[str, Any]:
-    """Run ``DELETE`` with validation, optional dry-run ``COUNT`` first."""
+    """Run ``DELETE`` with validation, optional dry-run ``COUNT`` first.
+
+    ``confirm_full_table`` forwards the caller's full-table intent to ``sql_guard``
+    (see docs/adr/0020-sql-guard-tautological-where.md).
+    """
     _ensure_session_database(profile, database)
     where_clause = where.strip()
     if not where_clause:
@@ -416,7 +426,7 @@ def execute_delete(
             detail="confirm=true is required when dry_run=false for nz_delete.",
         )
 
-    parsed = guard_validate(delete_sql, mode="write")
+    parsed = guard_validate(delete_sql, mode="write", confirm_full_table=confirm_full_table)
     if parsed.kind is not StatementKind.DELETE:
         raise NetezzaError(
             operation="execute_delete",

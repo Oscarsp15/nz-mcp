@@ -69,7 +69,9 @@ def test_insert_select_rejects_non_select() -> None:
             database="DEV",
             schema="PUBLIC",
             table="TGT",
-            select_sql="DELETE FROM PUBLIC.X WHERE 1=1",
+            # Selective predicate on purpose: an always-true WHERE would be rejected
+            # earlier with WHERE_ALWAYS_TRUE, hiding the check under test.
+            select_sql="DELETE FROM PUBLIC.X WHERE ID = 1",
             target_columns=None,
             dry_run=True,
             confirm=False,

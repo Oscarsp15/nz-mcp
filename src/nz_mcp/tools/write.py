@@ -46,6 +46,13 @@ class UpdateInput(BaseModel):
     where: str = Field(min_length=1, max_length=8192)
     dry_run: bool = True
     confirm: bool = False
+    confirm_full_table: bool = Field(
+        default=False,
+        description=(
+            "Declare that a WHERE which is always true (e.g. 1=1) is intended and every "
+            "row must be updated. Required by sql_guard for such predicates."
+        ),
+    )
 
     @field_validator("where")
     @classmethod
@@ -74,6 +81,13 @@ class DeleteInput(BaseModel):
     where: str = Field(min_length=1, max_length=8192)
     dry_run: bool = True
     confirm: bool = False
+    confirm_full_table: bool = Field(
+        default=False,
+        description=(
+            "Declare that a WHERE which is always true (e.g. 1=1) is intended and every "
+            "row must be deleted. Required by sql_guard for such predicates."
+        ),
+    )
 
     @field_validator("where")
     @classmethod
@@ -180,7 +194,8 @@ def nz_insert(
     name="nz_update",
     description=(
         "Update rows in a base table; WHERE is mandatory. Default dry_run=true runs COUNT only; "
-        "set dry_run=false and confirm=true to apply."
+        "set dry_run=false and confirm=true to apply. An always-true WHERE (1=1, TRUE, ...) is "
+        "rejected unless you also pass confirm_full_table=true."
     ),
     mode="write",
     input_model=UpdateInput,
@@ -207,6 +222,7 @@ def nz_update(
         where=params.where,
         dry_run=params.dry_run,
         confirm=params.confirm,
+        confirm_full_table=params.confirm_full_table,
     )
     if raw.get("dry_run"):
         return UpdateOutput(
@@ -227,7 +243,8 @@ def nz_update(
     name="nz_delete",
     description=(
         "Delete rows from a base table; WHERE is mandatory. Default dry_run=true counts matches; "
-        "set dry_run=false and confirm=true to execute DELETE."
+        "set dry_run=false and confirm=true to execute DELETE. An always-true WHERE (1=1, TRUE, "
+        "...) is rejected unless you also pass confirm_full_table=true."
     ),
     mode="write",
     input_model=DeleteInput,
@@ -253,6 +270,7 @@ def nz_delete(
         where=params.where,
         dry_run=params.dry_run,
         confirm=params.confirm,
+        confirm_full_table=params.confirm_full_table,
     )
     if raw.get("dry_run"):
         return DeleteOutput(

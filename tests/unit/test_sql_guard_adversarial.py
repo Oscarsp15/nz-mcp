@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 from nz_mcp.errors import GuardRejectedError
-from nz_mcp.sql_guard import validate
+from nz_mcp.sql_guard import StatementKind, validate
 
 
 @pytest.mark.adversarial
@@ -120,3 +120,123 @@ def test_except_blocked_as_unknown_statement() -> None:
     with pytest.raises(GuardRejectedError) as exc:
         validate("SELECT 1 EXCEPT SELECT 1", mode="read")
     assert exc.value.code == "UNKNOWN_STATEMENT"
+
+
+# --- Tautological WHERE (issue #140) ------------------------------------------
+# ``WHERE 1=1`` satisfies "there is a WHERE clause" while matching every row, so the
+# UPDATE/DELETE guard is worthless without static predicate analysis. Only the forms
+# listed in docs/adr/0020-sql-guard-tautological-where.md are detected.
+
+
+@pytest.mark.adversarial
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # Numeric tautologies.
+        "UPDATE t SET a = 1 WHERE 1 = 1",
+        "DELETE FROM t WHERE 1=1",
+        "UPDATE t SET a = 1 WHERE 2 > 1",
+        "DELETE FROM t WHERE 9 < 10",
+        "DELETE FROM t WHERE 1 <> 2",
+        "UPDATE t SET a = 1 WHERE -1 < 1",
+        "DELETE FROM t WHERE (1) = 1",
+        # Bare literal used as a predicate.
+        "DELETE FROM t WHERE 1",
+        # Boolean literals.
+        "DELETE FROM t WHERE TRUE",
+        "UPDATE t SET a = 1 WHERE TRUE = TRUE",
+        "DELETE FROM t WHERE NOT FALSE",
+        "DELETE FROM t WHERE NOT (1 = 2)",
+        # Text literal tautologies.
+        "DELETE FROM t WHERE 'a' = 'a'",
+        "UPDATE t SET a = 1 WHERE 'x' <> 'y'",
+        # OR neutralising a real predicate.
+        "UPDATE t SET a = 1 WHERE id = 5 OR 1 = 1",
+        "DELETE FROM t WHERE id = 5 OR TRUE",
+        # AND of two tautologies, and parenthesised forms.
+        "DELETE FROM t WHERE 1 = 1 AND 2 > 1",
+        "DELETE FROM t WHERE (1 = 1)",
+        # Self comparison: never restricts rows beyond NULLs.
+        "DELETE FROM t WHERE id = id",
+    ],
+)
+@pytest.mark.parametrize("mode", ["write", "admin"])
+def test_tautological_where_blocked(sql: str, mode: str) -> None:
+    with pytest.raises(GuardRejectedError) as exc:
+        validate(sql, mode=mode)  # type: ignore[arg-type]
+    assert exc.value.code == "WHERE_ALWAYS_TRUE"
+
+
+@pytest.mark.adversarial
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # Selective predicates: the normal case must keep working.
+        "UPDATE t SET a = 1 WHERE id = 5",
+        "DELETE FROM t WHERE id IS NOT NULL",
+        "DELETE FROM t WHERE a = b",
+        "DELETE FROM t WHERE a.id = b.id",
+        "DELETE FROM t WHERE -id = 1",
+        "DELETE FROM t WHERE id > 1",
+        "DELETE FROM t WHERE id = 5 OR id = 6",
+        "DELETE FROM t WHERE a = 1 AND b = 2",
+        "UPDATE t SET a = 1 WHERE 1 = 1 AND id = 5",
+        "DELETE FROM t WHERE NOT (id = 1)",
+        # Statically false predicates affect no row: nothing to protect against.
+        "DELETE FROM t WHERE 1 = 2",
+        "DELETE FROM t WHERE 0",
+        "DELETE FROM t WHERE 'a' = 'b'",
+        "DELETE FROM t WHERE 1 = 2 AND id = 5",
+        "DELETE FROM t WHERE 1 = 2 OR 'a' = 'b'",
+        # Non-boolean bare literal: undecided, not blocked.
+        "DELETE FROM t WHERE 'x'",
+    ],
+)
+def test_selective_where_not_blocked(sql: str) -> None:
+    """No false positives: real predicates keep passing the guard."""
+    assert validate(sql, mode="write").has_where is True
+
+
+@pytest.mark.adversarial
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "DELETE FROM t WHERE ABS(1) = 1",
+        "DELETE FROM t WHERE id > -2147483648",
+        "DELETE FROM t WHERE '1' = 1",
+    ],
+)
+def test_known_gaps_of_the_tautology_check(sql: str) -> None:
+    """Documented limits (ADR 0020): folding stops at literal-only predicates.
+
+    Deciding tautology in general is undecidable; these forms are NOT detected and
+    the guard says so explicitly instead of pretending otherwise.
+    """
+    assert validate(sql, mode="write").has_where is True
+
+
+@pytest.mark.adversarial
+def test_confirm_full_table_allows_the_tautology_explicitly() -> None:
+    """The caller may proceed only by declaring full-table intent in the call."""
+    parsed = validate("DELETE FROM t WHERE 1 = 1", mode="write", confirm_full_table=True)
+    assert parsed.kind is StatementKind.DELETE
+
+
+@pytest.mark.adversarial
+def test_confirm_full_table_does_not_waive_the_where_requirement() -> None:
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("DELETE FROM t", mode="write", confirm_full_table=True)
+    assert exc.value.code == "DELETE_REQUIRES_WHERE"
+
+
+@pytest.mark.adversarial
+def test_confirm_full_table_does_not_grant_mode_privileges() -> None:
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("DELETE FROM t WHERE 1 = 1", mode="read", confirm_full_table=True)
+    assert exc.value.code == "STATEMENT_NOT_ALLOWED"
+
+
+@pytest.mark.adversarial
+def test_tautological_where_in_select_is_allowed() -> None:
+    """The check targets mutations only; a SELECT scanning everything is not destructive."""
+    assert validate("SELECT * FROM t WHERE 1 = 1", mode="read").kind is StatementKind.SELECT

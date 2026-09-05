@@ -36,6 +36,18 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Las sentencias DELETE requieren cláusula WHERE.",
         "en": "DELETE statements require a WHERE clause.",
     },
+    "GUARD_REJECTED.WHERE_ALWAYS_TRUE": {
+        "es": (
+            "El predicado WHERE de la sentencia '{kind}' es siempre verdadero, así que "
+            "afectaría a todas las filas de la tabla. Si es intencionado, repite la "
+            "llamada con confirm_full_table=true."
+        ),
+        "en": (
+            "The WHERE predicate of the '{kind}' statement is always true, so it would "
+            "affect every row in the table. If that is intended, repeat the call with "
+            "confirm_full_table=true."
+        ),
+    },
     "GUARD_REJECTED.UNKNOWN_STATEMENT": {
         "es": "No se pudo clasificar la sentencia SQL recibida.",
         "en": "Could not classify the received SQL statement.",

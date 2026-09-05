@@ -6,8 +6,11 @@ See docs/architecture/security-model.md for the full matrix.
 
 from __future__ import annotations
 
+import operator
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Final
 
@@ -45,6 +48,10 @@ _WRITE_KINDS: Final[frozenset[StatementKind]] = frozenset(
 # DDL kinds permitted only in admin mode.
 _DDL_KINDS: Final[frozenset[StatementKind]] = frozenset(
     {StatementKind.CREATE, StatementKind.TRUNCATE, StatementKind.DROP}
+)
+# Kinds whose WHERE clause must both exist and actually restrict rows.
+_WHERE_REQUIRED_KINDS: Final[frozenset[StatementKind]] = frozenset(
+    {StatementKind.UPDATE, StatementKind.DELETE}
 )
 
 _NZPLSQL_MARKER: Final[re.Pattern[str]] = re.compile(
@@ -93,8 +100,17 @@ class ParsedStatement:
     raw: str
 
 
-def validate(sql: str, *, mode: PermissionMode) -> ParsedStatement:
+def validate(
+    sql: str,
+    *,
+    mode: PermissionMode,
+    confirm_full_table: bool = False,
+) -> ParsedStatement:
     """Parse ``sql``, classify, and enforce the rules for ``mode``.
+
+    ``confirm_full_table`` is the caller's explicit declaration that an ``UPDATE`` /
+    ``DELETE`` whose WHERE clause is statically always true is intended. It never
+    grants privileges and never waives the WHERE requirement.
 
     Raises :class:`GuardRejectedError` with a stable ``code`` on rejection.
     """
@@ -138,6 +154,7 @@ def validate(sql: str, *, mode: PermissionMode) -> ParsedStatement:
     kind = _classify(expr)
     has_where = _has_where(expr)
 
+    _assert_selective_where(expr, kind=kind, confirm_full_table=confirm_full_table)
     _enforce(kind=kind, has_where=has_where, mode=mode)
 
     return ParsedStatement(kind=kind, has_where=has_where, raw=sql)
@@ -280,6 +297,123 @@ def _classify(expr: exp.Expr) -> StatementKind:
 def _has_where(expr: exp.Expr) -> bool:
     where = expr.args.get("where") if hasattr(expr, "args") else None
     return where is not None
+
+
+# --- Tautological WHERE detection ---------------------------------------------
+# Requiring a WHERE clause is worthless if ``WHERE 1=1`` satisfies it. Deciding
+# whether an arbitrary predicate is a tautology is undecidable, so this is a
+# deliberately narrow, sound-by-construction constant folder over the AST:
+# literal-only comparisons plus AND / OR / NOT / parentheses. Anything that reads
+# data (columns, functions, subqueries) stays UNDECIDED and is allowed through.
+# See docs/adr/0020-sql-guard-tautological-where.md for the exact boundary.
+
+_LiteralValue = Decimal | str | bool
+
+_COMPARATORS: Final[dict[type[exp.Expression], Callable[[_LiteralValue, _LiteralValue], bool]]] = {
+    exp.EQ: operator.eq,
+    exp.NEQ: operator.ne,
+    exp.GT: operator.gt,
+    exp.GTE: operator.ge,
+    exp.LT: operator.lt,
+    exp.LTE: operator.le,
+}
+
+
+def _assert_selective_where(
+    expr: exp.Expr,
+    *,
+    kind: StatementKind,
+    confirm_full_table: bool,
+) -> None:
+    """Reject a mutation whose WHERE is statically always true, unless opted in."""
+    if kind not in _WHERE_REQUIRED_KINDS or confirm_full_table:
+        return
+    where = expr.args.get("where")
+    if where is None:
+        return
+    if _static_truth(where.this) is True:
+        raise GuardRejectedError(code="WHERE_ALWAYS_TRUE", kind=str(kind))
+
+
+def _static_truth(node: exp.Expression) -> bool | None:
+    """Fold ``node`` to ``True`` / ``False``; ``None`` means "cannot decide statically"."""
+    if isinstance(node, exp.Paren):
+        return _static_truth(node.this)
+    if isinstance(node, exp.Not):
+        inner = _static_truth(node.this)
+        return None if inner is None else not inner
+    if isinstance(node, exp.And):
+        return _fold(_static_truth(node.this), _static_truth(node.expression), conjunction=True)
+    if isinstance(node, exp.Or):
+        return _fold(_static_truth(node.this), _static_truth(node.expression), conjunction=False)
+    return _leaf_truth(node)
+
+
+def _fold(left: bool | None, right: bool | None, *, conjunction: bool) -> bool | None:
+    """Three-valued AND / OR: an undecided operand only survives short-circuiting."""
+    dominant = not conjunction  # False decides an AND; True decides an OR
+    if left is dominant or right is dominant:
+        return dominant
+    if left is None or right is None:
+        return None
+    return not dominant
+
+
+def _leaf_truth(node: exp.Expression) -> bool | None:
+    """Truth value of a predicate leaf: a bare literal or a literal-only comparison."""
+    if type(node) in _COMPARATORS:
+        return _compare(node)
+    return _value_truth(_literal_value(node))
+
+
+def _compare(node: exp.Expression) -> bool | None:
+    left = _literal_value(node.this)
+    right = _literal_value(node.expression)
+    if left is not None and right is not None and type(left) is type(right):
+        return _COMPARATORS[type(node)](left, right)
+    # ``col = col`` restricts nothing beyond NULL rows. Not a tautology in strict SQL
+    # semantics, but treated as full-table intent on purpose (over-approximation is
+    # cheap here: the caller can still proceed with confirm_full_table).
+    if isinstance(node, exp.EQ) and _same_column(node.this, node.expression):
+        return True
+    return None
+
+
+def _same_column(left: exp.Expression, right: exp.Expression) -> bool:
+    """True when both sides are the very same (textually identical) column reference."""
+    if not isinstance(left, exp.Column) or not isinstance(right, exp.Column):
+        return False
+    return left.sql(dialect="postgres").upper() == right.sql(dialect="postgres").upper()
+
+
+def _value_truth(value: _LiteralValue | None) -> bool | None:
+    """Truthiness of a bare literal predicate (``WHERE TRUE``, ``WHERE 1``)."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, Decimal):
+        return value != 0
+    return None
+
+
+def _literal_value(node: exp.Expression) -> _LiteralValue | None:
+    """Constant value of ``node``; ``None`` when it is not a literal."""
+    if isinstance(node, exp.Paren):
+        return _literal_value(node.this)
+    if isinstance(node, exp.Boolean):
+        return bool(node.this)
+    if isinstance(node, exp.Neg):
+        inner = _literal_value(node.this)
+        return -inner if isinstance(inner, Decimal) else None
+    if isinstance(node, exp.Literal):
+        return str(node.this) if node.is_string else _to_decimal(node.this)
+    return None
+
+
+def _to_decimal(raw: object) -> Decimal | None:
+    try:
+        return Decimal(str(raw))
+    except InvalidOperation:
+        return None
 
 
 def _enforce(*, kind: StatementKind, has_where: bool, mode: PermissionMode) -> None:

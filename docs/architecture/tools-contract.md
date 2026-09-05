@@ -578,18 +578,23 @@ Implementación: `INSERT INTO ... VALUES (...)` parametrizado. **Prohibido** con
 | `where` | string (required) | Predicado WHERE. **No vacío**. |
 | `dry_run` | bool (default true) | Ejecuta `SELECT COUNT(*) WHERE ...` primero y pide `confirm: true` para aplicar. |
 | `confirm` | bool (default false) | Requerido si `dry_run: false`. |
+| `confirm_full_table` | bool (default false) | Declara que un `WHERE` siempre verdadero (`1=1`, `TRUE`, …) es intencionado y debe afectar a **todas** las filas. |
 
 **Output** (dry-run `true`): `{ "updated": 0, "would_update": N, "dry_run": true, "confirm_required": true, "duration_ms": T }`
 
 **Output** (ejecución real): `{ "updated": N, "duration_ms": T, "dry_run": false }`
 
-**Regla de seguridad**: `sql_guard` rechaza `UPDATE` sin `WHERE`.
+**Regla de seguridad**: `sql_guard` rechaza `UPDATE` sin `WHERE` y, salvo
+`confirm_full_table: true`, también con un `WHERE` que se pliega a verdadero
+(código `WHERE_ALWAYS_TRUE`; alcance exacto y límites en
+[`../adr/0020-sql-guard-tautological-where.md`](../adr/0020-sql-guard-tautological-where.md)).
 
 ---
 
 #### 22. `nz_delete`
 
-Mismo patrón que `nz_update` con `where` obligatorio, `dry_run` default `true`.
+Mismo patrón que `nz_update` con `where` obligatorio, `dry_run` default `true` y
+`confirm_full_table` default `false`.
 
 **Output** (dry-run `true`): `{ "deleted": 0, "would_delete": N, "dry_run": true, "confirm_required": true, "duration_ms": T }`
 
