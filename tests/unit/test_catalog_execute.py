@@ -23,25 +23,87 @@ from nz_mcp.errors import NetezzaError
 
 def test_inject_limit_adds_limit_when_missing() -> None:
     out = inject_limit("SELECT a FROM t", 42)
-    assert "LIMIT" in out.upper()
-    assert "42" in out
+    assert out == "SELECT a FROM t\nLIMIT 42"
 
 
 def test_inject_limit_lowers_existing_limit() -> None:
     out = inject_limit("SELECT 1 LIMIT 999", 50)
-    assert "LIMIT" in out.upper()
-    assert "50" in out
+    assert out == "SELECT 1 LIMIT 50"
 
 
 def test_inject_limit_union() -> None:
     out = inject_limit("SELECT 1 UNION ALL SELECT 2", 7)
-    assert "LIMIT" in out.upper()
-    assert "7" in out
+    assert out == "SELECT 1 UNION ALL SELECT 2\nLIMIT 7"
 
 
 def test_inject_limit_not_select_raises() -> None:
     with pytest.raises(ValueError):
         inject_limit("DELETE FROM t WHERE id = 1", 10)
+
+
+# Issue #137: the executed text must be the text sql_guard validated. Re-serializing the
+# sqlglot tree with the postgres dialect rewrote Netezza SQL on its way to the server.
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT NVL(NOMBRE, 'x') AS N FROM DBO.T",
+        "SELECT DECODE(ESTADO, 1, 'A', 2, 'B', 'Z') AS E FROM DBO.T",
+        "SELECT NVL2(ID, 'a', 'b') AS V FROM DBO.T",
+        "SELECT ID FROM DBO.T ORDER BY ID NULLS LAST",
+        "SELECT ID FROM DBO.T WHERE regexp_like(NOMBRE, '^A')",
+        "SELECT STRPOS(NOMBRE, 'a') AS P FROM DBO.T",
+        "SELECT INSTR(NOMBRE, 'a') AS P FROM DBO.T",
+        "SELECT LAST_DAY(FECHA) AS V FROM DBO.T",
+        "SELECT DATE_PART('year', FECHA) AS V FROM DBO.T",
+        "SELECT SUBSTR(NOMBRE, 2, 3) AS V FROM DBO.T",
+        "SELECT ID FROM DBO.T WHERE X = 'it''s'",
+        'SELECT "MiCol" FROM DBO.T',
+    ],
+)
+def test_inject_limit_preserves_original_statement(sql: str) -> None:
+    assert inject_limit(sql, 100) == f"{sql}\nLIMIT 100"
+
+
+def test_inject_limit_keeps_a_lower_user_limit() -> None:
+    """A caller asking for 3 rows must not silently get ``max_rows`` rows."""
+    assert inject_limit("SELECT ID FROM DBO.T LIMIT 3", 100) == "SELECT ID FROM DBO.T LIMIT 3"
+
+
+def test_inject_limit_does_not_duplicate_limit() -> None:
+    out = inject_limit("SELECT ID FROM DBO.T LIMIT 999", 100)
+    assert out.upper().count("LIMIT") == 1
+    assert out == "SELECT ID FROM DBO.T LIMIT 100"
+
+
+def test_inject_limit_keeps_offset_when_lowering() -> None:
+    out = inject_limit("SELECT ID FROM DBO.T LIMIT 999 OFFSET 20", 50)
+    assert out == "SELECT ID FROM DBO.T LIMIT 50 OFFSET 20"
+
+
+def test_inject_limit_replaces_limit_all() -> None:
+    out = inject_limit("SELECT ID FROM DBO.T LIMIT ALL", 50)
+    assert out == "SELECT ID FROM DBO.T LIMIT 50"
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT a FROM (SELECT b FROM t LIMIT 5) x",
+        "WITH c AS (SELECT b FROM t LIMIT 5) SELECT * FROM c",
+    ],
+)
+def test_inject_limit_ignores_limit_inside_parentheses(sql: str) -> None:
+    assert inject_limit(sql, 10) == f"{sql}\nLIMIT 10"
+
+
+def test_inject_limit_drops_trailing_semicolon_before_appending() -> None:
+    assert inject_limit("SELECT a FROM t ;", 10) == "SELECT a FROM t\nLIMIT 10"
+
+
+def test_inject_limit_appends_on_a_new_line_after_a_line_comment() -> None:
+    """A trailing ``--`` comment would swallow a ``LIMIT`` appended on the same line."""
+    out = inject_limit("SELECT a FROM t -- why\n", 10)
+    assert out.splitlines()[-1] == "LIMIT 10"
 
 
 def test_execute_select_streams_rows(monkeypatch: pytest.MonkeyPatch) -> None:

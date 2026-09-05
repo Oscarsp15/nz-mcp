@@ -9,6 +9,7 @@ from typing import Any, Final, Protocol, cast
 
 import sqlglot
 from nzpy import ProgrammingError
+from sqlglot import Token, TokenType
 from sqlglot import expressions as exp
 
 from nz_mcp.auth import get_password
@@ -51,23 +52,60 @@ class _ConnectionLike(Protocol):
     def close(self) -> None: ...
 
 
+def _statement_body(sql: str, tokens: list[Token]) -> str:
+    """Return ``sql`` without its trailing semicolon, so a clause can be appended."""
+    if tokens and tokens[-1].token_type is TokenType.SEMICOLON:
+        return sql[: tokens[-1].start].rstrip()
+    return sql.rstrip()
+
+
+def _top_level_limit_span(tokens: list[Token]) -> tuple[int, int, int | None] | None:
+    """Locate the value of the statement-level ``LIMIT`` in the original text.
+
+    Returns ``(start, end, value)`` as character offsets of the token right after the
+    first depth-0 ``LIMIT`` keyword, with ``value`` set only when that token is an
+    integer literal (``LIMIT ALL`` yields ``None``). ``LIMIT`` inside parentheses
+    belongs to a subquery or a CTE and is left alone.
+    """
+    depth = 0
+    for index, tok in enumerate(tokens):
+        if tok.token_type is TokenType.L_PAREN:
+            depth += 1
+        elif tok.token_type is TokenType.R_PAREN:
+            depth -= 1
+        elif tok.token_type is TokenType.LIMIT and depth == 0 and index + 1 < len(tokens):
+            value_tok = tokens[index + 1]
+            is_int = value_tok.token_type is TokenType.NUMBER and value_tok.text.isdigit()
+            value = int(value_tok.text) if is_int else None
+            return (value_tok.start, value_tok.end + 1, value)
+    return None
+
+
 def inject_limit(sql: str, max_rows: int) -> str:
-    """Return SQL with ``LIMIT`` applied or lowered to ``max_rows`` when already present."""
+    """Return ``sql`` bounded by a statement-level ``LIMIT`` of at most ``max_rows``.
+
+    The statement is **never re-serialized**: sqlglot only reads it, to confirm it is a
+    SELECT / UNION and to locate an existing ``LIMIT``. What reaches Netezza is the text
+    the caller wrote and ``sql_guard`` validated, with at most the ``LIMIT`` value edited
+    in place. Re-printing the tree with the postgres dialect rewrote Netezza SQL on its
+    way out (``NVL`` to ``COALESCE``, ``DECODE`` / ``NVL2`` to ``CASE``, ``STRPOS`` to
+    ``POSITION``, ``LAST_DAY`` to a ``DATE_TRUNC`` expression, dropped ``NULLS LAST``)
+    and, because the limit literal was read from the wrong argument, silently raised a
+    caller's ``LIMIT 3`` to ``max_rows`` (issue #137).
+    """
     expr = sqlglot.parse_one(sql, read="postgres")
     if not isinstance(expr, (exp.Select, exp.Union)):
         raise ValueError("inject_limit expects a SELECT or UNION statement")
-    current: int | None = None
-    lim = expr.args.get("limit")
-    if isinstance(lim, exp.Limit):
-        lit = lim.this
-        if isinstance(lit, exp.Literal):
-            try:
-                current = int(lit.this)
-            except (TypeError, ValueError):
-                current = None
-    applied = max_rows if current is None else min(current, max_rows)
-    limited = expr.limit(applied)
-    return limited.sql(dialect="postgres")
+    tokens = sqlglot.tokenize(sql, read="postgres")
+    body = _statement_body(sql, tokens)
+    span = _top_level_limit_span(tokens)
+    if span is None:
+        # A newline, not a space: a trailing line comment would swallow the clause.
+        return f"{body}\nLIMIT {max_rows}"
+    start, end, current = span
+    if current is not None and current <= max_rows:
+        return body
+    return f"{body[:start]}{max_rows}{body[end:]}"
 
 
 def execute_select(
