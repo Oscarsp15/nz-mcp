@@ -46,6 +46,21 @@ Rutas completas al ejecutable para Claude Desktop (pipx vs `.venv`) y ejemplos d
 
 Campos opcionales por perfil en `~/.nz-mcp/profiles.toml` (se editan a mano): `security_level` (0-3, default `2` = negocia SSL con fallback a claro; `3` = SSL obligatorio) y `ca_certs` (ruta a un bundle CA en PEM para **verificar** el certificado del servidor; si se omite, la conexión SSL se establece sin verificar el certificado). Detalle en [docs/architecture/security-model.md](docs/architecture/security-model.md).
 
+## Gestión de perfiles
+
+Cada perfil vive en `~/.nz-mcp/profiles.toml`; la password va al keyring del SO, nunca al archivo.
+
+```bash
+nz-mcp add-profile prod --active      # alta interactiva: host, puerto, BD, usuario, password, modo
+nz-mcp list-profiles                  # nombres configurados
+nz-mcp edit-profile prod --mode read  # cambia campos sueltos, sin tocar la password
+nz-mcp remove-profile prod            # borra el perfil y su password del keyring
+```
+
+`add-profile` con un nombre que ya existe pide confirmación (default `No`) y, si aceptas, **reemplaza** todos los campos de esa sección en vez de duplicarla.
+
+`remove-profile` pide confirmación explícita antes de borrar la sección del TOML y la password del keyring. Si el perfil borrado era el activo, el archivo se queda sin `active`: elige otro con la variable `NZ_MCP_PROFILE` o editando el campo `active`.
+
 ## Configuración rápida en Claude Desktop
 
 `claude_desktop_config.json` (ajusta `command` al `nz-mcp` de pipx o del venv, ver guía arriba):
