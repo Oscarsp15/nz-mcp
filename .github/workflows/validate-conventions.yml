@@ -17,7 +17,7 @@ jobs:
       - name: Skip for bots
         if: startsWith(github.head_ref, 'dependabot/')
         run: echo "Skipping ${{ github.head_ref }} — bots use their own naming."
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         if: ${{ !startsWith(github.head_ref, 'dependabot/') }}
       - uses: actions/setup-python@v6
         if: ${{ !startsWith(github.head_ref, 'dependabot/') }}
@@ -52,7 +52,7 @@ jobs:
     name: PR title
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
@@ -88,7 +88,7 @@ jobs:
       - name: Skip for bots
         if: startsWith(github.head_ref, 'dependabot/')
         run: echo "Skipping ${{ github.head_ref }} — bots have their own PR body format."
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         if: ${{ !startsWith(github.head_ref, 'dependabot/') }}
       - uses: actions/setup-python@v6
         if: ${{ !startsWith(github.head_ref, 'dependabot/') }}
@@ -104,7 +104,7 @@ jobs:
     name: Commit subjects
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: actions/setup-python@v6
@@ -141,7 +141,7 @@ jobs:
     name: Repo hygiene
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: actions/setup-python@v6
