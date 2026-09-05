@@ -49,4 +49,5 @@ Ver [tech-lead.md](../roles/tech-lead.md#plantilla-adr-para-copiar-a-docsadrnnnn
 | 0019 | [Dejar de declarar `outputSchema` en `tools/list`](0019-sin-output-schema.md) | aceptado | 2026-09-04 |
 | 0020 | [Rechazar predicados WHERE siempre verdaderos salvo confirmación explícita](0020-sql-guard-tautological-where.md) | aceptado | 2026-09-04 |
 | 0021 | [Diagnóstico real del fallo de conexión: capturar el logger de nzpy](0021-diagnostico-fallo-conexion.md) | aceptado | 2026-09-05 |
+| 0022 | [Validar el SQL de `catalog_overrides` con `sql_guard`](0022-validar-catalog-overrides.md) | aceptado | 2026-09-05 |
 | 0023 | [Mensajes de error accionables: detalle localizado + hint específico o nada](0023-mensajes-error-accionables.md) | aceptado | 2026-09-05 |

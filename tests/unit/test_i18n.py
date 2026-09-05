@@ -132,3 +132,52 @@ def test_the_only_exempt_key_is_exempt_because_its_hint_is_per_locale() -> None:
     assert "hint_es" in _placeholders(msg["es"])
     assert "hint_en" in _placeholders(msg["en"])
     assert _placeholders(msg["es"]) - _placeholders(msg["en"]) == frozenset(["hint_es"])
+
+
+def test_catalog_override_rejection_renders_in_both_locales() -> None:
+    """The rejection context must satisfy the placeholders of the ES and EN messages.
+
+    ``server._error_response`` formats the message with the raw error context, so a
+    mismatch between the two would surface as a ``KeyError`` at the tool boundary.
+    """
+    from nz_mcp.errors import GuardRejectedError
+    from nz_mcp.server import _error_response
+
+    exc = GuardRejectedError(
+        code="CATALOG_OVERRIDE_REJECTED",
+        query_id="list_tables",
+        profile="prod",
+        reason="STATEMENT_NOT_ALLOWED",
+    )
+    payload = _error_response(exc.code, **exc.context)["error"]
+
+    assert payload["code"] == "CATALOG_OVERRIDE_REJECTED"
+    for message in (payload["message_es"], payload["message_en"]):
+        assert "list_tables" in message
+        assert "prod" in message
+        assert "STATEMENT_NOT_ALLOWED" in message
+
+
+def test_catalog_override_rejection_carries_a_top_level_hint() -> None:
+    """The rejection must reach the AI through the promoted hint pair (ADR 0023).
+
+    A rejected override is the user's config, not a call the model can retry: without a
+    hint naming the profiles.toml key, the payload says "no" and nothing else.
+    """
+    from nz_mcp.errors import GuardRejectedError
+    from nz_mcp.server import _error_response
+
+    exc = GuardRejectedError(
+        code="CATALOG_OVERRIDE_REJECTED",
+        query_id="list_tables",
+        profile="prod",
+        reason="NOT_A_SELECT",
+        statement_kind="SHOW",
+    )
+    payload = _error_response(exc.code, **exc.context)["error"]
+
+    for hint in (payload["hint_es"], payload["hint_en"]):
+        assert hint is not None
+        assert "catalog_overrides.list_tables" in hint
+        assert "prod" in hint
+        assert "SHOW" in hint

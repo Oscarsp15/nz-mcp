@@ -176,6 +176,16 @@ def test_invalid_catalog_overrides_rejected() -> None:
     assert probe_has_hard_failure(run)
 
 
+def test_catalog_override_rejected_by_the_guard_is_a_config_error() -> None:
+    """``probe-catalog`` diagnoses a non-read override instead of running it (issue #139)."""
+    prof = _profile(catalog_overrides={"list_databases": "DROP TABLE ADMIN.T"})
+    run = run_probe_catalog(prof)
+    assert run.config_error is not None
+    assert "CATALOG_OVERRIDE_REJECTED" in run.config_error
+    assert run.results == ()
+    assert probe_has_hard_failure(run)
+
+
 def test_json_shape() -> None:
     from nz_mcp.catalog.probe import ProbeResult, ProbeRun
 

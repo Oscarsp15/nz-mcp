@@ -35,6 +35,15 @@ _LISTING_TOOL_HINTS: Final[dict[str, str]] = {
     "procedure": "OBJECT_NOT_FOUND.HINT.PROCEDURE",
 }
 
+# Rejection reasons of a catalog override that have their own way out. Anything else
+# (a plain sql_guard code) falls back to ``.HINT.GUARD``, which quotes the code.
+_OVERRIDE_REASON_HINTS: Final[dict[str, str]] = {
+    "NOT_A_SELECT": "GUARD_REJECTED.CATALOG_OVERRIDE_REJECTED.HINT.NOT_A_SELECT",
+    "SELECT_INTO": "GUARD_REJECTED.CATALOG_OVERRIDE_REJECTED.HINT.SELECT_INTO",
+    "UNRESOLVED_BD_MARKER": "GUARD_REJECTED.CATALOG_OVERRIDE_REJECTED.HINT.UNRESOLVED_BD_MARKER",
+}
+_OVERRIDE_FALLBACK_HINT: Final[str] = "GUARD_REJECTED.CATALOG_OVERRIDE_REJECTED.HINT.GUARD"
+
 # Ordered rules, first match wins, matched lowercase against the sanitized driver text.
 # Kept as data (not nested ifs) so a newly observed message costs one tuple entry.
 # "Multiple-row VALUES lists are not supported" is verbatim NPS wording (see issue #133).
@@ -83,7 +92,31 @@ def hints_for_error(code: str, context: Mapping[str, Any]) -> dict[str, str] | N
         return _object_not_found_hints(context)
     if code == "NETEZZA_ERROR":
         return _netezza_hints(str(context.get("detail", "")))
+    if code == "CATALOG_OVERRIDE_REJECTED":
+        return _catalog_override_hints(context)
     return None
+
+
+def _catalog_override_hints(context: Mapping[str, Any]) -> dict[str, str] | None:
+    """Name the exact ``profiles.toml`` key to edit and the way out for this reason.
+
+    The offending SQL is the user's own config, so nz-mcp cannot repair it and never
+    echoes it back; pointing at the key is the whole actionable part. Without
+    ``query_id`` and ``profile`` there is no key to point at, so no hint is emitted.
+    """
+    query_id = context.get("query_id")
+    profile = context.get("profile")
+    if not query_id or not profile:
+        return None
+    reason = str(context.get("reason", ""))
+    key = _OVERRIDE_REASON_HINTS.get(reason, _OVERRIDE_FALLBACK_HINT)
+    return both(
+        key,
+        query_id=query_id,
+        profile=profile,
+        reason=reason,
+        statement_kind=context.get("statement_kind", "UNKNOWN"),
+    )
 
 
 def _object_not_found_hints(context: Mapping[str, Any]) -> dict[str, str] | None:

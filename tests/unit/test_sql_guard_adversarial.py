@@ -9,7 +9,12 @@ import pytest
 import sqlglot
 
 from nz_mcp.errors import GuardRejectedError
-from nz_mcp.sql_guard import StatementKind, _assert_selective_where, validate
+from nz_mcp.sql_guard import (
+    StatementKind,
+    _assert_selective_where,
+    validate,
+    validate_catalog_override,
+)
 
 
 @pytest.mark.adversarial
@@ -263,3 +268,105 @@ def test_confirm_full_table_does_not_grant_mode_privileges() -> None:
 def test_tautological_where_in_select_is_allowed() -> None:
     """The check targets mutations only; a SELECT scanning everything is not destructive."""
     assert validate("SELECT * FROM t WHERE 1 = 1", mode="read").kind is StatementKind.SELECT
+
+
+# --- catalog_overrides (profiles.toml) ----------------------------------------
+# The SQL of a catalog override used to reach the driver verbatim, bypassing barriers 1
+# and 2 (issue #139, ADR 0022). Everything below must stay rejected.
+
+
+@pytest.mark.adversarial
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "DELETE FROM _V_TABLE WHERE 1 = 1",
+        "DROP TABLE ADMIN.CUSTOMERS",
+        "TRUNCATE TABLE ADMIN.CUSTOMERS",
+        "INSERT INTO ADMIN.AUDIT VALUES (1)",
+        "UPDATE ADMIN.CUSTOMERS SET NAME = 'x' WHERE ID = 1",
+        "SELECT DATABASE FROM _V_DATABASE; DROP TABLE ADMIN.CUSTOMERS",
+        "SELECT DATABASE FROM _V_DATABASE; DELETE FROM ADMIN.CUSTOMERS WHERE ID = 1",
+        "GRANT ALL ON ADMIN.CUSTOMERS TO PUBLIC",
+        "CALL ADMIN.SOME_PROC(?)",
+        "CREATE TABLE ADMIN.EXFIL AS SELECT * FROM ADMIN.CUSTOMERS",
+        "WITH x AS (DELETE FROM ADMIN.T WHERE ID = 1 RETURNING *) SELECT * FROM x",
+        "SELECT * INTO ADMIN.EXFIL FROM ADMIN.CUSTOMERS",
+        "SHOW TABLES",
+        "EXPLAIN SELECT 1",
+        "   ",
+        "NOT SQL AT ALL",
+    ],
+)
+def test_catalog_override_rejects_non_read_statements(sql: str) -> None:
+    with pytest.raises(GuardRejectedError) as exc:
+        validate_catalog_override(sql, query_id="list_databases", profile="dev")
+    assert exc.value.code == "CATALOG_OVERRIDE_REJECTED"
+
+
+@pytest.mark.adversarial
+def test_catalog_override_rejects_nzplsql_procedure_body() -> None:
+    """A profile override cannot smuggle a procedure definition into a read path.
+
+    ``validate`` answers this one with ``PermissionDeniedError`` (admin required), not
+    ``GuardRejectedError``; the override validator must catch both, otherwise it escapes
+    as a permission problem of the caller instead of a broken profile.
+    """
+    sql = (
+        "CREATE OR REPLACE PROCEDURE ADMIN.P() RETURNS INT LANGUAGE NZPLSQL AS BEGIN_PROC END_PROC"
+    )
+    with pytest.raises(GuardRejectedError) as exc:
+        validate_catalog_override(sql, query_id="list_databases", profile="dev")
+    assert exc.value.code == "CATALOG_OVERRIDE_REJECTED"
+    assert exc.value.context["reason"] == "PERMISSION_DENIED"
+
+
+@pytest.mark.adversarial
+def test_catalog_override_rejects_select_into_materializing_a_table() -> None:
+    """``SELECT ... INTO t`` classifies as a SELECT but writes a table: a read's clothes."""
+    with pytest.raises(GuardRejectedError) as exc:
+        validate_catalog_override(
+            "SELECT DATABASE INTO ADMIN.EXFIL FROM _V_DATABASE",
+            query_id="list_databases",
+            profile="dev",
+        )
+    assert exc.value.context["reason"] == "SELECT_INTO"
+
+
+@pytest.mark.adversarial
+def test_catalog_override_rejects_unresolvable_cross_db_marker() -> None:
+    """A ``<BD>`` that is not the ``<BD>..`` sentinel would reach the driver unrendered."""
+    with pytest.raises(GuardRejectedError) as exc:
+        validate_catalog_override(
+            "SELECT SCHEMA FROM <BD>_V_SCHEMA",
+            query_id="list_schemas",
+            profile="dev",
+        )
+    assert exc.value.context["reason"] == "UNRESOLVED_BD_MARKER"
+
+
+@pytest.mark.adversarial
+def test_catalog_override_rejection_names_the_entry_without_echoing_the_sql() -> None:
+    """The user must learn which override broke; the SQL itself is their config, not ours."""
+    with pytest.raises(GuardRejectedError) as exc:
+        validate_catalog_override(
+            "DROP TABLE ADMIN.SECRET_TABLE",
+            query_id="list_tables",
+            profile="prod",
+        )
+    assert exc.value.context["query_id"] == "list_tables"
+    assert exc.value.context["profile"] == "prod"
+    assert exc.value.context["reason"] == "STATEMENT_NOT_ALLOWED"
+    assert "SECRET_TABLE" not in str(exc.value)
+
+
+@pytest.mark.adversarial
+def test_catalog_override_accepts_a_legitimate_read() -> None:
+    """A real override keeps working: cross-db marker, placeholders, CTE and UNION."""
+    sql = (
+        "WITH s AS (SELECT SCHEMA, OWNER FROM <BD>.._V_SCHEMA WHERE (? IS NULL OR SCHEMA = ?)) "
+        "SELECT SCHEMA, OWNER FROM s UNION ALL SELECT 'X', 'Y'"
+    )
+    parsed = validate_catalog_override(sql, query_id="list_schemas", profile="dev")
+    assert parsed.kind is StatementKind.SELECT
+    # The stored text is returned untouched: rendering the marker is a parsing artifact.
+    assert parsed.raw == sql

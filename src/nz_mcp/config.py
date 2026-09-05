@@ -64,7 +64,9 @@ class Profile(BaseModel):
     ca_certs: str | None = None
     max_rows_default: int = Field(default=DEFAULT_MAX_ROWS, ge=1, le=MAX_ROWS_CAP)
     timeout_s_default: int = Field(default=DEFAULT_TIMEOUT_S, ge=1, le=TIMEOUT_S_CAP)
-    # Catalog overrides run as-is and do not go through sql_guard.
+    # Catalog overrides replace a registered catalog query by ``query_id``. They are
+    # user-written SQL, so sql_guard validates each one as a read-only SELECT before it
+    # reaches the driver (see catalog/resolver.py and docs/adr/0022-*.md).
     catalog_overrides: dict[str, str] = Field(default_factory=dict)
 
 

@@ -125,6 +125,10 @@ list_databases = "SELECT DATABASE, OWNER FROM CUSTOM_DB_VIEW ORDER BY DATABASE"
 Contrato:
 
 - Clave = `CatalogQuery.id` (ej. `list_databases`).
-- Valor = SQL alternativo.
+- Valor = SQL alternativo, que debe ser un **`SELECT` de solo lectura**.
 - Si el `query_id` no existe en `CATALOG_QUERY_MAP`, el perfil es inválido.
-- El SQL override se ejecuta como configuración local del usuario.
+- El SQL override pasa por `sql_guard` antes de ejecutarse, como cualquier otra
+  sentencia: `resolve_query` valida todos los overrides del perfil y rechaza con
+  `CATALOG_OVERRIDE_REJECTED` el que no sea un `SELECT` (ADR 0022). `WITH ... SELECT`,
+  las uniones de `SELECT`, los placeholders `?` y el marcador `<BD>..` están permitidos;
+  `SHOW`, `EXPLAIN` y `SELECT ... INTO` no.
