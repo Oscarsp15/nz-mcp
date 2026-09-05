@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable, Sequence
 
 import pytest
@@ -15,6 +16,7 @@ from nz_mcp.connection import (
     CAUSE_HOST_UNREACHABLE,
     CAUSE_TLS_FAILED,
     CAUSE_UNKNOWN,
+    _DriverDiagnosticsHandler,
     classify_connection_failure,
     open_connection,
 )
@@ -256,6 +258,26 @@ def test_unclassified_failure_falls_back_to_unknown(monkeypatch: pytest.MonkeyPa
 
     assert err.context["cause"] == CAUSE_UNKNOWN
     assert err.context["detail"] == "something the driver never said before"
+
+
+def test_diagnostics_handler_ignores_other_threads() -> None:
+    """A concurrent connection's records must not reach this connection's detail.
+
+    The ``nzpy`` logger is process-wide, and each caller sanitizes only with its own
+    password, so a record from another thread could carry an unsanitized secret here.
+    """
+    handler = _DriverDiagnosticsHandler()
+    logger = logging.getLogger("nzpy")
+    logger.addHandler(handler)
+    try:
+        logger.warning("from this thread")
+        other = threading.Thread(target=lambda: logger.warning("from another thread"))
+        other.start()
+        other.join()
+    finally:
+        logger.removeHandler(handler)
+
+    assert handler.messages == ["from this thread"]
 
 
 def test_captured_driver_text_is_sanitized(monkeypatch: pytest.MonkeyPatch) -> None:

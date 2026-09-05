@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from contextlib import contextmanager, suppress
 from typing import TYPE_CHECKING, Final
 
@@ -99,15 +100,25 @@ _CONTROL_FLOW_MARKER: Final[re.Pattern[str]] = re.compile(r"^Error in conn_\w+$"
 
 
 class _DriverDiagnosticsHandler(logging.Handler):
-    """Collect the messages nzpy logs while a connection is being opened."""
+    """Collect the messages nzpy logs while a connection is being opened.
+
+    Records from other threads are ignored on purpose. The ``nzpy`` logger is a
+    process-wide singleton, so two connections opening at once would each see the
+    other's records; since the caller only sanitizes with *its own* password, a
+    concurrent connection's password could reach this one's ``detail``. Dispatch is
+    synchronous today, so this is a guard against a future thread pool, not a live bug.
+    """
 
     def __init__(self) -> None:
         super().__init__(level=logging.WARNING)
         self.messages: list[str] = []
+        self._thread_id = threading.get_ident()
 
     def emit(self, record: logging.LogRecord) -> None:
         # A broken log record must never turn into a connection failure.
         with suppress(Exception):
+            if record.thread != self._thread_id:
+                return
             self.messages.append(record.getMessage())
 
 
