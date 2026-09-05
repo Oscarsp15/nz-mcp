@@ -74,7 +74,13 @@ def test_listings_have_json_schemas() -> None:
     assert len(listings) >= len(EXPECTED_V010A0)
     for listing in listings:
         assert listing.input_schema.get("type") == "object"
-        assert listing.output_schema.get("type") == "object"
+
+
+@pytest.mark.contract
+def test_listings_do_not_carry_an_output_schema() -> None:
+    """Listings only describe what ``tools/list`` advertises (ADR 0019)."""
+    for listing in list_tools():
+        assert not hasattr(listing, "output_schema")
 
 
 @pytest.mark.contract

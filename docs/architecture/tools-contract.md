@@ -741,7 +741,7 @@ Opcionalmente persiste el DDL al filesystem del servidor MCP cuando se pasa `out
 | `include_resource_in_response` | bool (default `false`) | Sólo aplica cuando `output_path` está presente. Default `false`: el bloque resource se **omite** del response (sólo `TextContent` summary + `meta`) para evitar exceder el cap MCP con DDLs grandes. `true` restablece la forma anterior (resource + path); el caller asume el riesgo de truncamiento. |
 | `include_header` | bool (default `true`) | Sólo aplica cuando `output_path` está presente. Default `true`: prepende un header SQL (`-- Database/Schema/Object/Exported …` + `SET CATALOG <db>;`) al archivo para que sea auto-contenido y re-ejecutable. `false` escribe el DDL byte-idéntico al `text` del resource. |
 
-**Output exitoso** (`structuredContent`): objeto con `content` (array de bloques MCP serializados) y `meta` (metadatos: `object_type`, `database`, `schema`, `name`, `resource_uri`, `duration_ms`, y según tipo `reconstructed`/`notes`, `size_bytes`/`warning`, etc.). Cuando `output_path` se proveyó y la escritura tuvo éxito, `meta` añade:
+**Output exitoso**: los bloques MCP viajan en `content` (EmbeddedResource del DDL + TextContent de resumen) y `structuredContent` lleva únicamente `meta`, sin re-serializar los bloques (ver [ADR 0019](../adr/0019-sin-output-schema.md)). `meta` contiene los metadatos: `object_type`, `database`, `schema`, `name`, `resource_uri`, `duration_ms`, y según tipo `reconstructed`/`notes`, `size_bytes`/`warning`, etc. Cuando `output_path` se proveyó y la escritura tuvo éxito, `meta` añade:
 
 - `output_path`: ruta absoluta del archivo escrito.
 - `bytes_written`: longitud en bytes del payload UTF-8 escrito (incluye el header cuando `include_header=true`).

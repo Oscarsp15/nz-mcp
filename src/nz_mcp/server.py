@@ -20,18 +20,21 @@ from nz_mcp.config import Profile, get_active_profile
 from nz_mcp.errors import InvalidInputError, NzMcpError, PermissionDeniedError
 from nz_mcp.i18n import MESSAGES, both
 from nz_mcp.logging_config import configure_logging_for_stdio
-from nz_mcp.tools.registry import TOOLS, OutputKind, ToolSpec
+from nz_mcp.tools.registry import TOOLS, ToolSpec
 
 _MODE_RANK = {"read": 0, "write": 1, "admin": 2}
 
 
 @dataclass(frozen=True, slots=True)
 class ToolListing:
+    """What ``tools/list`` advertises for a single tool.
+
+    No output schema is advertised on purpose: see ``docs/adr/0019-sin-output-schema.md``.
+    """
+
     name: str
     description: str
     input_schema: dict[str, Any]
-    output_schema: dict[str, Any]
-    output_kind: OutputKind
     annotations: dict[str, Any]
 
 
@@ -41,8 +44,6 @@ def list_tools() -> list[ToolListing]:
             name=spec.name,
             description=spec.description,
             input_schema=spec.input_model.model_json_schema(),
-            output_schema=spec.output_model.model_json_schema(),
-            output_kind=spec.output_kind,
             annotations=dict(spec.annotations),
         )
         for spec in TOOLS.values()
@@ -190,13 +191,11 @@ def build_mcp_server(*, config_path: Path | None = None) -> Server[Any, Any]:
             return out
         if isinstance(out, tuple):
             blocks, meta = out
-            structured = {
-                "content": [_serialize_content_block(b) for b in blocks],
-                "meta": meta.model_dump(mode="json", by_alias=True),
-            }
+            # The blocks themselves are the payload; only the small metadata envelope is
+            # mirrored into structuredContent so it is not re-sent as serialized blocks.
             return types.CallToolResult(
                 content=blocks,
-                structuredContent=structured,
+                structuredContent={"meta": meta.model_dump(mode="json", by_alias=True)},
                 isError=False,
             )
         return {"result": out.model_dump(mode="json", by_alias=True)}
@@ -218,11 +217,16 @@ async def _run_stdio_server_async(config_path: Path | None) -> None:
 
 
 def _to_mcp_tool(listing: ToolListing) -> types.Tool:
+    """Adapt a listing to the MCP ``Tool`` shape.
+
+    ``outputSchema`` is optional in MCP (2025-06-18) and is deliberately omitted: it was
+    the single largest part of the catalog injected into every session, and declaring it
+    also forces a conforming ``structuredContent`` on every reply.
+    """
     return types.Tool(
         name=listing.name,
         description=listing.description,
         inputSchema=_inline_refs(listing.input_schema),
-        outputSchema=_tool_output_schema(listing.output_schema, output_kind=listing.output_kind),
         annotations=types.ToolAnnotations.model_validate(listing.annotations),
     )
 
@@ -266,58 +270,6 @@ def _inline_refs(schema: dict[str, Any]) -> dict[str, Any]:
         return node
 
     return cast(dict[str, Any], _walk(out, frozenset()))
-
-
-def _tool_output_schema(
-    result_schema: dict[str, Any],
-    *,
-    output_kind: OutputKind = "model",
-) -> dict[str, Any]:
-    err_block: dict[str, Any] = {
-        "type": "object",
-        "additionalProperties": True,
-        "properties": {
-            "code": {"type": "string"},
-            "message_en": {"type": "string"},
-            "message_es": {"type": "string"},
-            "context": {"type": "object"},
-        },
-        "required": ["code", "message_en", "message_es", "context"],
-    }
-    if output_kind == "content_blocks":
-        inlined = _inline_refs(result_schema)
-        props = inlined.get("properties") or {}
-        content_s = props.get("content")
-        meta_s = props.get("meta")
-        if content_s is None or meta_s is None:
-            raise ValueError("content_blocks tools require output_model with content and meta")
-        return {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "content": content_s,
-                "meta": meta_s,
-                "error": err_block,
-            },
-            "oneOf": [
-                {"required": ["content", "meta"]},
-                {"required": ["error"]},
-            ],
-        }
-
-    inlined = _inline_refs(result_schema)
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "result": inlined,
-            "error": err_block,
-        },
-        "oneOf": [
-            {"required": ["result"]},
-            {"required": ["error"]},
-        ],
-    }
 
 
 __all__ = [

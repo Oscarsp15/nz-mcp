@@ -122,7 +122,7 @@ Ver `docs/architecture/security-model.md` § "Casos adversariales que el guard D
 
 - Levantar el server en proceso, cliente fake JSON-RPC, verificar:
   - `tools/list` devuelve exactamente las 16 tools de [tools-contract.md](../architecture/tools-contract.md).
-  - Cada tool tiene `inputSchema`, `outputSchema`, `description`, `annotations`.
+  - Cada tool tiene `inputSchema`, `description`, `annotations`. `outputSchema` NO se declara (ADR 0019).
   - Errores siguen el formato del contrato.
 
 ## Cobertura

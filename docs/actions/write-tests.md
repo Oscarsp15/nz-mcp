@@ -140,7 +140,6 @@ def test_all_tools_have_schemas():
     server = build_server()
     for tool in server.list_tools():
         assert tool.input_schema, f"{tool.name} missing input_schema"
-        assert tool.output_schema, f"{tool.name} missing output_schema"
         assert tool.description, f"{tool.name} missing description"
 ```
 
