@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from nz_mcp.catalog import procedures as cat_proc
+from nz_mcp.catalog.procedures import ProcedureDdl
 from nz_mcp.config import MAX_ROWS_CAP
 from nz_mcp.tools.procedures import (
     PROC_DDL_DEFAULT_MAX_BYTES,
@@ -27,6 +29,15 @@ from nz_mcp.tools.procedures import (
     nz_get_procedures_ddl_batch,
     nz_list_procedures,
 )
+
+
+def _as_layout(text: str, header_lines: int = 3) -> ProcedureDdl:
+    """What the catalog hands the tool: DDL text plus the size of its header.
+
+    Three lines is the shape of a rebuilt DDL with no RETURNS clause: CREATE,
+    LANGUAGE NZPLSQL AS and the injected BEGIN_PROC delimiter.
+    """
+    return ProcedureDdl(text=text, header_lines=header_lines)
 
 
 def test_list_input_accepts_schema_alias() -> None:
@@ -91,10 +102,10 @@ def test_nz_describe_procedure_happy(monkeypatch: pytest.MonkeyPatch, two_profil
 
 
 def test_nz_get_procedure_ddl_happy(monkeypatch: pytest.MonkeyPatch, two_profiles: Path) -> None:
-    def _fake_ddl(*_a: object, **_k: object) -> str:
-        return "CREATE OR REPLACE PROCEDURE ..."
+    def _fake_ddl(*_a: object, **_k: object) -> ProcedureDdl:
+        return _as_layout("CREATE OR REPLACE PROCEDURE ...", header_lines=0)
 
-    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl", _fake_ddl)
+    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl_with_layout", _fake_ddl)
     out = nz_get_procedure_ddl(
         GetProcedureDdlInput(database="D", procedure_schema="PUBLIC", procedure="SP"),
         config_path=two_profiles,
@@ -111,10 +122,10 @@ def test_nz_get_procedure_ddl_large_emits_warning(
     """Raising max_bytes above the warn threshold still surfaces the size warning."""
     big = "P" * (PROC_DDL_WARN_BYTES + 1)
 
-    def _fake_ddl(*_a: object, **_k: object) -> str:
-        return big
+    def _fake_ddl(*_a: object, **_k: object) -> ProcedureDdl:
+        return _as_layout(big, header_lines=0)
 
-    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl", _fake_ddl)
+    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl_with_layout", _fake_ddl)
     out = nz_get_procedure_ddl(
         GetProcedureDdlInput(
             database="D",
@@ -248,10 +259,10 @@ def test_nz_get_procedure_ddl_default_variant_is_raw(
         "END_PROC;"
     )
 
-    def _fake_ddl(*_a: object, **_k: object) -> str:
-        return raw_source
+    def _fake_ddl(*_a: object, **_k: object) -> ProcedureDdl:
+        return _as_layout(raw_source)
 
-    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl", _fake_ddl)
+    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl_with_layout", _fake_ddl)
     out = nz_get_procedure_ddl(
         GetProcedureDdlInput(database="D", procedure_schema="PUBLIC", procedure="P"),
         config_path=two_profiles,
@@ -275,10 +286,10 @@ def test_nz_get_procedure_ddl_variant_raw_explicit(
         "END_PROC;"
     )
 
-    def _fake_ddl(*_a: object, **_k: object) -> str:
-        return raw_source
+    def _fake_ddl(*_a: object, **_k: object) -> ProcedureDdl:
+        return _as_layout(raw_source)
 
-    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl", _fake_ddl)
+    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl_with_layout", _fake_ddl)
     out = nz_get_procedure_ddl(
         GetProcedureDdlInput(database="D", procedure_schema="PUBLIC", procedure="P", variant="raw"),
         config_path=two_profiles,
@@ -300,10 +311,10 @@ def test_nz_get_procedure_ddl_variant_clean_strips_comments(
         "END_PROC;"
     )
 
-    def _fake_ddl(*_a: object, **_k: object) -> str:
-        return raw_source
+    def _fake_ddl(*_a: object, **_k: object) -> ProcedureDdl:
+        return _as_layout(raw_source)
 
-    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl", _fake_ddl)
+    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl_with_layout", _fake_ddl)
     out = nz_get_procedure_ddl(
         GetProcedureDdlInput(
             database="D", procedure_schema="PUBLIC", procedure="P", variant="clean"
@@ -330,10 +341,10 @@ def test_nz_get_procedure_ddl_sizes_always_present(
         "END_PROC;"
     )
 
-    def _fake_ddl(*_a: object, **_k: object) -> str:
-        return raw_source
+    def _fake_ddl(*_a: object, **_k: object) -> ProcedureDdl:
+        return _as_layout(raw_source)
 
-    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl", _fake_ddl)
+    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl_with_layout", _fake_ddl)
     for variant in ("raw", "clean"):
         out = nz_get_procedure_ddl(
             GetProcedureDdlInput(
@@ -522,7 +533,9 @@ def test_nz_get_procedure_ddl_truncates_by_default_and_hints(
 ) -> None:
     ddl = _big_ddl(4000)
     assert len(ddl.encode("utf-8")) > PROC_DDL_DEFAULT_MAX_BYTES
-    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl", lambda *_a, **_k: ddl)
+    monkeypatch.setattr(
+        "nz_mcp.tools.procedures.get_procedure_ddl_with_layout", lambda *_a, **_k: _as_layout(ddl)
+    )
 
     out = nz_get_procedure_ddl(
         GetProcedureDdlInput(database="D", procedure_schema="PUBLIC", procedure="P"),
@@ -543,11 +556,64 @@ def test_nz_get_procedure_ddl_truncates_by_default_and_hints(
     assert first_source_line == "  x := 0; -- filler comment padding the line"
 
 
+def test_hint_after_native_delimiters_does_not_repeat_a_delivered_line(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """Truncation over a source that already carries BEGIN_PROC (audit of #184).
+
+    Both shapes produce byte-identical DDL, so a resume line inferred from the text
+    counts one header line too many here and re-sends a line the caller already has.
+    The whole chain runs: the real builder, the real truncation and the section tool.
+    """
+    inner = "\n".join(f"  x := {i}; -- filler comment padding the line" for i in range(1, 400))
+    source = f"BEGIN_PROC\n{inner}\nEND_PROC;"
+    row = ("P", "ADMIN", "()", "", source, "P()")
+    monkeypatch.setattr(cat_proc, "_fetch_procedure_rows", lambda *_a, **_k: [row])
+    monkeypatch.setattr(cat_proc, "_pick_procedure_row", lambda rows, *_x: rows[0])
+
+    out = nz_get_procedure_ddl(
+        GetProcedureDdlInput(
+            database="D",
+            procedure_schema="PUBLIC",
+            procedure="P",
+            max_bytes=PROC_DDL_MIN_MAX_BYTES,
+        ),
+        config_path=two_profiles,
+    )
+    assert out.truncated is True
+    assert out.hint is not None
+    resume = int(out.hint.split("from_line=")[1].split(",")[0])
+
+    section = nz_get_procedure_section(
+        GetProcedureSectionInput(
+            database="D",
+            procedure_schema="PUBLIC",
+            procedure="P",
+            section="range",
+            from_line=resume,
+            to_line=resume + 4,
+        ),
+        config_path=two_profiles,
+    )
+
+    source_lines = source.splitlines()
+    delivered = out.ddl.splitlines()
+    header_lines = len(delivered) - (resume - 1)
+    # BEGIN_PROC came from the catalog here: it is source line 1, not header.
+    assert header_lines == 2
+    assert delivered[header_lines] == "BEGIN_PROC"
+    # Nothing repeated and nothing skipped between the two calls.
+    assert delivered[header_lines:] == source_lines[: resume - 1]
+    assert section.content.splitlines()[0] == source_lines[resume - 1]
+
+
 def test_nz_get_procedure_ddl_under_cap_keeps_full_text(
     monkeypatch: pytest.MonkeyPatch, two_profiles: Path
 ) -> None:
     ddl = _big_ddl(10)
-    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl", lambda *_a, **_k: ddl)
+    monkeypatch.setattr(
+        "nz_mcp.tools.procedures.get_procedure_ddl_with_layout", lambda *_a, **_k: _as_layout(ddl)
+    )
 
     out = nz_get_procedure_ddl(
         GetProcedureDdlInput(database="D", procedure_schema="PUBLIC", procedure="P"),
@@ -562,7 +628,9 @@ def test_nz_get_procedure_ddl_clean_variant_respects_max_bytes(
     monkeypatch: pytest.MonkeyPatch, two_profiles: Path
 ) -> None:
     ddl = _big_ddl(4000)
-    monkeypatch.setattr("nz_mcp.tools.procedures.get_procedure_ddl", lambda *_a, **_k: ddl)
+    monkeypatch.setattr(
+        "nz_mcp.tools.procedures.get_procedure_ddl_with_layout", lambda *_a, **_k: _as_layout(ddl)
+    )
 
     out = nz_get_procedure_ddl(
         GetProcedureDdlInput(

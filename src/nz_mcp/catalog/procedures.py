@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from contextlib import closing
+from dataclasses import dataclass
 from typing import Any, Final, Protocol, cast
 
 from nz_mcp.auth import get_password
@@ -31,6 +32,23 @@ from nz_mcp.errors import (
     SectionNotFoundError,
 )
 from nz_mcp.logging_utils import sanitize
+
+
+@dataclass(frozen=True, slots=True)
+class ProcedureDdl:
+    """Reconstructed DDL plus the header size needed to map it onto the source.
+
+    ``header_lines`` counts the leading lines of ``text`` that are not part of
+    ``_V_PROCEDURE.PROCEDURESOURCE``: the rebuilt ``CREATE`` head, the
+    ``LANGUAGE NZPLSQL AS`` marker and, when it had to be injected, the
+    ``BEGIN_PROC`` delimiter. Consumers that translate DDL line numbers into source
+    line numbers (the truncation hint) must use it instead of inspecting the text:
+    an injected ``BEGIN_PROC`` and one stored by the catalog are indistinguishable.
+    """
+
+    text: str
+    header_lines: int
+
 
 # Maximum number of raw source lines returned by ``nz_get_procedure_section``
 # when ``section="range"``. Public because truncation hints elsewhere quote it.
@@ -157,35 +175,23 @@ def get_procedure_ddl(
     signature: str | None = None,
 ) -> str:
     """Return reconstructed ``CREATE OR REPLACE PROCEDURE`` DDL text."""
+    return get_procedure_ddl_with_layout(profile, database, schema, procedure, signature).text
+
+
+def get_procedure_ddl_with_layout(
+    profile: Profile,
+    database: str,
+    schema: str,
+    procedure: str,
+    signature: str | None = None,
+) -> ProcedureDdl:
+    """Return the DDL together with the header offset that maps it onto the source."""
     rows = _fetch_procedure_rows(profile, database, schema, procedure)
     row = _pick_procedure_row(rows, signature, procedure)
     return _build_procedure_ddl(schema, row)
 
 
-# Line that closes the reconstructed DDL header built by ``_build_procedure_ddl``.
-# After it come the ``BEGIN_PROC`` delimiter and verbatim ``PROCEDURESOURCE``, so
-# counting those lines yields the offset between DDL and source line numbers.
-_DDL_SOURCE_MARKER: Final[str] = "\nLANGUAGE NZPLSQL AS\n"
-
-# Delimiter line re-injected by ``_build_procedure_ddl``. It is not stored in
-# ``PROCEDURESOURCE``, so it counts as header and never as source line 1.
-_BEGIN_PROC_LINE: Final[re.Pattern[str]] = re.compile(r"^\s*BEGIN_PROC\s*$", re.IGNORECASE)
-
-
-def _ddl_header_lines(ddl: str) -> int:
-    """Count the DDL lines that precede ``PROCEDURESOURCE`` line 1."""
-    marker_at = ddl.find(_DDL_SOURCE_MARKER)
-    if marker_at < 0:
-        return 0
-    source_at = marker_at + len(_DDL_SOURCE_MARKER)
-    count = ddl.count("\n", 0, source_at)
-    first_line, _, _ = ddl[source_at:].partition("\n")
-    if _BEGIN_PROC_LINE.match(first_line):
-        count += 1
-    return count
-
-
-def truncate_procedure_ddl(ddl: str, max_bytes: int) -> tuple[str, int]:
+def truncate_procedure_ddl(ddl: str, max_bytes: int, *, header_lines: int) -> tuple[str, int]:
     """Cut ``ddl`` down to ``max_bytes`` UTF-8 bytes on raw source line boundaries.
 
     Returns ``(text, resume_line)`` where ``resume_line`` is the 1-indexed
@@ -194,11 +200,15 @@ def truncate_procedure_ddl(ddl: str, max_bytes: int) -> tuple[str, int]:
 
     Cutting on line boundaries (instead of raw bytes) keeps the returned text
     readable and lets the resume line be exact.
+
+    ``header_lines`` is the number of leading DDL lines that are **not** part of
+    ``PROCEDURESOURCE``. It cannot be recovered from ``ddl`` alone: a ``BEGIN_PROC``
+    line that ``_build_procedure_ddl`` injected and one the catalog really stores as
+    source line 1 produce byte-identical text. Only the builder knows which is which,
+    so it hands the number over in ``ProcedureDdl.header_lines``.
     """
     if len(ddl.encode("utf-8")) <= max_bytes:
         return ddl, 0
-
-    header_lines = _ddl_header_lines(ddl)
 
     kept: list[str] = []
     used = 0
@@ -227,7 +237,7 @@ def get_procedure_size(
     rows = _fetch_procedure_rows(profile, database, schema, procedure)
     row = _pick_procedure_row(rows, signature, procedure)
 
-    raw_ddl = _build_procedure_ddl(schema, row)
+    raw_ddl = _build_procedure_ddl(schema, row).text
     clean_ddl = strip_comments(raw_ddl)
 
     source = _ddl_get(row, "PROCEDURESOURCE")
@@ -406,7 +416,7 @@ def get_all_procedures_ddl(
         signature = _ddl_get(row, "PROCEDURESIGNATURE").strip()
         last_altered = _ddl_get(row, "CREATEDATE").strip()
 
-        ddl = _build_procedure_ddl(schema, row)
+        ddl = _build_procedure_ddl(schema, row).text
         size_bytes = len(ddl.encode("utf-8"))
         total_size_bytes += size_bytes
 
@@ -667,6 +677,15 @@ def _signature_clause_for_ddl(proc: str, signature: str, arguments: str) -> str:
     return sig_norm
 
 
+def _has_proc_delimiters(body: str) -> bool:
+    """True when the catalog source already carries ``BEGIN_PROC`` / ``END_PROC``."""
+    stripped = body.strip()
+    return bool(
+        re.match(r"^\s*BEGIN_PROC\b", stripped, re.IGNORECASE)
+        and re.search(r"\bEND_PROC\s*;?\s*$", stripped, re.IGNORECASE),
+    )
+
+
 def _wrap_nzplsql_body(body: str) -> str:
     """Wrap a raw procedure body with the NZPLSQL delimiters so it can be executed.
 
@@ -676,19 +695,14 @@ def _wrap_nzplsql_body(body: str) -> str:
 
     Idempotent: a body that already carries both delimiters is returned untouched.
     Leading whitespace is preserved on purpose - dropping it would shift every
-    ``PROCEDURESOURCE`` line number and break ``_ddl_header_lines``.
+    ``PROCEDURESOURCE`` line number.
     """
-    stripped = body.strip()
-    if re.match(r"^\s*BEGIN_PROC\b", stripped, re.IGNORECASE) and re.search(
-        r"\bEND_PROC\s*;?\s*$",
-        stripped,
-        re.IGNORECASE,
-    ):
+    if _has_proc_delimiters(body):
         return body
     return f"BEGIN_PROC\n{body.rstrip()}\nEND_PROC;\n"
 
 
-def _build_procedure_ddl(schema: str, row: Any) -> str:
+def _build_procedure_ddl(schema: str, row: Any) -> ProcedureDdl:
     proc = _ddl_get(row, "PROCEDURE").strip()
     args = _ddl_get(row, "ARGUMENTS").strip()
     returns = _ddl_get(row, "RETURNS").strip()
@@ -700,7 +714,13 @@ def _build_procedure_ddl(schema: str, row: Any) -> str:
     head = f"CREATE OR REPLACE PROCEDURE {sch}.{sig_use}"
     if ret_clause:
         head = f"{head}\n{ret_clause}"
-    return f"{head}\nLANGUAGE NZPLSQL AS\n{_wrap_nzplsql_body(source)}"
+    # Head lines, plus the LANGUAGE marker, plus the BEGIN_PROC line when this call is
+    # the one injecting it. Computed here because only here is it known.
+    header_lines = head.count("\n") + 2 + (0 if _has_proc_delimiters(source) else 1)
+    return ProcedureDdl(
+        text=f"{head}\nLANGUAGE NZPLSQL AS\n{_wrap_nzplsql_body(source)}",
+        header_lines=header_lines,
+    )
 
 
 # ── nz_find_table_references (issue #107) ────────────────────────────────────
