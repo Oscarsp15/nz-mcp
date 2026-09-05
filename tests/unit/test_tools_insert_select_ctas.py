@@ -213,6 +213,26 @@ def test_ctas_random_default_distribution(monkeypatch: pytest.MonkeyPatch) -> No
     assert "DISTRIBUTE ON RANDOM" in out["ddl_to_execute"]
 
 
+def test_ctas_distribute_before_organize(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Netezza grammar: DISTRIBUTE ON must come before ORGANIZE ON (issue #135)."""
+    p = _admin_profile()
+    monkeypatch.setattr("nz_mcp.catalog.ddl.table_exists", lambda *_a, **_k: False)
+    out = execute_create_table_as(
+        p,
+        database="DEV",
+        schema="PUBLIC",
+        table="O",
+        select_sql="SELECT KEYREGLA, F FROM PUBLIC.SRC",
+        distribution={"type": "HASH", "columns": ["KEYREGLA"]},
+        organized_on=["F"],
+        dry_run=True,
+        confirm=False,
+    )
+    ddl = str(out["ddl_to_execute"])
+    assert ddl.index("DISTRIBUTE ON") < ddl.index("ORGANIZE ON")
+    assert ddl.endswith("DISTRIBUTE ON HASH (KEYREGLA)\nORGANIZE ON (F)")
+
+
 def test_ctas_union_all_select(monkeypatch: pytest.MonkeyPatch) -> None:
     p = _admin_profile()
     monkeypatch.setattr("nz_mcp.catalog.ddl.table_exists", lambda *_a, **_k: False)

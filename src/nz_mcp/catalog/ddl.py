@@ -20,7 +20,8 @@ from nz_mcp.sql_guard import validate as guard_validate
 
 # Netezza ``DISTRIBUTE ON`` / ``ORGANIZE ON`` are not parsed by sqlglot; we validate the
 # ``CREATE TABLE (...)`` core with ``guard_validate``, then append fixed templates using
-# only validated identifiers (see docs/architecture/security-model.md).
+# only validated identifiers (see docs/architecture/security-model.md). Their order is
+# part of the Netezza grammar and is enforced by ``_with_netezza_clauses``.
 _TYPE_SAFE: Final[re.Pattern[str]] = re.compile(
     r"^[A-Za-z][A-Za-z0-9_]*(?:\(\s*\d+(?:\s*,\s*\d+)?\s*\))?$",
 )
@@ -108,6 +109,25 @@ def _build_organize_clause(organized_on: list[str] | None) -> str:
     return f"ORGANIZE ON ({', '.join(cols)})"
 
 
+def _with_netezza_clauses(
+    core_sql: str,
+    *,
+    distribution: dict[str, Any] | None,
+    organized_on: list[str] | None,
+) -> str:
+    """Append the Netezza storage clauses to a validated ``CREATE TABLE`` core.
+
+    The grammar is fixed: ``DISTRIBUTE ON`` first, ``ORGANIZE ON`` second. The reverse
+    order is a parse error on the server (``found 'DISTRIBUTE' ... expecting a keyword``),
+    so every table asked for with ``organized_on`` used to fail (issue #135).
+    """
+    pieces = [core_sql.rstrip(), _build_distribution_clause(distribution)]
+    org_clause = _build_organize_clause(organized_on)
+    if org_clause:
+        pieces.append(org_clause)
+    return "\n".join(pieces)
+
+
 def _build_create_table_base_sql(
     *,
     schema: str,
@@ -165,13 +185,11 @@ def execute_create_table(
             operation="execute_create_table",
             detail=f"Unexpected statement kind after validation: {parsed.kind}",
         )
-    org_clause = _build_organize_clause(organized_on)
-    dist_clause = _build_distribution_clause(distribution)
-    pieces = [parsed.raw.rstrip()]
-    if org_clause:
-        pieces.append(org_clause)
-    pieces.append(dist_clause)
-    full_sql = "\n".join(pieces)
+    full_sql = _with_netezza_clauses(
+        parsed.raw,
+        distribution=distribution,
+        organized_on=organized_on,
+    )
 
     if dry_run:
         return {
@@ -284,13 +302,11 @@ def execute_create_table_as(
             detail=f"Unexpected statement kind after validation: {parsed_core.kind}",
         )
 
-    org_clause = _build_organize_clause(organized_on)
-    dist_clause = _build_distribution_clause(distribution)
-    pieces: list[str] = [parsed_core.raw.rstrip()]
-    if org_clause:
-        pieces.append(org_clause)
-    pieces.append(dist_clause)
-    full_sql = "\n".join(pieces)
+    full_sql = _with_netezza_clauses(
+        parsed_core.raw,
+        distribution=distribution,
+        organized_on=organized_on,
+    )
 
     if dry_run:
         duration_ms = 0
