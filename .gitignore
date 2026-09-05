@@ -57,3 +57,6 @@ logs/
 
 # Worktrees temporales de agentes
 .claude/worktrees/
+
+# Lock de tareas programadas, local
+.claude/scheduled_tasks.lock

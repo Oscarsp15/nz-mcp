@@ -36,8 +36,10 @@ class SecretBytes(bytes):
     __slots__ = ()
 
     def __new__(cls, value: bytes = b"") -> SecretBytes:
-        # Same trap as ``Secret.__new__``: rebuilding from an instance must copy the
-        # real buffer, never a rendered form.
+        # Not the same trap as ``Secret.__new__``: ``bytes.__new__`` copies the buffer
+        # and never renders through ``__repr__``, so rebuilding from a ``SecretBytes``
+        # was already correct. This exists to keep that guarantee explicit and to
+        # survive a future ``__bytes__`` override on this class.
         return super().__new__(cls, memoryview(value).tobytes())
 
     def __repr__(self) -> str:
