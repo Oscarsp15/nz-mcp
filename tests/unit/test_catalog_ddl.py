@@ -98,6 +98,31 @@ def test_execute_create_table_hash_and_organize(monkeypatch: pytest.MonkeyPatch)
     assert "CREATE TABLE PUBLIC.T2" in sql
     assert "ORGANIZE ON (ID)" in sql
     assert "DISTRIBUTE ON HASH (ID)" in sql
+    # Netezza grammar: DISTRIBUTE ON must come before ORGANIZE ON (issue #135).
+    assert sql.index("DISTRIBUTE ON") < sql.index("ORGANIZE ON")
+    assert fake.cursor_obj.executed[0][0] == sql
+
+
+def test_execute_create_table_multi_column_organize_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A multi-column ORGANIZE ON stays after DISTRIBUTE ON too (issue #135)."""
+    fake = _FakeConn()
+    monkeypatch.setattr("nz_mcp.catalog.ddl.open_connection", lambda _p, _w: fake)
+    monkeypatch.setattr("nz_mcp.catalog.ddl.get_password", lambda _n: "pw")
+
+    out = execute_create_table(
+        _admin_profile(),
+        database="DEV",
+        schema="PUBLIC",
+        table="T3",
+        columns=[{"name": "ID", "type": "INTEGER"}, {"name": "F", "type": "DATE"}],
+        distribution={"type": "RANDOM"},
+        organized_on=["ID", "F"],
+        if_not_exists=False,
+    )
+    sql = str(out["ddl_to_execute"])
+    assert sql.endswith("DISTRIBUTE ON RANDOM\nORGANIZE ON (ID, F)")
 
 
 def test_execute_create_table_wrong_database(monkeypatch: pytest.MonkeyPatch) -> None:
