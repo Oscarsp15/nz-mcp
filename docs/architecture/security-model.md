@@ -9,6 +9,7 @@
 |---|---|
 | IA ejecuta SQL destructivo por error o prompt injection | `sql_guard` + tools con responsabilidad única + modos de perfil |
 | Credenciales de Netezza filtradas en logs o repo | `keyring` OS-native + sanitizer + test que falla si hay password en output |
+| Credencial impresa por el intérprete al pintar una traza (argumentos del frame) | La password viaja como `Secret` (subclase de `str` con `repr`/`str`/`format`/`encode` redactados) desde `auth.get_password`; ADR 0026 |
 | SQL injection en queries construidas dinámicamente | Parámetros del driver (nunca concatenación de strings) |
 | Denegación de servicio accidental (full table scan en billones de filas) | `LIMIT` forzado + `timeout_s` + cap de bytes en respuesta |
 | Exfiltración de datos masiva vía prompt injection | Cap bytes + logging estructurado + modo por perfil |
@@ -174,11 +175,25 @@ mode = "write"
 
 4. Al conectar: `password = keyring.get_password("nz-mcp", f"profile:{profile_name}")`.
 
+### La password en memoria: `Secret`
+
+`auth.get_password()` no devuelve una `str` desnuda sino un `Secret`
+(`nz_mcp/secret.py`), subclase de `str` cuyo `__repr__`, `__str__`, `__format__` y
+`encode()` están redactados a `***`. Motivo: el sanitizador solo cubre el texto que
+escribimos nosotros, y una traza la pinta el intérprete con **los argumentos de cada
+frame**, password incluida (issue #191). `open_connection` y `profile_check.run_checks`
+re-ligan además su propio argumento a `Secret`, así que un llamante que aún tenga una
+`str` tampoco puede filtrarla desde ahí hacia abajo, ni por los frames de `nzpy`.
+
+El valor real solo sale por `reveal()`, y el único sitio que lo usa es `store_password`
+(el backend de keyring necesita el texto). Alcance, límites y alternativas descartadas en
+[`../adr/0026-secret-sin-password-en-trazas.md`](../adr/0026-secret-sin-password-en-trazas.md).
+
 ### Reglas
 
 - `profiles.toml` **nunca** contiene password.
 - Test unitario: parsear `profiles.toml` y afirmar que ninguna clave tenga nombre conteniendo `pass`, `pwd`, `secret`, `token`, `key`.
-- Sanitizer de logs: regex que borra valores tras `password=`, `pwd=`, etc., más comparación contra el password conocido del perfil activo (si aparece en log → panic).
+- Sanitizer de logs: regex que borra valores tras `password=`, `pwd=`, etc., más comparación contra el password conocido del perfil activo (si aparece en log → panic). Es la **segunda** barrera: la primera es que la credencial sea un `Secret` que no se imprime a sí mismo.
 - Permisos de archivo: `profiles.toml` se crea con `0600` en Unix; en Windows, con ACL restringida al usuario actual.
 
 ### Qué NO usar (anti-patrones)
@@ -265,5 +280,6 @@ sobre el fichero, sino la garantía de que las rutas de catálogo solo pueden le
 - [ ] Tests adversariales de la lista cubren los casos añadidos.
 - [ ] `grep -i "password\|secret\|token"` en mi diff no muestra nada sospechoso.
 - [ ] Si añadí un logger, el sanitizer cubre el caso.
+- [ ] Ninguna función nueva desenvuelve la password con `reveal()` fuera de `store_password`.
 - [ ] `mypy --strict` limpio.
 - [ ] Documenté la decisión en un ADR si cambié el modelo.

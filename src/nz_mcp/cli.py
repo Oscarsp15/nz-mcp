@@ -57,6 +57,7 @@ from nz_mcp.i18n import MESSAGES, Locale, resolve_locale, t
 from nz_mcp.logging_config import configure_logging_for_stdio
 from nz_mcp.logging_utils import sanitize
 from nz_mcp.profile_check import CheckOutcome, ValidationReport, run_checks
+from nz_mcp.secret import Secret
 from nz_mcp.server import run_stdio_server
 from nz_mcp.tools.session import SwitchProfileInput, nz_switch_profile
 
@@ -381,13 +382,16 @@ class _ProfileDraft:
     what makes "retry", "fix one field" and "save anyway" possible without asking for
     the rest again. ``password`` is part of the draft so it can be corrected too, but
     it is never written to profiles.toml — it goes to the OS keyring.
+
+    ``password`` is a ``Secret`` so that the draft, which is a frame argument of half the
+    wizard, cannot print the credential in a traceback or in a dataclass repr (ADR 0026).
     """
 
     host: str
     port: int
     database: str
     user: str
-    password: str
+    password: Secret
     mode: PermissionMode
     security_level: int
     ca_certs: str | None
@@ -473,9 +477,9 @@ def _prompt_database(locale: Locale, default: str | None) -> str:
     return str(typer.prompt(t("CLI.WIZARD_DATABASE_PROMPT", locale), default=default))
 
 
-def _prompt_password(locale: Locale) -> str:
+def _prompt_password(locale: Locale) -> Secret:
     typer.echo(t("CLI.WIZARD_PASSWORD_EXPLAIN", locale))
-    return str(
+    return Secret(
         typer.prompt(
             t("CLI.WIZARD_PASSWORD_PROMPT", locale),
             hide_input=True,
