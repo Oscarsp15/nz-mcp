@@ -2,11 +2,15 @@
 
 Notes:
 - ``isolated_keyring`` autouse: every test gets a fresh in-memory keyring backend.
+- Explicitly enabled integration tests are the single exception: they authenticate against
+  a real Netezza with the credential of a real profile, so keyring reads go through to the
+  OS backend. Writes stay blocked even there (see ``_readonly_real_keyring``).
 - ``tmp_profiles`` writes a ``profiles.toml`` under ``tmp_path`` and points config there.
 """
 
 from __future__ import annotations
 
+import os
 from collections.abc import Generator
 from pathlib import Path
 
@@ -14,6 +18,12 @@ import keyring as _keyring
 import pytest
 
 from nz_mcp import config
+
+#: Opt-in switch for the integration suite; see docs/standards/testing.md.
+RUN_INTEGRATION_ENV = "NZ_MCP_RUN_INTEGRATION"
+
+#: Only tests living under this directory may ever reach the real OS keyring.
+INTEGRATION_DIR = Path(__file__).parent / "integration"
 
 
 class _TestKeyringBackend:
@@ -26,9 +36,47 @@ class _TestKeyringBackend:
     __slots__ = ()
 
 
+def _uses_real_keyring(request: pytest.FixtureRequest) -> bool:
+    """Whether this test is allowed to read the real OS keyring.
+
+    Three conditions must hold at once, so a unit test can never reach the real keyring by
+    accident: the opt-in env var is set, the test carries the ``integration`` marker, and
+    the test module lives under ``tests/integration/``.
+    """
+    if os.environ.get(RUN_INTEGRATION_ENV) != "1":
+        return False
+    if request.node.get_closest_marker("integration") is None:
+        return False
+    module_path = getattr(request.node, "path", None)
+    if module_path is None:  # pragma: no cover - pytest always sets ``path`` on items
+        return False
+    return INTEGRATION_DIR in Path(module_path).parents
+
+
+def _readonly_real_keyring(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let reads reach the OS keyring, but fail loudly on any write.
+
+    Integration tests only consume a credential stored beforehand by the developer; none of
+    them may create, overwrite or delete an entry in the real keyring.
+    """
+
+    def _blocked(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError(
+            "integration tests must not write to the real keyring; "
+            "store the profile password with `nz-mcp set-password` instead",
+        )
+
+    monkeypatch.setattr(_keyring, "set_password", _blocked)
+    monkeypatch.setattr(_keyring, "delete_password", _blocked)
+
+
 @pytest.fixture(autouse=True)
-def isolated_keyring(monkeypatch: pytest.MonkeyPatch) -> None:
+def isolated_keyring(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Replace keyring globals with an in-memory store."""
+    if _uses_real_keyring(request):
+        _readonly_real_keyring(monkeypatch)
+        return
+
     store: dict[tuple[str, str], str] = {}
 
     def _set(service: str, username: str, password: str) -> None:

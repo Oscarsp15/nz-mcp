@@ -8,8 +8,6 @@ Both tests create a throwaway table in a development schema and drop it afterwar
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from nz_mcp.tools.ddl import (
@@ -25,22 +23,12 @@ from nz_mcp.tools.ddl import (
 
 pytestmark = pytest.mark.integration
 
-_SKIP = pytest.mark.skipif(
-    os.environ.get("NZ_MCP_RUN_INTEGRATION") != "1",
-    reason="Set NZ_MCP_RUN_INTEGRATION=1 and configure a live admin profile.",
-)
 
-
-def _coords() -> tuple[str, str]:
-    return (
-        os.environ.get("NZ_MCP_TEST_DATABASE", "DESA_MOTOR"),
-        os.environ.get("NZ_MCP_TEST_SCHEMA", "DBO"),
-    )
-
-
-@_SKIP
-def test_issue135_create_table_with_organize_on() -> None:
-    db, schema = _coords()
+def test_issue135_create_table_with_organize_on(
+    integration_database: str,
+    integration_schema: str,
+) -> None:
+    db, schema = integration_database, integration_schema
     table = "NZ_MCP_ISSUE135_ORDER"
     try:
         out = nz_create_table(
@@ -68,9 +56,11 @@ def test_issue135_create_table_with_organize_on() -> None:
         )
 
 
-@_SKIP
-def test_issue135_create_table_as_with_organize_on() -> None:
-    db, schema = _coords()
+def test_issue135_create_table_as_with_organize_on(
+    integration_database: str,
+    integration_schema: str,
+) -> None:
+    db, schema = integration_database, integration_schema
     table = "NZ_MCP_ISSUE135_CTAS"
     try:
         out = nz_create_table_as(

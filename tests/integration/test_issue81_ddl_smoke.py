@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from nz_mcp.tools.ddl import (
@@ -18,17 +16,14 @@ from nz_mcp.tools.ddl import (
 pytestmark = pytest.mark.integration
 
 
-@pytest.mark.skipif(
-    os.environ.get("NZ_MCP_RUN_INTEGRATION") != "1",
-    reason="Set NZ_MCP_RUN_INTEGRATION=1 and configure a live admin profile.",
-)
-def test_issue81_create_table_dry_run_returns_ddl_only() -> None:
-    db = os.environ.get("NZ_MCP_TEST_DATABASE", "DESA_MODELOS")
-    schema = os.environ.get("NZ_MCP_TEST_SCHEMA", "DBO")
+def test_issue81_create_table_dry_run_returns_ddl_only(
+    integration_database: str,
+    integration_schema: str,
+) -> None:
     out = nz_create_table(
         CreateTableInput(
-            database=db,
-            table_schema=schema,
+            database=integration_database,
+            table_schema=integration_schema,
             table="NZ_MCP_ISSUE81_DRYRUN",
             columns=[ColumnDef(name="ID", type="INT")],
             distribution=DistributionInput(type="RANDOM", columns=[]),
@@ -41,17 +36,14 @@ def test_issue81_create_table_dry_run_returns_ddl_only() -> None:
     assert "DISTRIBUTE ON" in out.ddl_to_execute
 
 
-@pytest.mark.skipif(
-    os.environ.get("NZ_MCP_RUN_INTEGRATION") != "1",
-    reason="Set NZ_MCP_RUN_INTEGRATION=1 and configure a live admin profile.",
-)
-def test_issue81_drop_table_if_exists_missing_table_ok() -> None:
-    db = os.environ.get("NZ_MCP_TEST_DATABASE", "DESA_MODELOS")
-    schema = os.environ.get("NZ_MCP_TEST_SCHEMA", "DBO")
+def test_issue81_drop_table_if_exists_missing_table_ok(
+    integration_database: str,
+    integration_schema: str,
+) -> None:
     out = nz_drop_table(
         DropTableInput(
-            database=db,
-            table_schema=schema,
+            database=integration_database,
+            table_schema=integration_schema,
             table="NZ_MCP_NONEXISTENT_DROP_81",
             confirm=True,
             if_exists=True,
