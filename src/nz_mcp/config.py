@@ -67,6 +67,15 @@ class ProfilesFile(BaseModel):
     profiles: dict[str, dict[str, object]] = Field(default_factory=dict)
 
 
+def _dump_profiles_raw(target: Path, raw: dict[str, Any]) -> None:
+    """Atomically persist the raw profiles mapping with owner-only permissions."""
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    tmp.write_text(tomli_w.dumps(raw), encoding="utf-8")
+    tmp.replace(target)
+    with contextlib.suppress(OSError):  # pragma: no cover - Windows ACLs differ
+        target.chmod(0o600)
+
+
 def load_profiles_file(path: Path | None = None) -> ProfilesFile:
     target = path or profiles_path()
     if not target.exists():
@@ -91,11 +100,7 @@ def set_active_profile(name: str, path: Path | None = None) -> None:
     get_profile(name, path=cfg)
     raw: dict[str, Any] = tomllib.loads(cfg.read_text(encoding="utf-8"))
     raw["active"] = name
-    tmp = cfg.with_suffix(cfg.suffix + ".tmp")
-    tmp.write_text(tomli_w.dumps(raw), encoding="utf-8")
-    tmp.replace(cfg)
-    with contextlib.suppress(OSError):  # pragma: no cover - Windows ACLs differ
-        cfg.chmod(0o600)
+    _dump_profiles_raw(cfg, raw)
 
 
 def get_profile(name: str, path: Path | None = None) -> Profile:
@@ -157,9 +162,5 @@ def update_profile_fields(
     merged = Profile.model_validate({"name": name, **block})
     profiles[name] = block
     raw["profiles"] = profiles
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_text(tomli_w.dumps(raw), encoding="utf-8")
-    tmp.replace(target)
-    with contextlib.suppress(OSError):  # pragma: no cover - Windows ACLs differ
-        target.chmod(0o600)
+    _dump_profiles_raw(target, raw)
     return merged
