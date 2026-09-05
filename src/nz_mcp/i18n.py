@@ -184,8 +184,14 @@ MESSAGES: Final[dict[str, Message]] = {
         "en": "Profile '{profile}' already exists in {path}.",
     },
     "CLI.PROFILE_OVERWRITE_CONFIRM": {
-        "es": "¿Sobrescribirlo? Se reemplazarán todos sus campos y su password",
-        "en": "Overwrite it? Every field and its password will be replaced",
+        "es": (
+            "¿Sobrescribirlo? Se reemplazarán host, puerto, base de datos, usuario, "
+            "modo y password; el resto de campos del perfil se conserva"
+        ),
+        "en": (
+            "Overwrite it? Host, port, database, user, mode and password will be "
+            "replaced; every other profile field is kept"
+        ),
     },
     "CLI.PROFILE_OVERWRITE_CANCELLED": {
         "es": (

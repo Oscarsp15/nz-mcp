@@ -60,3 +60,23 @@ def test_write_profile_same_name_replaces_section(tmp_profiles: Path) -> None:
     assert profile.port == 5481
     assert profile.database == "DB2"
     assert profile.mode == "write"
+
+
+def test_write_profile_overwrite_keeps_unmanaged_fields(tmp_profiles: Path) -> None:
+    """Overwriting must not drop TLS settings the wizard never asks for (issue #167)."""
+    _write_profile(
+        name="dev", host="h", port=5480, database="DB", user="u", mode="read", set_active=True
+    )
+    raw = tmp_profiles.read_text(encoding="utf-8")
+    tmp_profiles.write_text(
+        raw + 'security_level = 3\nca_certs = "/etc/ssl/nz.pem"\n', encoding="utf-8"
+    )
+
+    _write_profile(
+        name="dev", host="h2", port=5481, database="DB2", user="u2", mode="write", set_active=True
+    )
+
+    profile = get_profile("dev", path=tmp_profiles)
+    assert profile.host == "h2"
+    assert profile.security_level == 3
+    assert profile.ca_certs == "/etc/ssl/nz.pem"

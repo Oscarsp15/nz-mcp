@@ -431,7 +431,13 @@ def _write_profile(
         "max_rows_default": DEFAULT_MAX_ROWS,
         "timeout_s_default": DEFAULT_TIMEOUT_S,
     }
+    current = load_profiles_file()
     # ``--active`` only elects a profile when none is declared yet: switching the active
     # profile of an existing setup is an explicit action, not a side effect of add-profile.
-    elect_active = set_active and load_profiles_file().active is None
-    upsert_profile(name, block, set_active=elect_active)
+    elect_active = set_active and current.active is None
+    # Overwriting must not silently drop hand-edited configuration the wizard does not ask
+    # for (security_level, ca_certs, catalog_overrides, and any field added later): carry
+    # every key the wizard does not set over to the replacement section.
+    previous = current.profiles.get(name, {})
+    preserved = {k: v for k, v in previous.items() if k not in block and k != "name"}
+    upsert_profile(name, {**preserved, **block}, set_active=elect_active)
