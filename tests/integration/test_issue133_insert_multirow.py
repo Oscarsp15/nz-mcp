@@ -7,8 +7,6 @@ in one call, checks the count, and drops the table — all against a live profil
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from nz_mcp.tools.ddl import (
@@ -26,13 +24,12 @@ pytestmark = pytest.mark.integration
 _TABLE = "NZ_MCP_ISSUE133_MULTIROW"
 
 
-@pytest.mark.skipif(
-    os.environ.get("NZ_MCP_RUN_INTEGRATION") != "1",
-    reason="Set NZ_MCP_RUN_INTEGRATION=1 and configure a live admin profile.",
-)
-def test_issue133_multirow_insert_succeeds() -> None:
-    db = os.environ.get("NZ_MCP_TEST_DATABASE", "DESA_MODELOS")
-    schema = os.environ.get("NZ_MCP_TEST_SCHEMA", "DBO")
+def test_issue133_multirow_insert_succeeds(
+    integration_database: str,
+    integration_schema: str,
+) -> None:
+    db = integration_database
+    schema = integration_schema
 
     nz_create_table(
         CreateTableInput(

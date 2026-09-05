@@ -17,11 +17,9 @@ from nz_mcp.tools.procedures import (
 pytestmark = pytest.mark.integration
 
 
-@pytest.mark.skipif(
-    os.environ.get("NZ_MCP_RUN_INTEGRATION") != "1",
-    reason="Set NZ_MCP_RUN_INTEGRATION=1 and configure a live profile.",
-)
 def test_describe_ddl_section_smoke() -> None:
+    # This smoke needs a table and a procedure that actually exist; both defaults live in
+    # DESA_MODELOS. Override the four variables to run it elsewhere.
     db = os.environ.get("NZ_MCP_TEST_DATABASE", "DESA_MODELOS")
     schema = os.environ.get("NZ_MCP_TEST_SCHEMA", "DBO")
     table = os.environ.get("NZ_MCP_TEST_TABLE", "BASECOMERCIAL_EFECTIVO_MC")
