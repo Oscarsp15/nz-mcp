@@ -67,6 +67,7 @@
 | `connection.py` | Pool de conexiones `nzpy`, cursores con timeout, streaming | Decidir si la query es legal |
 | `catalog.py` | Queries a `_v_database`, `_v_table`, `_v_relation_column`, etc. | Ejecutar queries del usuario |
 | `i18n.py` | Resuelve mensajes por locale (`en`, `es`) | Formatear datos |
+| `error_hints.py` | Resume el `ValidationError` de pydantic y deriva el hint accionable (ES/EN) del payload de error | Decidir el código de error |
 | `errors.py` | Excepciones tipadas: `GuardRejectedError`, `AuthError`, `TimeoutError`, etc. | Decidir cómo mostrar |
 
 ## Flujo de una tool (`nz_query_select` ejemplo)

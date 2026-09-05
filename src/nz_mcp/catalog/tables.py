@@ -165,10 +165,13 @@ def describe_table(
             if not column_rows:
                 raise ObjectNotFoundError(
                     detail=(
-                        "No columns returned for this table — table may not exist "
-                        f"or may not be visible (database={database!r}, schema={schema!r}, "
-                        f"table={table!r})."
+                        f"Table {table!r} does not exist in {database}.{schema} "
+                        "or is not visible to this profile."
                     ),
+                    object_type="table",
+                    database=database,
+                    schema=schema,
+                    table=table,
                 )
 
             dist_sql = render_cross_db(
@@ -483,9 +486,13 @@ def get_table_stats(
     if not fetched:
         raise ObjectNotFoundError(
             detail=(
-                "No statistics row returned — table may not exist or may not be visible "
-                f"(database={database!r}, schema={schema!r}, table={table!r})."
+                f"Table {table!r} does not exist in {database}.{schema} "
+                "or is not visible to this profile."
             ),
+            object_type="table",
+            database=database,
+            schema=schema,
+            table=table,
         )
 
     payload = _parse_table_stats_row(fetched[0])

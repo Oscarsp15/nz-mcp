@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from string import Formatter
+
 import pytest
 
 from nz_mcp import i18n
@@ -100,3 +102,33 @@ def test_truncation_hints_render_in_both_locales() -> None:
         assert "nz_get_procedure_size" in ddl
         assert "from_line=1501" in ddl
         assert "to_line=2000" in ddl
+
+
+def _placeholders(text: str) -> set[str]:
+    """Named slots a catalog entry interpolates."""
+    names: set[str] = set()
+    for _, name, _, _ in Formatter().parse(text):
+        if name:
+            names.add(name)
+    return names
+
+
+# PROFILE_NOT_FOUND is the single deliberate exception: its hint is already localized
+# at the raise site, so each locale interpolates its own slot (hint_es / hint_en).
+_PLACEHOLDER_PARITY_EXEMPT = frozenset(["PROFILE_NOT_FOUND"])
+
+
+def test_placeholders_match_between_locales() -> None:
+    """A slot present in one locale only renders half a message, or raises KeyError."""
+    for key, msg in MESSAGES.items():
+        if key in _PLACEHOLDER_PARITY_EXEMPT:
+            continue
+        assert _placeholders(msg["es"]) == _placeholders(msg["en"]), f"Placeholder drift in {key}"
+
+
+def test_the_only_exempt_key_is_exempt_because_its_hint_is_per_locale() -> None:
+    """Guards the exemption from rotting into a silent excuse for real drift."""
+    msg = MESSAGES["PROFILE_NOT_FOUND"]
+    assert "hint_es" in _placeholders(msg["es"])
+    assert "hint_en" in _placeholders(msg["en"])
+    assert _placeholders(msg["es"]) - _placeholders(msg["en"]) == frozenset(["hint_es"])

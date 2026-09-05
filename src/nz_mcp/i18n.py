@@ -119,6 +119,48 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Netezza devolvió un error durante '{operation}': {detail}",
         "en": "Netezza returned an error during '{operation}': {detail}",
     },
+    # One hint per Netezza error pattern the AI can actually fix (see error_hints).
+    "NETEZZA_ERROR.HINT.MULTI_ROW_VALUES": {
+        "es": "Netezza no acepta listas VALUES de varias filas. Inserta con nz_insert (que emite un único UNION ALL) o con nz_insert_select.",
+        "en": "Netezza does not accept multi-row VALUES lists. Insert with nz_insert (it emits a single UNION ALL) or with nz_insert_select.",
+    },
+    "NETEZZA_ERROR.HINT.RELATION_NOT_FOUND": {
+        "es": "La relación no existe en la base de datos activa. Comprueba el nombre con nz_list_tables y cualifícalo como BD.ESQUEMA.TABLA si vive en otra base.",
+        "en": "The relation does not exist in the active database. Check the name with nz_list_tables and qualify it as DB.SCHEMA.TABLE if it lives in another database.",
+    },
+    "NETEZZA_ERROR.HINT.ATTRIBUTE_NOT_FOUND": {
+        "es": "Esa columna no existe en la tabla. Pide los nombres exactos con nz_describe_table antes de reintentar.",
+        "en": "That column does not exist on the table. Get the exact names with nz_describe_table before retrying.",
+    },
+    "NETEZZA_ERROR.HINT.PERMISSION_DENIED": {
+        "es": "El usuario de Netezza del perfil no tiene el privilegio necesario. nz-mcp no puede concederlo: mira con qué usuario operas con nz_current_profile y pide el grant a un DBA.",
+        "en": "The profile's Netezza user lacks the required privilege. nz-mcp cannot grant it: check which user you are running as with nz_current_profile and ask a DBA for the grant.",
+    },
+    # Tool input validation
+    "INVALID_INPUT": {
+        "es": "Argumento inválido: {detail}",
+        "en": "Invalid argument: {detail}",
+    },
+    "INVALID_INPUT.HINT.MISSING_FIELDS": {
+        "es": "Faltan argumentos obligatorios: {fields}. Añádelos y repite la llamada.",
+        "en": "Missing required arguments: {fields}. Add them and call the tool again.",
+    },
+    "INVALID_INPUT.HINT.UNEXPECTED_FIELDS": {
+        "es": "Argumentos no reconocidos: {fields}. La tool los rechaza; quítalos o usa el nombre del esquema de entrada.",
+        "en": "Unknown arguments: {fields}. The tool rejects them; drop them or use the name from its input schema.",
+    },
+    "OBJECT_NOT_FOUND": {
+        "es": "Objeto no encontrado: {detail}",
+        "en": "Object not found: {detail}",
+    },
+    "OBJECT_NOT_FOUND.HINT.TABLE": {
+        "es": "Lista los nombres reales con nz_list_tables(database='{database}', schema='{schema}'); Netezza guarda los identificadores en mayúsculas salvo que se crearan entrecomillados.",
+        "en": "List the real names with nz_list_tables(database='{database}', schema='{schema}'); Netezza stores identifiers in upper case unless they were created quoted.",
+    },
+    "OBJECT_NOT_FOUND.HINT.PROCEDURE": {
+        "es": "Lista los procedimientos reales con nz_list_procedures(database='{database}', schema='{schema}'); el nombre debe coincidir con el catálogo, incluidas mayúsculas.",
+        "en": "List the real procedures with nz_list_procedures(database='{database}', schema='{schema}'); the name must match the catalog, casing included.",
+    },
     # Auth
     "KEYRING_UNAVAILABLE": {
         "es": "El backend de keyring no está disponible en este sistema.",

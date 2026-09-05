@@ -959,15 +959,24 @@ Todas las tools devuelven errores con estructura estable:
     "message_en": "SELECT tool received a DELETE statement",
     "message_es": "La tool SELECT recibió una sentencia DELETE",
     "hint_en": "Use nz_delete instead",
-    "hint_es": "Usa nz_delete en su lugar"
+    "hint_es": "Usa nz_delete en su lugar",
+    "context": {}
   }
 }
 ```
 
+`hint_en` / `hint_es` están **siempre presentes** y valen `null` cuando ninguna regla es lo bastante específica: un campo que aparece y desaparece es más difícil de ramificar para un modelo que un `null` (ADR 0023). Un hint genérico ("revisa los argumentos") no se emite nunca. Cuando el error se construye con hints en su `context` (caso de `CONNECTION_FAILED`), el servidor los **promociona** al nivel superior y los quita del `context` para no enviarlos dos veces.
+
 Códigos estables (contrato):
 `GUARD_REJECTED`, `PERMISSION_DENIED`, `PROFILE_NOT_FOUND`, `CONNECTION_FAILED`, `QUERY_TIMEOUT`, `RESULT_TOO_LARGE`, `RESPONSE_TOO_LARGE`, `INPUT_TOO_BROAD`, `INVALID_INPUT`, `CONFIRM_REQUIRED`, `NETEZZA_ERROR`, `INTERNAL_ERROR`, `OBJECT_NOT_FOUND`, `SECTION_NOT_FOUND`, `PROCEDURE_ALREADY_EXISTS`, `OVERLOAD_AMBIGUOUS`, `CLONE_VALIDATION_FAILED`.
 
-`CONNECTION_FAILED` añade en su `context` un campo `cause` con la causa clasificada del fallo, más `hint_es` / `hint_en` accionables para esa causa (catálogo i18n `CONNECTION_FAILED.HINT.<cause>`). Valores estables de `cause`: `AUTH_REJECTED` (credenciales rechazadas), `DATABASE_UNAVAILABLE` (la BD no existe o no hay permiso), `HOST_UNREACHABLE` (host o puerto sin respuesta), `TLS_FAILED` (fallo de negociación TLS) y `UNKNOWN` (sin clasificar). El `detail` sigue siendo el texto del driver, ahora enriquecido con el diagnóstico que nzpy solo escribía en su logger.
+`INVALID_INPUT` cubre tanto las validaciones de las tools como **todo** `ValidationError` de pydantic al validar los argumentos. En el caso de pydantic el `detail` es un resumen compacto `campo: motivo` separado por `; ` (sin la URL de docs ni el valor de entrada que `str(exc)` incluye), acotado a 5 campos más `(+N more)`. Si faltan argumentos obligatorios el hint los nombra; si sobran argumentos desconocidos y no falta ninguno, nombra los que hay que quitar; en cualquier otro caso el hint es `null`.
+
+`OBJECT_NOT_FOUND` lleva en su `context` `object_type` (`table`, `procedure`, `database`) más las coordenadas del objeto. Cuando el tipo tiene una tool de listado que responde a la pregunta y se conocen `database` y `schema`, el hint remite a ella (`nz_list_tables` / `nz_list_procedures`). `nz_switch_database` no lleva hint: ya devuelve la lista de bases visibles en su propio `detail`.
+
+`NETEZZA_ERROR` clasifica el texto del driver contra una tabla de patrones y adjunta el hint correspondiente (catálogo i18n `NETEZZA_ERROR.HINT.<patrón>`): `MULTI_ROW_VALUES` (Netezza rechaza `VALUES (..),(..)` → usar `nz_insert` o `nz_insert_select`), `RELATION_NOT_FOUND`, `ATTRIBUTE_NOT_FOUND` y `PERMISSION_DENIED`. Un texto no visto antes no recibe hint.
+
+`CONNECTION_FAILED` añade en su `context` un campo `cause` con la causa clasificada del fallo, y publica en `hint_es` / `hint_en` (nivel superior del error) la salida accionable para esa causa (catálogo i18n `CONNECTION_FAILED.HINT.<cause>`). Valores estables de `cause`: `AUTH_REJECTED` (credenciales rechazadas), `DATABASE_UNAVAILABLE` (la BD no existe o no hay permiso), `HOST_UNREACHABLE` (host o puerto sin respuesta), `TLS_FAILED` (fallo de negociación TLS) y `UNKNOWN` (sin clasificar). El `detail` sigue siendo el texto del driver, ahora enriquecido con el diagnóstico que nzpy solo escribía en su logger.
 
 ### Descripciones de tool (lo que ve la IA)
 

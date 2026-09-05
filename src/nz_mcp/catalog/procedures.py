@@ -541,9 +541,13 @@ def _fetch_procedure_rows(
     if not rows:
         raise ObjectNotFoundError(
             detail=(
-                "No procedure row returned — object may not exist or may not be visible "
-                f"(database={database!r}, schema={schema!r}, procedure={procedure!r})."
+                f"Procedure {procedure!r} does not exist in {database}.{schema} "
+                "or is not visible to this profile."
             ),
+            object_type="procedure",
+            database=database,
+            schema=schema,
+            procedure=procedure,
         )
     return rows
 
