@@ -158,7 +158,8 @@ docs/
 ├── architecture/
 │   ├── overview.md                ← módulos, flujo, capas
 │   ├── tools-contract.md          ← 16 tools con schema JSON
-│   └── security-model.md          ← threat model, sql_guard, auth
+│   ├── security-model.md          ← threat model, sql_guard, auth
+│   └── cli-experience.md          ← diseño de la experiencia de terminal
 ├── roles/                         ← un archivo por rol senior
 │   ├── tech-lead.md
 │   ├── backend-developer.md
