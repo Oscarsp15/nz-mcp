@@ -37,7 +37,7 @@ MIN_HEIGHT: Final[int] = 20
 #: - ``chosen``: a command was picked and is in :attr:`MenuChoice.command`.
 #: - ``cancelled``: the person left with Escape. Nothing runs, and that is not an error.
 #: - ``degraded``: the window dropped below the minimum mid-session, so the caller falls
-#:   back to the help screen exactly as it does for the six start-up triggers.
+#:   back to the help screen exactly as it does for the seven start-up triggers.
 MenuStatus = Literal["chosen", "cancelled", "degraded"]
 
 
