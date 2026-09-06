@@ -118,7 +118,7 @@ def _plain(text: str) -> str:
     return _ANSI_SEQUENCE.sub("", text)
 
 
-def _run_help(*, lang: str, no_color: bool = False) -> subprocess.CompletedProcess[str]:
+def _run_help(*, lang: str, forced_terminal: bool = True) -> subprocess.CompletedProcess[str]:
     """Run ``--help`` in a subprocess with both streams piped, i.e. never a terminal.
 
     A subprocess and not an in-memory runner on purpose: the language is resolved while the
@@ -130,11 +130,15 @@ def _run_help(*, lang: str, no_color: bool = False) -> subprocess.CompletedProce
     env["PYTHONPATH"] = str(root / "src") + os.pathsep + env.get("PYTHONPATH", "")
     env["NZ_MCP_LANG"] = lang
     env["PYTHONIOENCODING"] = "utf-8"
-    env.pop("FORCE_COLOR", None)
-    if no_color:
-        env["NO_COLOR"] = "1"
-    else:
-        env.pop("NO_COLOR", None)
+    env.pop("NO_COLOR", None)
+    if not forced_terminal:
+        # Typer decides the help screen's terminal detection, not this project, and it forces
+        # a terminal whenever any of these is set — ``GITHUB_ACTIONS`` included, which is why
+        # the help comes out styled on CI even though the output is a pipe. Clearing them is
+        # the only way to ask the question this project can actually answer: with nobody
+        # forcing anything, is a piped help screen plain text?
+        for forcing in ("GITHUB_ACTIONS", "FORCE_COLOR", "PY_COLORS"):
+            env.pop(forcing, None)
     return subprocess.run(
         [sys.executable, "-m", "nz_mcp", "--help"],
         check=False,
@@ -169,14 +173,15 @@ def test_the_rendered_help_lists_init_before_serve() -> None:
     assert body.index(" init ") < body.index(" serve ")
 
 
-def test_the_help_honours_no_color() -> None:
-    """With ``NO_COLOR`` set, the first screen is plain text and nothing else.
+def test_a_piped_help_screen_is_plain_text_when_nothing_forces_a_terminal() -> None:
+    """Redirected to a file or a pager, the first screen reads as text.
 
-    Terminal detection for this screen belongs to typer — on CI it colours a piped log on
-    purpose — so what is asserted here is the part every renderer must obey: the ``NO_COLOR``
-    convention. Whoever needs a clean capture has one command-independent way to get it.
+    The condition matters and is spelled out in :func:`_run_help`: typer forces a terminal
+    when ``GITHUB_ACTIONS``, ``FORCE_COLOR`` or ``PY_COLORS`` is set, and that decision is
+    typer's, not this project's. What is pinned here is the part this project could break —
+    a help screen that emitted escape sequences into a pipe on its own initiative.
     """
-    proc = _run_help(lang="es", no_color=True)
+    proc = _run_help(lang="es", forced_terminal=False)
     assert proc.returncode == 0, proc.stderr
     assert _ESC not in proc.stdout
     assert _ESC not in proc.stderr
