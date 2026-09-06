@@ -410,8 +410,8 @@ def _no_arguments(ctx: typer.Context) -> None:
     """Offer the menu, and fall back to the help screen whenever it cannot open.
 
     The fallback is not a courtesy: **nobody may be left unable to use the CLI because an
-    interface would not start** (ADR 0028, condition 1, inherited by ADR 0030). Six of the
-    seven triggers are decided by the gate before anything is built; the seventh - a window
+    interface would not start** (ADR 0028, condition 1, inherited by ADR 0030). Seven of the
+    eight triggers are decided by the gate before anything is built; the eighth - a window
     shrunk below the minimum mid-session - can only be seen from inside the running
     application, and comes back as ``degraded``.
     """

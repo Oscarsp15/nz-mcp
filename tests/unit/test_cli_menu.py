@@ -2,7 +2,7 @@
 
 The condition that can sink this feature is the same one that could sink the wizard:
 **nobody may be left unable to use the CLI because an interface would not start.** So each
-of the seven degradation triggers gets a test of its own, and each one starts from a helper
+of the eight degradation triggers gets a test of its own, and each one starts from a helper
 that opens the gate completely - otherwise a test would pass because a *different* trigger
 fired, which is how a broken gate stays green (the discipline of PR #223).
 
@@ -62,6 +62,10 @@ def open_the_gate(monkeypatch: pytest.MonkeyPatch) -> _FakeTerminal:
     monkeypatch.setenv("LINES", str(MIN_HEIGHT + 4))
     monkeypatch.setattr(out, "_terminfo_declares_full_screen", lambda _term: True)
     monkeypatch.setattr(out, "detect_legacy_windows", lambda: False)
+    # The streams below are stand-ins with no file descriptor, so the foreground check has
+    # nothing real to ask; it is stubbed here and exercised for real, against the two
+    # process groups, in ``test_wizard_gate.py``.
+    monkeypatch.setattr(out, "_owns_the_terminal", lambda: True)
     stdout = _FakeTerminal()
     monkeypatch.setattr("sys.stdin", _FakeTerminal())
     monkeypatch.setattr("sys.stdout", stdout)
@@ -98,7 +102,7 @@ def run_cli(*args: str) -> tuple[int, str]:
     return (0 if code is None else int(code)), str(written)
 
 
-# --- the seven triggers, each from a fully open gate --------------------------
+# --- the eight triggers, each from a fully open gate --------------------------
 
 
 def test_an_open_gate_opens_the_menu(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -154,8 +158,26 @@ def test_a_redirected_stream_prints_the_help(monkeypatch: pytest.MonkeyPatch, st
     assert "init" in written
 
 
+def test_a_process_in_the_background_prints_the_help(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Trigger 4, and the one with the worst failure of the eight.
+
+    ``nz-mcp &``, or a process that inherited the descriptors through ``nohup`` or
+    ``setsid``: three valid terminals, a real ``TERM``, a good window, so **not one of the
+    other seven fires**. Opening a screen there means reading the keyboard, which on POSIX
+    answers with ``SIGTTIN``: the process stops with the alternate screen open and leaves
+    the terminal unusable for whoever was sitting at it. Printing the help costs nothing and
+    lets the background job finish.
+    """
+    open_the_gate(monkeypatch)
+    refuse_to_open(monkeypatch)
+    monkeypatch.setattr(out, "_owns_the_terminal", lambda: False)
+    code, written = run_cli()
+    assert code == _NO_ARGUMENTS
+    assert "init" in written
+
+
 def test_a_terminal_without_guarantees_prints_the_help(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Trigger 4: a POSIX ``TERM`` terminfo cannot use. Routine inside containers.
+    """Trigger 5: a POSIX ``TERM`` terminfo cannot use. Routine inside containers.
 
     Every other trigger is quiet here - the three streams are terminals and the window is a
     good size - so without this one a full-screen application would start with no guarantee
@@ -172,7 +194,7 @@ def test_a_terminal_without_guarantees_prints_the_help(monkeypatch: pytest.Monke
 
 
 def test_a_console_without_vt_prints_the_help(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Trigger 5: the legacy Windows console, which is where this product mostly runs."""
+    """Trigger 6: the legacy Windows console, which is where this product mostly runs."""
     open_the_gate(monkeypatch)
     refuse_to_open(monkeypatch)
     monkeypatch.setattr(out, "detect_legacy_windows", lambda: True)
@@ -192,7 +214,7 @@ def test_a_console_without_vt_prints_the_help(monkeypatch: pytest.MonkeyPatch) -
 def test_a_window_below_the_minimum_prints_the_help(
     monkeypatch: pytest.MonkeyPatch, columns: int, lines: int
 ) -> None:
-    """Trigger 6, on both axes. Small remote windows are the routine case, not the edge."""
+    """Trigger 7, on both axes. Small remote windows are the routine case, not the edge."""
     open_the_gate(monkeypatch)
     refuse_to_open(monkeypatch)
     monkeypatch.setenv("COLUMNS", str(columns))
@@ -205,10 +227,10 @@ def test_a_window_below_the_minimum_prints_the_help(
 def test_shrinking_below_the_minimum_mid_session_prints_the_help(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Trigger 7, the one only a running application can see.
+    """Trigger 8, the one only a running application can see.
 
     The menu hands back ``degraded`` and the entry point does what it does for the other
-    six: the help, on stdout, with the exit code it has always had. That the application
+    seven: the help, on stdout, with the exit code it has always had. That the application
     really does report it is tested in ``test_menu_app.py`` by shrinking the window.
     """
     open_the_gate(monkeypatch)

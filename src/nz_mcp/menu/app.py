@@ -24,11 +24,11 @@ of the focused field.
 
 Degradation (ADR 0028, condition 1, inherited by ADR 0030)
 ----------------------------------------------------------
-The six start-up triggers are decided before this module is even imported, by
-``cli_output.interactive_ui_enabled()``. The seventh one lives here, because only a running
+The seven start-up triggers are decided before this module is even imported, by
+``cli_output.interactive_ui_enabled()``. The eighth one lives here, because only a running
 application can see it: a window shrunk **below the minimum during the session** closes the
 screen with ``degraded``, and the entry point prints the help - the same fallback as for
-the other six.
+the other seven.
 """
 
 from __future__ import annotations
@@ -136,8 +136,8 @@ class CommandMenuApp(App[MenuChoice]):
     def on_resize(self, event: events.Resize) -> None:
         """Degrade when the window drops below the minimum.
 
-        The seventh trigger. Shrinking a window mid-session is routine over SSH, and the
-        other six only look at start-up; leaving with ``degraded`` rather than repainting a
+        The eighth trigger. Shrinking a window mid-session is routine over SSH, and the
+        other seven only look at start-up; leaving with ``degraded`` rather than repainting a
         broken screen is what turns a bug into a documented fallback - here, the help.
         """
         if not self._mounted:

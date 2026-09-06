@@ -51,19 +51,24 @@ Consecuencias, todas queridas:
 
 ### 2. La degradación es un requisito, no una cortesía
 
-Los **siete** disparadores del ADR 0028 se aplican igual, con la misma puerta (`cli_output.interactive_ui_blocker`) y sin una segunda implementación de nada:
+Los disparadores del ADR 0028 se aplican igual, con la misma puerta (`cli_output.interactive_ui_blocker`) y sin una segunda implementación de nada. **Este PR añade el octavo**, que la auditoría encontró y que ninguno de los siete anteriores veía:
 
 | Disparador | Cómo se detecta |
 |---|---|
 | `NZ_MCP_NO_TUI` | variable de entorno |
 | `TERM=dumb` | variable de entorno |
 | Sin TTY en entrada, salida o error | `isatty()` sobre las tres |
+| **Proceso en segundo plano de la terminal** (`nz-mcp &`, `nohup`, `setsid`) | `os.tcgetpgrp(stdin)` frente a `os.getpgrp()` — **solo POSIX** |
 | `TERM` vacío, sin definir o desconocido para terminfo (POSIX) | `curses.setupterm` y la capacidad `cup` |
 | Consola de Windows sin secuencias VT | `rich.console.detect_legacy_windows` |
 | Ventana por debajo del mínimo al arrancar | tamaño de la terminal |
 | Ventana achicada por debajo del mínimo **a mitad de sesión** | `on_resize` dentro de la aplicación |
 
-**Con cualquiera de los siete, `nz-mcp` imprime la ayuda de siempre.** No una ayuda parecida: la misma. La pantalla no se reconstruye —se llama a `ctx.get_help()`, que es lo que `click` llamaba— y el código de salida sigue siendo **2**, el que devolvía `no_args_is_help`. Está comprobado byte a byte contra la salida anterior a este cambio.
+El de segundo plano merece su párrafo porque **es el que peor falla**. Un proceso lanzado con `&`, o que heredó los descriptores por `nohup` o `setsid`, tiene las tres TTY válidas, un `TERM` de verdad y una ventana correcta: **ninguno de los otros siete dice nada**. Si la pantalla arranca, leer el teclado provoca `SIGTTIN`, el proceso **se detiene con la pantalla alternativa abierta** y quien estuviera sentado delante se queda con la terminal inservible. Negarse a arrancar cuesta una pantalla de ayuda; equivocarse cuesta la terminal. Lo que no se puede preguntar —un flujo sin descriptor porque alguien lo sustituyó, un descriptor que no es una terminal— cuenta como *"no es nuestra"*, por el mismo cálculo.
+
+**En Windows no aplica, y se dice en voz alta en vez de dejarlo implícito.** No hay grupos de proceso POSIX, no hay terminal que poseer y no existe `SIGTTIN`: allí un proceso desatendido no tiene consola —eso es el tercer disparador, `isatty` en falso— y uno lanzado con la consola compartida no se detiene por leerla. La plataforma se comprueba con `sys.platform` y no con `os.name` porque es la forma que el verificador de tipos estrecha, así que la rama POSIX ni siquiera se analiza en una compilación de Windows.
+
+**Con cualquiera de los ocho, `nz-mcp` imprime la ayuda de siempre.** No una ayuda parecida: la misma. La pantalla no se reconstruye —se llama a `ctx.get_help()`, que es lo que `click` llamaba— y el código de salida sigue siendo **2**, el que devolvía `no_args_is_help`. Está comprobado byte a byte contra la salida anterior a este cambio.
 
 Cada disparador tiene su test, y cada test arranca desde una **puerta abierta del todo**, para que ninguno pase en verde porque saltó otro; y cada uno comprueba además que **no se construyó nada** antes de decidir.
 
@@ -133,7 +138,7 @@ Lo que este ADR **no** concede: que ese día llegue por uniformidad. Convertir u
 ## Qué monitorizar
 
 - Que ningún comando gane pantalla sin su propia enmienda.
-- Que los siete disparadores sigan probados, y no solo declarados, para el menú **y** para el asistente.
+- Que los ocho disparadores sigan probados, y no solo declarados, para el menú **y** para el asistente. Y que el de segundo plano siga preguntándole a la terminal por su grupo en primer plano: es el único que no se puede deducir de una variable de entorno.
 - Que las entradas se sigan construyendo desde los comandos registrados. Una lista escrita a mano en `menu/entries.py` es el primer síntoma de que el menú y la ayuda se van a separar.
 - Que `nz-mcp` sin menú siga imprimiendo exactamente la ayuda de siempre, con su código 2.
 
