@@ -498,7 +498,7 @@ Consecuencias que hay que declarar sin adornos:
       carácter, la traza mostraba `event = Paste(text='<la credencial>')`. Estaba en el camino
       feliz, que es el error que este proyecto ya ha cometido antes. Se corrige con un `finally`
       que vacía la referencia pase lo que pase, y hay un test que provoca la excepción de verdad y
-      lee la traza en los cinco estilos de `--tb`. **La ventana se reduce a la duración del bucle;
+      lee la traza en los cinco estilos de `--tb`. **La ventana se reduce al bloque `try` completo, que incluye las llamadas previas al bucle y no solo su cuerpo (medido: un frame capturado dentro de `credential.clear()`, que corre antes del bucle, todavía alcanza `event.text` entero);
       no desaparece**: un fallo *dentro* del bucle sigue teniendo el evento vivo en ese instante,
       solo que ya no queda nada después.
    2. **`pasted_text`, en un frame que no es nuestro.** Un local del frame suspendido del generador

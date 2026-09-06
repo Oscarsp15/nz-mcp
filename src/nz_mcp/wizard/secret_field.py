@@ -37,7 +37,10 @@ is worth nothing if it is not complete:
 
 1. ``event`` is an argument of :meth:`SecretField.on_paste`, so while that call is on the
    stack the text is reachable by anything that renders frame arguments or locals. The
-   ``finally`` shrinks that window to the body of the loop; it does not close it.
+   ``finally`` shrinks that window to the ``try`` block -- which includes the calls
+   made before the loop, not only its body -- and it does not close it. Measured: a
+   frame captured from inside ``credential.clear()``, which runs before the loop,
+   still reaches ``event.text`` in full.
 2. ``pasted_text``, a local of the parser's own suspended generator frame, keeps a full
    copy until the next bracketed paste. Measured through ``parser._gen.gi_frame.f_locals``.
    That frame is not ours and carries no ``Secret``.
