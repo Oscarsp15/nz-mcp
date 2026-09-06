@@ -191,6 +191,28 @@ Nombres de tools MCP, nombres de archivo internos y marcas de reStructuredText f
 | `doctor` | **No** | Una entidad con muchos atributos: eso es `clave: valor`, no una tabla |
 | `test-connection` | No | Un solo resultado |
 
+### Qué se sacrifica primero cuando no cabe
+
+> Añadido el 2026-09-06 al cerrar el issue [#220](https://github.com/Oscarsp15/nz-mcp/issues/220). La tabla se construía a ancho fijo y nunca consultaba el de la consola: con `COLUMNS=40` imprimía exactamente lo mismo que en una terminal ancha, así que la partía el terminal por donde le tocaba.
+
+El issue ofrecía tres candidatos —encoger la columna de host, recortar por el medio, esconder columnas por importancia— y pedía elegir. **Se eligen el primero y el segundo, y se rechaza el tercero.** El orden es éste, y cada escalón tiene test:
+
+1. **No desaparece nada.** Ni una columna ni una fila. Esconder una columna se lleva por delante la única pista de que existía: es la pérdida que nadie puede notar y nadie puede deshacer. Un valor recortado, en cambio, lleva escrito que le falta algo.
+2. **Ninguna columna baja de su propia cabecera.** Las cabeceras salen enteras, así que la tabla sigue leyéndose *como* tabla por muy apretada que esté. `Base de datos` ocupa trece celdas y ése es su suelo.
+3. **Paga la columna más ancha**, celda a celda, hasta que la fila entra. Hoy es el host y en el informe de `probe-catalog --verbose` será el identificador de consulta; lo que **nunca** es, es `Modo` o `Activo` —cortas porque sus valores son cortos—. La regla se escribe por anchura y no por nombre para que no haya que volver aquí cada vez que una tabla gane una columna.
+4. **La celda que tiene que perder caracteres los pierde por el medio.** `10.51.10.242` y `10.51.10.243` se distinguen por el final; `nz-prod-01.corp.example.com` y `nz-prod-02.corp.example.com`, por el principio. Cortar la cola convierte la pregunta que la tabla existe para responder —*¿cuál es éste?*— en una adivinanza. Se conservan las dos puntas y `...` dice qué pasó. El marcador es ASCII por lo de siempre: una consola de Windows con página de códigos heredada dibuja `…` como `?`.
+5. **Por debajo del ancho de las cabeceras deja de ser una tabla.** Cada fila sale como bloque `clave: valor`, que es la forma que `list-profiles` ya usa con un solo perfil, así que no hay nada nuevo que aprender. Ahí no se recorta nada: sin columnas que alinear no hay nada que proteger, y una línea larga la parte el terminal sin perder un carácter.
+
+**Sin terminal no se adivina ningún ancho.** Redirigido, canalizado o en CI se usa un valor fijo y las columnas se siguen dimensionando por su contenido, así que un archivo recibe exactamente los mismos bytes que antes de todo esto. Un archivo se guarda y se lee después, en una ventana que no tiene nada que ver con aquélla; encogerlo a una terminal que no está sería perder datos para beneficio de nadie.
+
+Las otras dos salidas anchas se revisaron con el mismo criterio y **no cambian**:
+
+| Salida | Veredicto |
+|---|---|
+| La ayuda (`nz-mcp --help`) | Ya se adapta: la dibuja `typer` con `rich`, que lee `COLUMNS`. No es código nuestro, pero queda un test que lo fija, porque una revisión que no cambia nada tiene que dejar rastro o el siguiente cambio de paneles la rompe en silencio |
+| `probe-catalog --verbose` | Es una tabla y hereda el orden de arriba sin tocar nada, con una precisión: se ajusta al ancho de **stderr**, que es por donde sale, y no al de stdout |
+| `doctor` | Es `clave: valor`, no hay columnas que alinear. No se recorta ningún valor: el informe está pensado para pegarlo en un issue y una ruta a la que le falta el medio no le sirve a nadie. Una línea larga la parte el terminal, y partir conserva todos los caracteres |
+
 ---
 
 ## 5. Tono, y cómo encaja con el i18n existente
