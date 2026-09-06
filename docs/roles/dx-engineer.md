@@ -136,7 +136,7 @@ Antes de proponer una tool nueva, responder:
 
 Innegociables. Un diseño que las incumpla no se implementa.
 
-1. **`serve` habla MCP por stdout.** Ninguna animación, color, spinner ni carácter de control puede salir por ahí: corrompe el JSON-RPC y rompe el cliente. Todo lo visual va por **stderr** y **solo** en comandos de terminal. Referencias: `src/nz_mcp/logging_config.py` y el test de contrato `tests/contract/test_stdio_stdout_json_lines.py`.
+1. **`serve` habla MCP por stdout.** Ninguna animación, color, spinner ni carácter de control puede salir por ahí: corrompe el JSON-RPC y rompe el cliente. Todo lo visual va por **stderr** y **solo** en comandos de terminal. La capa de salida `src/nz_mcp/cli_output.py` es el único escritor de la terminal y decide el canal; ningún módulo llama a `typer.echo` por su cuenta. Y la garantía no depende de esa disciplina: `serve` mueve el stdout real a un descriptor privado que solo conoce el transporte MCP, así que una escritura ingenua a stdout —venga de donde venga— acaba en stderr. Referencias: `src/nz_mcp/logging_config.py` y los tests de contrato `tests/contract/test_serve_stdout_protocol_only.py` (arranca `serve` y verifica su stdout) y `tests/contract/test_stdio_stdout_json_lines.py`.
 2. **Sin terminal no hay adorno.** Al redirigir a archivo, canalizar a otro proceso o correr en CI, la salida queda limpia y sin secuencias ANSI. Se **detecta**, no se confía.
 3. **Sin frontend ni TUI navegable** ([ADR 0005](../adr/0005-sin-frontend.md)). Formato y progreso en comandos puntuales, nunca un interfaz que capture el teclado.
 4. **La librería no la decide este rol.** Ver [Qué NO decide este rol](#qué-no-decide-este-rol).

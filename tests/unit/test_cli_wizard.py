@@ -111,7 +111,7 @@ def test_wizard_explains_mode_and_security_before_asking(
     _patch_connection(monkeypatch)
     result = runner.invoke(app, ["add-profile", "dev"], input=_answers())
     assert result.exit_code == 0
-    out = result.stdout
+    out = result.stderr
     assert "El modo limita lo que la IA podrá hacer" in out
     assert "'admin' añade DDL" in out
     assert "El nivel de seguridad decide si la conexión viaja cifrada" in out
@@ -164,13 +164,14 @@ def test_wizard_reports_the_three_levels_and_prints_the_claude_config(
     _patch_connection(monkeypatch)
     result = runner.invoke(app, ["add-profile", "dev", "--active"], input=_answers())
     assert result.exit_code == 0
-    out = result.stdout
-    assert "1/3 Conexión: OK" in out
-    assert "2/3 Lectura del catálogo: OK" in out
-    assert "3/3 Visibilidad en DB: OK" in out
-    assert "los tres niveles han pasado" in out
-    assert '"NZ_MCP_PROFILE": "dev"' in out
-    assert "nz-mcp probe-catalog --profile dev" in out
+    ladder = result.stderr
+    assert "1/3 Conexión: OK" in ladder
+    assert "2/3 Lectura del catálogo: OK" in ladder
+    assert "3/3 Visibilidad en DB: OK" in ladder
+    assert "los tres niveles han pasado" in ladder
+    assert "nz-mcp probe-catalog --profile dev" in ladder
+    # The snippet is payload: it stays on stdout so it can be redirected to a file.
+    assert '"NZ_MCP_PROFILE": "dev"' in result.stdout
     assert get_password("dev") == "pw123456"
 
 
@@ -180,8 +181,8 @@ def test_wizard_can_skip_validation_entirely(
     _patch_connection(monkeypatch)
     result = runner.invoke(app, ["add-profile", "dev"], input=_answers(validate="n"))
     assert result.exit_code == 0
-    assert "Validación omitida" in result.stdout
-    assert "1/3" not in result.stdout
+    assert "Validación omitida" in result.stderr
+    assert "1/3" not in result.stdout + result.stderr
     assert list_profile_names(tmp_profiles) == ["dev"]
 
 
@@ -327,7 +328,7 @@ def test_init_uses_the_same_guided_wizard(
     _patch_connection(monkeypatch)
     result = runner.invoke(app, ["init"], input="lab\n" + _answers())
     assert result.exit_code == 0
-    assert "primer perfil" in result.stdout
+    assert "primer perfil" in result.stderr
     assert list_profile_names(tmp_profiles) == ["lab"]
     assert load_profiles_file(tmp_profiles).active == "lab"
 

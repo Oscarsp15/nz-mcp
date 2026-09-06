@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from nz_mcp import __version__
+from nz_mcp import __version__, cli_output
 from nz_mcp.auth import get_password, store_password
 from nz_mcp.cli import app
 from nz_mcp.config import get_profile, list_profile_names, load_profiles_file
@@ -26,7 +26,8 @@ def test_version_command() -> None:
 def test_list_profiles_empty(tmp_profiles: Path) -> None:
     result = runner.invoke(app, ["list-profiles"])
     assert result.exit_code == 0
-    assert "sin perfiles" in result.stdout
+    assert "sin perfiles" in result.stderr
+    assert result.stdout == ""
 
 
 def test_list_profiles_with_two(two_profiles: Path) -> None:
@@ -39,7 +40,7 @@ def test_list_profiles_with_two(two_profiles: Path) -> None:
 def test_edit_profile_updates_mode(two_profiles: Path) -> None:
     result = runner.invoke(app, ["edit-profile", "dev", "--mode", "write"])
     assert result.exit_code == 0
-    assert "Updated" in result.stdout
+    assert "Updated" in result.stderr
     from nz_mcp.config import get_profile
 
     assert get_profile("dev", path=two_profiles).mode == "write"
@@ -58,20 +59,23 @@ def test_edit_profile_invalid_mode_exits_2(two_profiles: Path) -> None:
 def test_edit_profile_no_flags_noop(two_profiles: Path) -> None:
     result = runner.invoke(app, ["edit-profile", "dev"])
     assert result.exit_code == 0
-    assert "No changes" in result.stdout
+    assert "No changes" in result.stderr
 
 
 def test_serve_runs_stdio_server(monkeypatch: pytest.MonkeyPatch) -> None:
-    called = False
+    """``serve`` hands the transport the private stdout, never ``sys.stdout``."""
+    received: dict[str, object] = {}
 
-    def _fake_run_stdio_server() -> None:
-        nonlocal called
-        called = True
+    def _fake_run_stdio_server(*, protocol_stdout: object = None) -> None:
+        received["protocol_stdout"] = protocol_stdout
+        received["reserved_while_running"] = cli_output.stdout_is_reserved()
 
     monkeypatch.setattr("nz_mcp.cli.run_stdio_server", _fake_run_stdio_server)
     result = runner.invoke(app, ["serve"])
     assert result.exit_code == 0
-    assert called is True
+    assert received["reserved_while_running"] is True
+    assert received["protocol_stdout"] is not None, "the transport got no private stream"
+    assert cli_output.stdout_is_reserved() is False, "the reservation was not released"
 
 
 def test_doctor_smoke_ok(two_profiles: Path) -> None:
@@ -134,9 +138,9 @@ def test_test_connection_ok(monkeypatch: pytest.MonkeyPatch, two_profiles: Path)
     monkeypatch.setattr("nz_mcp.profile_check.open_connection", _open)
     result = runner.invoke(app, ["test-connection"])
     assert result.exit_code == 0
-    assert "OK: connected to" in result.stdout
-    assert "NPS 7.2.1-1" in result.stdout
-    assert "svc_dev" in result.stdout
+    assert "OK: connected to" in result.stderr
+    assert "NPS 7.2.1-1" in result.stderr
+    assert "svc_dev" in result.stderr
 
 
 def test_test_connection_profile_flag_ok(
@@ -150,7 +154,7 @@ def test_test_connection_profile_flag_ok(
     monkeypatch.setattr("nz_mcp.profile_check.open_connection", _open)
     result = runner.invoke(app, ["test-connection", "--profile", "prod"])
     assert result.exit_code == 0
-    assert "svc_prod" in result.stdout
+    assert "svc_prod" in result.stderr
 
 
 def test_test_connection_execute_error_redacts_password(
@@ -237,7 +241,7 @@ _WIZARD_INPUT = "nz.example.com\n5480\nDB\nsvc\npw123456\npw123456\nread\n2\n\nn
 def test_add_profile_creates_it_and_suggests_test_connection(tmp_profiles: Path) -> None:
     result = runner.invoke(app, ["add-profile", "dev", "--active"], input=_WIZARD_INPUT)
     assert result.exit_code == 0
-    assert "nz-mcp test-connection --profile dev" in result.stdout
+    assert "nz-mcp test-connection --profile dev" in result.stderr
     assert load_profiles_file(tmp_profiles).active == "dev"
     assert get_profile("dev", path=tmp_profiles).host == "nz.example.com"
     assert get_password("dev") == "pw123456"
@@ -327,7 +331,7 @@ def test_remove_profile_warns_but_proceeds_when_keyring_fails(
 def test_switch_profile_sets_the_active_one(two_profiles: Path) -> None:
     result = runner.invoke(app, ["switch-profile", "prod"])
     assert result.exit_code == 0
-    assert "prod" in result.stdout
+    assert "prod" in result.stderr
     assert load_profiles_file(two_profiles).active == "prod"
 
 
@@ -336,7 +340,7 @@ def test_switch_profile_reports_the_granted_mode(two_profiles: Path) -> None:
     assert result.exit_code == 0
     result = runner.invoke(app, ["switch-profile", "prod"])
     assert result.exit_code == 0
-    assert "write" in result.stdout
+    assert "write" in result.stderr
 
 
 def test_switch_profile_unknown_lists_existing_ones(two_profiles: Path) -> None:
