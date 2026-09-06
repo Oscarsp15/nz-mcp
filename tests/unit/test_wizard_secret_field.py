@@ -9,7 +9,7 @@ Two things are being checked at once and they pull in opposite directions:
 - and it must not hold the text, which is the whole reason it exists.
 
 The adversarial half is deliberate: every editing test also asserts *where the characters
-ended up*, and the paste tests assert that nothing arrived at all.
+ended up*, and the paste tests assert that what the framework kept afterwards is empty.
 """
 
 from __future__ import annotations
@@ -33,8 +33,7 @@ _CREDENTIAL: Final[str] = "Zzq-Krd4471-Xyw"
 
 _ROOMY: Final[tuple[int, int]] = (100, 30)
 
-#: What gets pasted into one of the seven ordinary fields, to show the refusal belongs to
-#: the credential row and not to the form.
+#: What gets pasted into one of the seven ordinary fields.
 _PASTED_HOST: Final[str] = "pasted-host-row"
 
 
@@ -269,13 +268,11 @@ async def test_the_row_explains_itself_in_the_language_of_the_session(locale: Lo
 
 
 @pytest.mark.asyncio
-async def test_a_paste_is_refused_and_nothing_of_it_arrives() -> None:
-    """The measured decision of ADR 0029 adenda 2, exercised.
+async def test_a_paste_arrives_whole_and_the_widget_still_holds_a_number() -> None:
+    """Pasting works - a password manager is how most people type a credential.
 
-    ``textual`` builds the whole pasted string before any handler of ours runs, and the
-    message that carries it outlives the handler inside the message pump. So the field
-    does not read it. What this test pins is that **nothing** arrives: not a character in
-    the sink, not a change in the counter, and not the value anywhere in the application.
+    The characters go through the same door as the typed ones, so the field ends up with a
+    bigger counter and nothing else.
     """
     sink = _Sink()
     app = _app(sink)
@@ -285,43 +282,118 @@ async def test_a_paste_is_refused_and_nothing_of_it_arrives() -> None:
         await pilot.pause()
         field.post_message(events.Paste(_CREDENTIAL))
         await pilot.pause()
-        status = _status(app)
         rendered = field.render()
         held = dict(field.__dict__)
         await pilot.press("escape")
 
-    assert sink.characters == [], "the pasted credential reached the sink"
-    assert held["_length"] == 0, "the counter moved, so something was consumed"
-    assert rendered == "_", "the mask grew, so something was consumed"
-    assert status == t("CLI.WIZARD_UI_PASSWORD_NO_PASTE", "es")
-    assert _CREDENTIAL not in str(held), "the pasted value is sitting in the widget"
+    assert sink.joined() == _CREDENTIAL
+    assert sink.characters == list(_CREDENTIAL), "the sink got a string, not characters"
+    assert held["_length"] == len(_CREDENTIAL)
+    assert rendered == "*" * len(_CREDENTIAL) + "_"
+    windows = {_CREDENTIAL[i : i + 4] for i in range(len(_CREDENTIAL) - 3)}
+    assert not [window for window in windows if window in repr(held)], (
+        f"a piece of the pasted credential is sitting in the widget: {held}"
+    )
 
 
 @pytest.mark.asyncio
-async def test_the_refusal_is_said_out_loud_and_then_gets_out_of_the_way() -> None:
-    """A field that silently ignores a paste reads as broken; one that nags reads as noise."""
+async def test_the_pasted_string_is_released_as_soon_as_it_has_been_consumed() -> None:
+    """The one part of the window that is ours to close, and it is closed.
+
+    Measured on ``textual`` 8.2.8: a ``Paste`` message can outlive the handler inside the
+    message pump - posted to the application it survived the dispatch and 300 ms of
+    idling. We cannot shorten *its* life, so the handler drops the reference it carries
+    instead, and whatever the pump is still holding stops carrying the credential.
+
+    The message is kept alive here by this test on purpose, which is the only way to look
+    at it afterwards; the reference under examination is the framework's, not ours.
+    ``__rich_repr__`` is checked too, because that is what a devtools console would print.
+    """
+    sink = _Sink()
+    app = _app(sink)
+    paste = events.Paste(_CREDENTIAL)
+
+    async with app.run_test(size=_ROOMY) as pilot:
+        field = _field(app)
+        field.focus()
+        await pilot.pause()
+        field.post_message(paste)
+        await pilot.pause()
+        await pilot.press("escape")
+
+    assert sink.joined() == _CREDENTIAL, "the paste was not consumed, so this proves nothing"
+    assert paste.text == "", "the message the pump may keep still carries the credential"
+    assert _CREDENTIAL not in repr(list(paste.__rich_repr__()))
+
+
+@pytest.mark.asyncio
+async def test_a_paste_lands_at_the_caret_and_replaces_a_selection() -> None:
+    """It is an insertion like any other, so it obeys the caret and the selection."""
+    sink = _Sink()
+    app = _app(sink)
+    async with app.run_test(size=_ROOMY) as pilot:
+        field = _field(app)
+        field.focus()
+        await pilot.press(*"abcd")
+        await pilot.press("left", "left")
+        field.post_message(events.Paste("XY"))
+        await pilot.pause()
+        at_the_caret = sink.joined()
+        await pilot.press("ctrl+a")
+        field.post_message(events.Paste("Z"))
+        await pilot.pause()
+        over_a_selection = sink.joined()
+        await pilot.press("escape")
+
+    assert at_the_caret == "abXYcd"
+    assert over_a_selection == "Z"
+
+
+@pytest.mark.asyncio
+async def test_a_pasted_line_break_does_not_become_part_of_the_credential() -> None:
+    """Password managers add a trailing newline. It is not part of what you copied."""
     sink = _Sink()
     app = _app(sink)
     async with app.run_test(size=_ROOMY) as pilot:
         field = _field(app)
         field.focus()
         await pilot.pause()
-        field.post_message(events.Paste(_CREDENTIAL))
+        field.post_message(events.Paste("hun\tter2\r\n"))
         await pilot.pause()
-        refused = _status(app)
-        await pilot.press("a")
-        await pilot.pause()
-        after_typing = _status(app)
         await pilot.press("escape")
 
-    assert refused == t("CLI.WIZARD_UI_PASSWORD_NO_PASTE", "es")
-    assert after_typing != refused, "the warning stayed after the person did what it asked"
-    assert sink.joined() == "a"
+    assert sink.joined() == "hunter2"
+
+
+@pytest.mark.asyncio
+async def test_a_paste_replaces_a_credential_that_came_from_the_terminal() -> None:
+    """Same rule as typing: two sources never concatenate into a broken credential."""
+    sink = _Sink()
+    sink.characters = list("from-the-terminal")
+
+    app = ProfileWizardApp(
+        profile="dev",
+        initial=DraftFields(host="h", database="d", user="u"),
+        password_set=False,
+        ask_password=lambda: True,
+        credential=sink,
+        locale="es",
+    )
+    async with app.run_test(size=_ROOMY) as pilot:
+        field = _field(app)
+        field.focus()
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+        field.post_message(events.Paste("pasted"))
+        await pilot.pause()
+        await pilot.press("escape")
+
+    assert sink.joined() == "pasted"
 
 
 @pytest.mark.asyncio
 async def test_a_paste_into_one_of_the_other_seven_fields_still_works() -> None:
-    """The refusal is the credential row's, not the form's: a hostname is not a secret."""
+    """Nothing about the credential row changed how the ordinary fields behave."""
     sink = _Sink()
     app = _app(sink)
     async with app.run_test(size=_ROOMY) as pilot:

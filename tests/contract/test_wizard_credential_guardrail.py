@@ -19,7 +19,8 @@ Read this part before trusting anything below it.
 **The guarantee is :func:`test_the_real_wizard_never_lets_the_credential_into_a_widget`.**
 It starts the real application, drives the real credential path with a real value, and
 then goes looking for that value in the finished widget tree, in the application's own
-attributes and in what it hands back. It checks the **fact**, not the way the code is
+attributes, in a screenshot taken by the framework and in what it hands back. It checks the
+**fact**, not the way the code is
 written, so no way of writing it gets past. It is the test PR #193 did not have. If it is
 ever weakened, narrowed or deleted, **nothing else in this file replaces it** - what is
 left would be a check that agrees with the code rather than one that contradicts it.
@@ -58,13 +59,13 @@ Allowlist    What it pins
 ``FIELDS``   every field of ``DraftFields``, which is the only data object here
 ``MODULE``   every module-level name the package may define
 ``WIDGETS``  the expressions allowed to reach a widget, when built and via ``setattr``
-``PASTE``    the attribute reads that are forbidden outright, ``.text`` being the paste
+``PASTE``    the pasted string may be consumed in place and never copied to a name
 ============ =========================================================================
 
 Naming what is allowed is still much better than naming what is forbidden - a blacklist is
 walked past by renaming, and an allowlist is not. The first five pin every slot a value
-could be held in, so a credential that got in would at least have to be declared. The
-sixth is the one that cannot be exhaustive, for the reason above.
+could be held in, so a credential that got in would at least have to be declared. The last
+two are the ones that cannot be exhaustive, for the reason above.
 
 The cost is deliberate. Adding a field, a parameter or an import to the wizard means
 editing a list in this file, on purpose, in a diff a reviewer sees.
@@ -85,7 +86,7 @@ from nz_mcp.wizard.app import ProfileWizardApp
 from nz_mcp.wizard.fields import DraftFields
 from nz_mcp.wizard.secret_field import SecretField
 
-# --- the six allowlists -------------------------------------------------------
+# --- the seven allowlists -----------------------------------------------------
 #
 # Every entry below was added by a person who thought about it. That is the point: the
 # lists are short because the package is small, and they stay short because growing one
@@ -144,7 +145,6 @@ _ALLOWED_PARAMETERS: Final[frozenset[tuple[str, str]]] = frozenset(
         ("event", "Input.Submitted"),
         ("event", "events.DescendantFocus"),
         ("event", "SecretField.Changed"),
-        ("event", "SecretField.PasteRejected"),
         ("status", "WizardStatus"),
         # nz_mcp.wizard.secret_field - the counter, the key it reacts to, and the boolean
         # it publishes. Not one of them is a place a credential could sit.
@@ -169,7 +169,6 @@ _ALLOWED_APP_STATE: Final[dict[str, tuple[str, bool]]] = {
     "_credential": ("CredentialSink", False),
     "_locale": ("Locale", True),
     "_mounted": ("bool", False),
-    "_paste_refused": ("bool", False),
     # ``SecretField``: the whole of it. Three integers and a boolean, which is the claim
     # issue #224 makes and the reason a screenshot of this field cannot leak anything.
     "_length": ("int", False),
@@ -253,10 +252,12 @@ _LOCAL_WIDGETS: Final[frozenset[str]] = frozenset({"SecretField"})
 _SINK_KEYWORD: Final[str] = "credential"
 _SINK_SOURCE: Final[str] = "self._credential"
 
-#: Attribute reads that are forbidden anywhere in the package. ``text`` is how
-#: ``events.Paste`` carries the whole pasted string; the field refuses the paste without
-#: reading it, and this is what keeps that true after somebody edits the file (issue #224).
-_FORBIDDEN_ATTRIBUTES: Final[frozenset[str]] = frozenset({"text"})
+#: Attributes whose value may be **used** but never **copied**. ``text`` is how
+#: ``events.Paste`` carries the whole pasted string: the field consumes it character by
+#: character and then releases it, which is fine, but binding it to a name, storing it or
+#: handing it to anything would put a full copy of the credential where one does not
+#: belong. Iterating it and clearing it are the two shapes that stay allowed (issue #224).
+_UNCOPYABLE_ATTRIBUTES: Final[frozenset[str]] = frozenset({"text"})
 
 #: Carved out of an allowed package. ``textual`` is on the import allowlist because the
 #: wizard is built with it, and a prefix match would let its developer tooling in with it;
@@ -561,21 +562,40 @@ def _widget_content_violations(tree: ast.AST) -> Iterator[str]:
                 yield f"line {node.lineno}: widget given {shown}, which is not an allowed source"
 
 
-# --- rule 7: the pasted string is never read ----------------------------------
+# --- rule 7: the pasted string is used, never copied --------------------------
 
 
-def _forbidden_attribute_violations(tree: ast.AST) -> Iterator[str]:
-    """No expression in this package may read a forbidden attribute.
+def _mentions_uncopyable(node: ast.AST | None) -> bool:
+    """Whether an expression reads one of :data:`_UNCOPYABLE_ATTRIBUTES` anywhere inside."""
+    if node is None:
+        return False
+    return any(
+        isinstance(inner, ast.Attribute) and inner.attr in _UNCOPYABLE_ATTRIBUTES
+        for inner in ast.walk(node)
+    )
 
-    Only one is forbidden today: ``text``, which is where ``events.Paste`` keeps the whole
-    pasted string. Measured on ``textual`` 8.2.8, that string is built by the parser before
-    any handler of ours runs and outlives the handler inside the message pump, so the field
-    refuses the paste **without reading it**. A rule rather than a comment, because the
-    tempting one-liner - ``for c in event.text: ...`` - looks perfectly innocent.
+
+def _paste_copy_violations(tree: ast.AST) -> Iterator[str]:
+    """The pasted string may be consumed in place, and may not be copied anywhere.
+
+    ``events.Paste`` carries the whole credential as a bare ``str``. The field walks it
+    character by character and then clears it, and both of those are fine: the copy already
+    exists, made by the parser before any handler of ours runs, and clearing it is what
+    stops the message the pump keeps from carrying it any longer.
+
+    What this rule forbids is the shape that would make a *second* copy and give it a home:
+    binding it to a name, storing it on an attribute, or handing it to a call. So
+    ``for character in event.text`` and ``event.text = ""`` pass, and ``buffer =
+    event.text`` or ``sink.store(event.text)`` do not.
     """
     for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and node.attr in _FORBIDDEN_ATTRIBUTES:
-            yield f"line {node.lineno}: reads .{node.attr}, which carries the whole paste"
+        if isinstance(node, ast.Assign | ast.AnnAssign | ast.AugAssign):
+            if _mentions_uncopyable(node.value):
+                yield f"line {node.lineno}: the pasted string is copied into a name"
+        elif isinstance(node, ast.Call):
+            arguments: list[ast.AST | None] = [*node.args, *(kw.value for kw in node.keywords)]
+            if any(_mentions_uncopyable(argument) for argument in arguments):
+                yield f"line {node.lineno}: the pasted string is handed to a call"
 
 
 # --- extras -------------------------------------------------------------------
@@ -607,14 +627,14 @@ def collect_credential_violations(source: str) -> list[str]:
         *_draft_field_violations(tree),
         *_module_name_violations(tree),
         *_widget_content_violations(tree),
-        *_forbidden_attribute_violations(tree),
+        *_paste_copy_violations(tree),
         *_dump_violations(tree),
     ]
 
 
 @pytest.mark.contract
 def test_the_wizard_package_cannot_hold_the_credential() -> None:
-    """Defence in depth: six allowlists, so a mistake shows up in the diff.
+    """Defence in depth: seven allowlists, so a mistake shows up in the diff.
 
     **Not the guarantee.** This finds a credential put somewhere it was declared; it does
     not prove one cannot arrive by a route nobody thought of. That is the job of
@@ -676,14 +696,21 @@ _INJECTED_VIOLATIONS: Final[tuple[tuple[str, str], ...]] = (
     # The ways the old blacklist did catch, kept so the coverage never narrows.
     # The ways issue #224 opened, each closed by a rule of its own.
     (
-        "reading-the-pasted-string",
-        "def on_paste(self, event: events.Paste) -> None:\n"
-        "    for character in event.text:\n"
-        "        self._credential.insert(0, character)\n",
+        "copying-the-pasted-string-into-a-name",
+        "buffer = pasted.text\n",
     ),
     (
-        "reading-the-pasted-string-under-another-name",
-        "buffer = pasted.text\n",
+        "copying-the-pasted-string-onto-the-state",
+        "class A:\n    def f(self, event: events.Paste) -> None:\n"
+        "        self._length = event.text\n",
+    ),
+    (
+        "handing-the-pasted-string-to-a-call",
+        "def f(self, event: events.Paste) -> None:\n    self._credential.insert(0, event.text)\n",
+    ),
+    (
+        "slicing-the-pasted-string-into-a-name",
+        "head = event.text[:4]\n",
     ),
     (
         "the-secure-field-built-with-something-else-as-its-sink",
@@ -768,6 +795,15 @@ def test_the_guardrail_rejects_an_injected_violation(source: str) -> None:
         pytest.param(
             "def insert(self, index: int, character: str) -> None:\n    pass\n",
             id="the-write-only-sink",
+        ),
+        pytest.param(
+            "def f(self, event: events.Paste) -> None:\n    for character in event.text:\n"
+            "        pass\n",
+            id="consuming-a-paste-in-place",
+        ),
+        pytest.param(
+            "def f(self, event: events.Paste) -> None:\n    event.text = ''\n",
+            id="releasing-the-paste-once-it-is-consumed",
         ),
     ],
 )

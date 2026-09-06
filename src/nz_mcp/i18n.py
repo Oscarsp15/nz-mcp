@@ -590,18 +590,6 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "definida en el terminal (escribe aquí para cambiarla)",
         "en": "set on the terminal (type here to change it)",
     },
-    "CLI.WIZARD_UI_PASSWORD_NO_PASTE": {
-        "es": (
-            "Este campo no acepta pegar: el texto pegado seguiría vivo dentro de la "
-            "librería de interfaz después de recibirlo. Escríbela, o pulsa Ctrl+P y "
-            "pégala en el terminal."
-        ),
-        "en": (
-            "This field does not accept a paste: the pasted text would stay alive inside "
-            "the interface library after we received it. Type it, or press Ctrl+P and "
-            "paste it on the terminal."
-        ),
-    },
     "CLI.WIZARD_UI_MISSING": {
         "es": "Falta por rellenar: {fields}",
         "en": "Still missing: {fields}",

@@ -183,7 +183,6 @@ class ProfileWizardApp(App[WizardResult]):
         self._credential: CredentialSink = credential
         self._locale: Locale = locale
         self._mounted: bool = False
-        self._paste_refused: bool = False
 
     # --- composition ---------------------------------------------------------
 
@@ -245,19 +244,11 @@ class ProfileWizardApp(App[WizardResult]):
 
     def on_input_changed(self, event: Input.Changed) -> None:
         del event  # the whole form is re-read; which field changed does not matter
-        self._paste_refused = False
         self._update_state()
 
     def on_secret_field_changed(self, event: SecretField.Changed) -> None:
         """The credential row says *whether* there is one. That is all it ever says."""
         self._password_set = event.held
-        self._paste_refused = False
-        self._update_state()
-
-    def on_secret_field_paste_rejected(self, event: SecretField.PasteRejected) -> None:
-        """A paste was dropped unread. Say so, and say what to do instead."""
-        del event  # it carries nothing, deliberately
-        self._paste_refused = True
         self._update_state()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -323,7 +314,6 @@ class ProfileWizardApp(App[WizardResult]):
             # counter of zero and says so, so nothing about a credential typed off screen
             # ends up drawn on screen.
             self.query_one(SecretField).mark_held_elsewhere()
-        self._paste_refused = False
         self.refresh()
         self._update_state()
 
@@ -368,10 +358,6 @@ class ProfileWizardApp(App[WizardResult]):
         Colour only underlines it. The sentence carries the whole meaning, so redirecting
         the terminal or not seeing colour costs nothing (``cli-experience.md`` §6.5).
         """
-        if self._paste_refused:
-            # The most recent thing the person did, so it goes first: they pressed a key
-            # combination and nothing appeared, and silence there reads as a broken field.
-            return t("CLI.WIZARD_UI_PASSWORD_NO_PASTE", self._locale), "invalid"
         draft = self._read_draft()
         shape = first_shape_error(draft)
         if shape is not None:

@@ -445,6 +445,8 @@ está prohibido, solo no se había escrito.
 | `Input(password=True)` recibe un pegado | `Input.value` pasa a ser la cadena pegada completa, en claro. Confirma la medición original |
 | `events.Paste` | `Paste(text: str)`: el pegado llega **entero**, como `str` desnuda, construido por el parser de la terminal **antes** de que corra ningún manejador nuestro |
 | Vida del mensaje `Paste` tras el manejador | Con `weakref`: **sigue vivo** después del despacho y después de 300 ms de inactividad. Solo se recoge cuando se procesa **otro** mensaje |
+| ¿Se puede soltar esa referencia? | **Sí.** `Paste.text` es un atributo escribible: vaciarlo tras consumirlo deja el mensaje sin la credencial, y su `__rich_repr__` —lo que imprimiría una consola de devtools— pasa a estar vacío |
+| ¿Queda alguna copia más? | **Sí, y no es nuestra.** `pasted_text`, un local del frame suspendido del generador del parser (`parser._gen.gi_frame.f_locals`), conserva una copia completa hasta el siguiente pegado con corchetes |
 | `export_screenshot()` con el campo nuevo lleno | No contiene la credencial. Contiene la máscara |
 | Recorrido del grafo de objetos desde `App` y desde `Screen`, sin tope práctico de profundidad, siguiendo `__dict__`, `__slots__`, `__closure__`, `__self__` y `__func__` | **Limpio.** El único camino que aparece a la credencial pasa por `sys.modules` hasta la variable del propio script de ataque |
 
@@ -456,10 +458,10 @@ está prohibido, solo no se había escrito.
 > asistente puede tener un campo propio para la contraseña siempre que **su estado no contenga
 > texto**: `SecretField` guarda tres enteros (cuántos caracteres hay, dónde está el cursor, dónde
 > empezó la selección) y un booleano, dibuja la máscara a partir del contador, y entrega cada
-> pulsación a un `CredentialSink` que vive fuera del árbol. Ese protocolo es **de solo escritura**:
-> acepta un carácter en una posición, borra un rango y olvida; no se le puede preguntar qué tiene.
-> La suspensión con `App.suspend()` y `cli_output.ask_secret()` **se conserva como red**, en
-> Ctrl+P, para el pegado y para quien prefiera no escribirla en pantalla.
+> pulsación —tecleada o pegada— a un `CredentialSink` que vive fuera del árbol. Ese protocolo es
+> **de solo escritura**: acepta un carácter en una posición, borra un rango y olvida; no se le
+> puede preguntar qué tiene. La suspensión con `App.suspend()` y `cli_output.ask_secret()`
+> **se conserva como red**, en Ctrl+P, para quien prefiera no escribirla en pantalla.
 
 Consecuencias que hay que declarar sin adornos:
 
@@ -477,14 +479,39 @@ Consecuencias que hay que declarar sin adornos:
    consecuencia. También vale la pena decir qué **no** es: no es cifrado. Un volcado de memoria la
    recompone. La propiedad que se afirma es de alcanzabilidad entre objetos, la misma clase de
    propiedad que afirma la [ADR 0026](0026-secret-sin-password-en-trazas.md).
-3. **El pegado se prohíbe en ese campo, y esta es la razón.** No es prudencia: es que la promesa
-   *"consumirlo sin que quede en ningún punto"* **no se puede cumplir**. Cuando nuestro manejador
-   recibe el evento, la cadena completa ya existe —la construyó el parser— y sigue viva dentro del
-   bus de mensajes después de que el manejador termine, indefinidamente si la sesión se queda
-   quieta. Nada de lo que escribamos acorta esa vida. Lo único que sí está en nuestra mano es **no
-   copiarla a ningún sitio nuestro**, y eso es lo que se hace: el campo descarta el evento sin leer
-   su texto, lo dice en pantalla y señala Ctrl+P. Una regla estática nueva prohíbe leer `.text` en
-   todo el paquete, porque el atajo tentador (`for c in event.text: ...`) parece inocente.
+3. **El pegado se permite, y se acepta un riesgo estrecho por escrito.** Aquí la primera versión de
+   esta adenda decía que se prohibía, y estaba equivocada por exceso de celo. Lo que hay que
+   revisar no es la medición, que sigue en pie, sino **la promesa que se le exigía**.
+
+   *Qué se acepta*: la cadena pegada existe entera, como `str` desnuda, durante un instante y
+   dentro de objetos que no son nuestros. No podemos evitar que se cree: la construye el parser
+   antes de que corra ninguna línea nuestra.
+
+   *Cuál es la exposición concreta*: `pasted_text`, un local del frame suspendido del generador del
+   parser de `textual`, conserva una copia completa hasta el siguiente pegado con corchetes. Un
+   fallo que se renderizara con los locales de los frames y pasara por ahí podría mostrarla, porque
+   ese frame no es nuestro y no lleva `Secret`. Es una ventana estrecha y una condición rara, pero
+   es real y aquí queda escrita en vez de escondida.
+
+   *Qué sí está en nuestra mano, y se hace*: soltar la referencia en cuanto se consume.
+   `Paste.text` es escribible, así que el manejador la vacía después de recorrerla, y el mensaje
+   que el bus conserva deja de llevar la credencial —igual que su `__rich_repr__`, que es lo que
+   imprimiría una consola de devtools o un log de mensajes—. Es todo lo que se puede estrechar el
+   instante; lo demás no depende de nosotros y así está dicho.
+
+   *Por qué se acepta*: la molestia de no poder pegar es **diaria y segura** —un gestor de
+   contraseñas es la forma normal de escribir una credencial— y el riesgo es **estrecho y raro**.
+   Y hay un argumento que cierra la incoherencia: **`Secret` tampoco protege la memoria**. Guarda
+   el texto real en un `str` y lo que controla es cómo se renderiza. Exigirle al evento de pegado
+   una garantía que nuestro propio tipo no da era pedir de más.
+
+   *Qué sigue garantizado*, que es lo que el modelo de amenaza pide de verdad: no se muestra en
+   pantalla, no entra en registros, no sale en una captura y no aparece en ningún mensaje de error
+   construido por **nuestro** código.
+
+   La regla estática que prohibía leer `.text` se **acota** en vez de retirarse: ahora prohíbe
+   *copiarlo* —ligarlo a un nombre, guardarlo en un atributo o pasarlo a una llamada— y permite las
+   dos formas que sí tienen sentido, recorrerlo en el sitio y vaciarlo.
 4. **La máscara enseña la longitud, y solo mientras el campo tiene el foco.** `cli-experience.md`
    §4 dice que ni enmascarada se muestra la password, y esa frase se refiere a la **recapitulación**
    —seguir sin mostrarla ahí—; un campo de entrada es otra cosa, es el editor. Aun así la longitud
@@ -507,8 +534,8 @@ Consecuencias que hay que declarar sin adornos:
   tiene siete campos y ninguno es la credencial; lo que viaja al lado es un booleano.
 - **Cláusula 3**: ni devtools ni capturas en el camino de producción. La captura de arriba se toma
   **en un test**, que es donde el guardarraíl estático la permite y la producción no.
-- **La suspensión sigue existiendo**, y ahora tiene un motivo mejor que la falta de alternativa:
-  es la respuesta al pegado y a quien no quiera teclear una credencial en una pantalla completa.
+- **La suspensión sigue existiendo** como red: es la alternativa para quien prefiera no teclear
+  una credencial en una pantalla completa, y el camino que queda si el campo no está disponible.
 - **La adenda 1 sigue mandando** sobre qué garantiza qué: el test de ejecución es la garantía, el
   guardarraíl estático es defensa en profundidad, y esta adenda no lo presenta como demostración
   aunque haya crecido con dos reglas nuevas.
@@ -521,9 +548,10 @@ Consecuencias que hay que declarar sin adornos:
   construcción" de esta adenda desaparece.
 - Que el test de ejecución siga recorriendo los dos caminos y siga siguiendo closures. Si vuelve a
   buscar solo en `__dict__`, la condición 5 deja de estar comprobada para el diseño nuevo.
-- Si una versión futura de `textual` deja de mantener vivo el mensaje de pegado, o expone una
-  forma de consumirlo destructivamente, **la decisión 3 se revisa**: se prohibió por una medición,
-  no por principio.
+- Si una versión futura de `textual` deja de vaciarse cuando le vaciamos `Paste.text`, o deja de
+  soltar `pasted_text` en el frame del parser, **el riesgo aceptado en la decisión 3 cambia de
+  tamaño** y hay que volver a medirlo. Está aceptado con las cifras de 8.2.8 delante, no en
+  abstracto.
 
 ## Referencias
 

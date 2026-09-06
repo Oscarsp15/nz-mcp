@@ -17,23 +17,31 @@ and what stays in the DOM is a bare ``str``, alive for the whole session. Nothin
 concatenates anything: ``insert`` and ``remove`` are told an *index*, and the sink keeps
 the characters apart until the wizard is over.
 
-The paste, and why it is refused
---------------------------------
-Measured on ``textual`` 8.2.8, on the same interpreter as the rest of ADR 0029:
+The paste: accepted, with the window made as narrow as it can be made
+--------------------------------------------------------------------
+Pasting works, because a password manager is how most people type a credential and
+refusing it every day to avoid a rare and narrow exposure is a bad trade. What is bought
+and what is paid is measured, on ``textual`` 8.2.8:
 
 - ``events.Paste`` carries the whole pasted text as a bare ``str`` (``Paste(text: str)``),
-  built by the terminal parser **before** any handler of ours runs.
-- That message object is still alive **after** the handler returns. Weak-referenced, it
-  survived the dispatch and 300 ms of idling, and was only collected once another message
-  had been processed. While the session sits idle, the credential stays inside the
-  framework's message pump, and no code in this package can shorten that.
+  built by the terminal parser **before** any handler of ours runs. That copy is not ours
+  to prevent.
+- The message object outlives the handler: weak-referenced, it survived the dispatch and
+  300 ms of idling. **So the handler drops the reference itself**: after consuming the
+  characters it sets ``text`` to the empty string, and the message the pump keeps no
+  longer carries the credential - nor does its ``__rich_repr__``, which is what a
+  devtools console or a log of messages would print.
+- What stays, and is outside this package: ``pasted_text``, a local of the parser's own
+  suspended generator frame, keeps a full copy until the next bracketed paste. Measured
+  through ``parser._gen.gi_frame.f_locals``. A traceback rendered with frame locals that
+  walked through that frame would show it, because that frame is not ours and carries no
+  ``Secret``.
 
-So a paste cannot be consumed "without leaving anything anywhere": the copy exists before
-we are asked and outlives our answer. This field therefore **refuses the paste without
-reading it** - the ``text`` of the event is never touched, here or anywhere in the
-package, and a static rule in ``tests/contract/test_wizard_credential_guardrail.py`` keeps
-it that way - and points at Ctrl+P, which asks on the real terminal with the echo off and
-wraps the answer in a ``Secret`` on the first line of our own code.
+That last line is the accepted risk, written down rather than hidden, and it is not a
+double standard: ``Secret`` does not protect memory either - it holds the real text and
+redacts how it renders. What stays guaranteed is what the threat model actually asks for:
+nothing on screen, nothing in a log, nothing in a screenshot, and nothing in an error
+message built by our own code. See adenda 2 of ADR 0029.
 
 What is on screen
 -----------------
@@ -100,9 +108,6 @@ class SecretField(Widget, can_focus=True):
         def __init__(self, held: bool) -> None:
             super().__init__()
             self.held: bool = held
-
-    class PasteRejected(Message):
-        """A paste arrived and was dropped unread. Carries nothing, on purpose."""
 
     DEFAULT_CSS: ClassVar[str] = """
     SecretField {
@@ -183,16 +188,30 @@ class SecretField(Widget, can_focus=True):
         self.post_message(self.Changed(self.holds_credential()))
 
     def on_paste(self, event: events.Paste) -> None:
-        """Drop the paste without reading it. The module docstring has the measurement.
+        """Take the paste, character by character, and then unhook it from the framework.
 
-        The pasted string is deliberately not touched. Reading it would not make the leak
-        better or worse - it already exists and it outlives this handler - but it would
-        put a full copy of the credential into the wizard's own state, which is the one
-        thing this field exists to prevent.
+        The characters go through exactly the same door as the typed ones, so nothing here
+        holds text either. Line breaks and tabs are dropped for the same reason a control
+        key is: a credential does not contain them, and a trailing newline from a password
+        manager would otherwise become part of it.
+
+        The last two lines are the mitigation, and the module docstring has the numbers:
+        the pasted string is not ours to prevent, but the reference the message keeps is
+        ours to release, so it is released the moment it has been consumed.
         """
         event.stop()
         event.prevent_default()
-        self.post_message(self.PasteRejected())
+        self._discard_external()
+        self._delete_selection()
+        for character in event.text:
+            if not character.isprintable():
+                continue
+            self._credential.insert(self._cursor, character)
+            self._length += 1
+            self._cursor += 1
+        event.text = ""
+        self.refresh()
+        self.post_message(self.Changed(self.holds_credential()))
 
     # --- editing, entirely on the counters -----------------------------------
 
