@@ -31,6 +31,9 @@ write a control character, and it writes none at all when there is no terminal.
 prompt on **stderr** and read the answer from stdin. A question is not payload
 either.
 
+:func:`steps` is the determinate sibling of :func:`progress`, for the one wait in this CLI
+with a real denominator. Same channel, same transience, same silence without a terminal.
+
 :func:`table` is the layer's own vocabulary for "aligned columns", per condition 3 of
 ADR 0027. It returns **text** rather than writing anywhere, so the caller decides the
 channel: today the profile list emits it as payload on stdout. Its ``rich`` console is
@@ -69,7 +72,7 @@ import itertools
 import os
 import sys
 import threading
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from typing import Final, Literal, Protocol, TextIO
 
 import typer
@@ -107,6 +110,15 @@ _SPINNER_GRACE_S: Final[float] = 0.25
 #: How long :func:`progress` waits for the animation thread to clear its line. Only
 #: relevant if the terminal blocks on write; the thread is a daemon either way.
 _SPINNER_JOIN_S: Final[float] = 1.0
+
+#: Width of the determinate progress bar, in characters. Short on purpose: it shares the line
+#: with the counter and the name of the step in flight, and the name is the part that says
+#: where a run got stuck.
+_BAR_WIDTH: Final[int] = 20
+
+#: Characters of that bar. ASCII, for the same reason as the spinner frames.
+_BAR_DONE: Final[str] = "#"
+_BAR_TODO: Final[str] = "-"
 
 #: Line width the table renderer is allowed to use. Wide enough that nothing this CLI shows
 #: is ever wrapped by us: a narrow terminal wraps it, and a redirected file keeps the rows
@@ -217,6 +229,57 @@ def progress(message: str) -> Iterator[None]:
     finally:
         stop.set()
         worker.join(timeout=_SPINNER_JOIN_S)
+
+
+def _render_step(done: int, total: int, label: str) -> str:
+    """One frame of the determinate indicator: bar, counter and what is running now."""
+    filled = round(_BAR_WIDTH * done / total) if total else _BAR_WIDTH
+    bar = _BAR_DONE * filled + _BAR_TODO * (_BAR_WIDTH - filled)
+    return f"[{bar}] {done}/{total} {label}"
+
+
+@contextlib.contextmanager
+def steps(total: int) -> Iterator[Callable[[int, str], None]]:
+    """Show a determinate progress indicator on stderr while the block runs.
+
+    The counterpart to :func:`progress`, and the exception that proves its rule. A percentage
+    is only honest where the denominator is real, which in this CLI happens exactly once: the
+    catalog probe runs a **known** list of queries, so ``7/14`` is counted, not invented.
+    Everywhere else Netezza does not report how far a query has got and the indicator stays
+    indeterminate.
+
+    The line is transient and rewritten in place: it names the step currently running, which
+    is what tells you where a run got stuck, and it is erased when the block ends so the
+    report that follows is not printed under a trail of dead progress lines.
+
+    Without a terminal — redirected, piped, in CI, or ``TERM=dumb`` — **nothing at all is
+    written**: no frames, no carriage returns, no escape sequences. Redirecting the report to
+    a file therefore yields the report and nothing else.
+
+    Args:
+        total: How many steps there are. Known in advance; that is the whole point.
+
+    Yields:
+        A callable ``(done, label)`` the caller invokes once per step, where ``label`` names
+        the step and is already localized. Never a credential.
+    """
+    if not animation_enabled():
+        yield lambda _done, _label: None
+        return
+    widest = 0
+
+    def update(done: int, label: str) -> None:
+        nonlocal widest
+        frame = _render_step(done, total, label)
+        widest = max(widest, len(frame))
+        _write_live("\r" + frame.ljust(widest))
+
+    try:
+        yield update
+    finally:
+        # Erase with spaces and a carriage return only: no escape sequence, so nothing here
+        # depends on what the terminal understands.
+        _write_live("\r" + " " * widest + "\r")
 
 
 @contextlib.contextmanager
@@ -423,6 +486,7 @@ __all__: Final[tuple[str, ...]] = (
     "status",
     "stdout_is_reserved",
     "stdout_reserved_for_protocol",
+    "steps",
     "success",
     "table",
     "warn",
