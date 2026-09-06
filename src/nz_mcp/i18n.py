@@ -835,6 +835,80 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Segundos que se espera a una consulta antes de cortarla",
         "en": "Seconds a query is given before it is cut off",
     },
+    # nz-mcp list-profiles — where each profile points, and which one is in use.
+    "CLI.PROFILES_EMPTY": {
+        "es": "No hay ningún perfil configurado todavía. Crea el primero con: nz-mcp init",
+        "en": "No profile is configured yet. Create the first one with: nz-mcp init",
+    },
+    "CLI.PROFILES_COLUMN_NAME": {
+        "es": "Perfil",
+        "en": "Profile",
+    },
+    "CLI.PROFILES_COLUMN_HOST": {
+        "es": "Host",
+        "en": "Host",
+    },
+    "CLI.PROFILES_COLUMN_DATABASE": {
+        "es": "Base de datos",
+        "en": "Database",
+    },
+    "CLI.PROFILES_COLUMN_MODE": {
+        "es": "Modo",
+        "en": "Mode",
+    },
+    # The marker is text, not colour: the header names the column and the cell carries an
+    # asterisk, so nothing is lost by whoever redirects the output or does not see colour.
+    "CLI.PROFILES_COLUMN_ACTIVE": {
+        "es": "Activo",
+        "en": "Active",
+    },
+    "CLI.PROFILES_NEXT_STEP": {
+        "es": "Cambia el activo con: nz-mcp switch-profile <perfil>",
+        "en": "Change the active one with: nz-mcp switch-profile <profile>",
+    },
+    "CLI.PROFILES_SINGLE_NEXT_STEP": {
+        "es": "Comprueba que llega con: nz-mcp test-connection",
+        "en": "Check that it connects with: nz-mcp test-connection",
+    },
+    # nz-mcp edit-profile
+    "CLI.EDIT_PROFILE_INVALID_MODE": {
+        "es": (
+            "'{value}' no es un modo válido. Usa read (solo consultas), write (además "
+            "INSERT, UPDATE y DELETE) o admin (además DDL)."
+        ),
+        "en": (
+            "'{value}' is not a valid mode. Use read (queries only), write (also INSERT, "
+            "UPDATE and DELETE) or admin (also DDL)."
+        ),
+    },
+    "CLI.EDIT_PROFILE_NO_CHANGES": {
+        "es": (
+            "No se ha cambiado nada: indica al menos uno de --mode, --database, "
+            "--max-rows-default o --timeout-s-default."
+        ),
+        "en": (
+            "Nothing changed: pass at least one of --mode, --database, --max-rows-default "
+            "or --timeout-s-default."
+        ),
+    },
+    "CLI.EDIT_PROFILE_UPDATED": {
+        "es": "Perfil '{profile}' actualizado (modo {mode}).",
+        "en": "Profile '{profile}' updated (mode {mode}).",
+    },
+    # nz-mcp test-connection — the prefixes used to be English while the hint next to them
+    # was translated, which left a single screen speaking two languages.
+    "CLI.TEST_CONNECTION_OK": {
+        "es": "OK: conectado a {detail} como {user}.",
+        "en": "OK: connected to {detail} as {user}.",
+    },
+    "CLI.TEST_CONNECTION_FAIL": {
+        "es": "FALLA: {detail}",
+        "en": "FAIL: {detail}",
+    },
+    "CLI.TEST_CONNECTION_HINT": {
+        "es": "Qué mirar: {hint}",
+        "en": "What to look at: {hint}",
+    },
     # nz-mcp doctor (CLI diagnostics — no secrets)
     "DOCTOR.HEADER": {
         "es": "Diagnóstico local (nz-mcp doctor)",

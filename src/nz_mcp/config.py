@@ -123,9 +123,23 @@ def get_profile(name: str, path: Path | None = None) -> Profile:
         raise InvalidProfileError(profile=name, detail=str(exc)) from exc
 
 
+def active_profile_name(file: ProfilesFile) -> str | None:
+    """Name of the profile a new nz-mcp process would use, or ``None`` when there is none.
+
+    Three sources, in this order: the ``active`` field of ``profiles.toml``, the
+    ``NZ_MCP_PROFILE`` environment variable, and — only when it is unambiguous — the single
+    configured profile.
+
+    Split out of :func:`get_active_profile` so that listing the profiles can mark the active
+    one without re-deriving the rule. Two answers to "which profile is in use" would be one
+    too many, and the CLI is exactly where the wrong answer would be believed.
+    """
+    return file.active or os.environ.get("NZ_MCP_PROFILE") or single_profile_name_or_none(file)
+
+
 def get_active_profile(path: Path | None = None) -> Profile:
     file = load_profiles_file(path)
-    name = file.active or os.environ.get("NZ_MCP_PROFILE") or single_profile_name_or_none(file)
+    name = active_profile_name(file)
     if not name:
         raise ProfileNotFoundError(profile="<active>", hint_es="", hint_en="")
     return get_profile(name, path=path)
