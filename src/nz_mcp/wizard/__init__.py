@@ -31,6 +31,7 @@ from nz_mcp.wizard.fields import (
     MIN_HEIGHT,
     MIN_WIDTH,
     MODES,
+    CredentialSink,
     DraftFields,
     FieldSpec,
     WizardResult,
@@ -53,6 +54,7 @@ def collect_profile_draft(
     initial: DraftFields,
     password_set: bool,
     ask_password: Callable[[], bool],
+    credential: CredentialSink,
     locale: Locale,
 ) -> WizardResult:
     """Run the full-screen wizard and return what it collected.
@@ -68,7 +70,10 @@ def collect_profile_draft(
         password_set: Whether a credential is already held. A boolean; see
             :mod:`nz_mcp.wizard.fields`.
         ask_password: Asks for the credential outside the widget tree and returns whether
-            one is now held.
+            one is now held. The net, for a paste or for anyone who would rather not type
+            a credential into a full-screen interface.
+        credential: Where the secure field puts each keystroke. Write-only by its own
+            protocol, so nothing inside the interface can read the credential back.
         locale: Language of every visible string.
 
     Returns:
@@ -82,6 +87,7 @@ def collect_profile_draft(
         initial=initial,
         password_set=password_set,
         ask_password=ask_password,
+        credential=credential,
         locale=locale,
     )
     result = application.run()
@@ -97,6 +103,7 @@ __all__: Final[tuple[str, ...]] = (
     "MIN_HEIGHT",
     "MIN_WIDTH",
     "MODES",
+    "CredentialSink",
     "DraftFields",
     "FieldSpec",
     "WizardResult",

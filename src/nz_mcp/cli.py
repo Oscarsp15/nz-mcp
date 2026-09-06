@@ -649,17 +649,61 @@ class _CredentialHolder:
     """Where the drafted credential lives while the wizard is on screen.
 
     Outside every widget tree, which is the whole point (ADR 0029, condition 5). The
-    full-screen wizard is handed a callable that fills this in and answers *"is there one
-    now?"* with a boolean; it has no reference to the object and no way to read it.
+    full-screen wizard reaches it through two doors and neither can read it back: a
+    callable that fills it from the terminal and answers *"is there one now?"* with a
+    boolean, and the write-only :class:`~nz_mcp.wizard.CredentialSink` protocol that the
+    secure field uses, one character at a time.
 
-    ``Secret`` and not ``str`` for the reason the ADR 0026 gives: this value is a frame
-    argument of half the wizard, and a traceback prints frame arguments.
+    **Characters in a list, not a string.** Two reasons, and the second is the one that
+    matters. A ``str`` buffer would build a complete copy of the credential on every
+    keystroke - the exact behaviour ADR 0029 measured inside ``textual``'s ``Input`` and
+    the reason that widget was rejected. And while the wizard is up, no live object holds
+    the credential contiguously: it is joined exactly once, at :meth:`credential`, into a
+    ``Secret``, which is what ADR 0026 requires of anything that can end up in a frame.
+    That property is what the contract test verifies, and it is why the search there
+    follows closures and bound methods: this object is reachable from the screen.
     """
 
-    __slots__ = ("value",)
+    __slots__ = ("_characters",)
 
     def __init__(self) -> None:
-        self.value: Secret | None = None
+        self._characters: list[str] = []
+
+    # --- the write-only sink the secure field is given ------------------------
+
+    def insert(self, index: int, character: str) -> None:
+        self._characters.insert(index, character)
+
+    def remove(self, start: int, stop: int) -> None:
+        del self._characters[start:stop]
+
+    def clear(self) -> None:
+        self._characters.clear()
+
+    # --- the side only the CLI sees ------------------------------------------
+
+    def accept(self, secret: Secret) -> None:
+        """Take a credential typed on the real terminal, replacing anything typed before.
+
+        It is taken apart into the same one-character pieces the field produces, so the
+        two ways in leave the same thing behind and the property holds for both: while the
+        screen is up, no live object carries the credential whole.
+        """
+        self._characters = list(secret)
+
+    def is_set(self) -> bool:
+        return bool(self._characters)
+
+    def credential(self) -> Secret | None:
+        """The credential, assembled at last, or ``None`` if there is none."""
+        # The joined text is never bound to a name: it is the argument of ``Secret`` and
+        # nothing else, so it is released as soon as the copy inside it is made.
+        return Secret("".join(self._characters)) if self._characters else None
+
+    def __repr__(self) -> str:
+        # This object is a frame argument of half the wizard, and a traceback prints frame
+        # arguments (ADR 0026). Say how many characters, never which.
+        return f"_CredentialHolder(set={self.is_set()})"
 
 
 def _credential_collector(holder: _CredentialHolder, locale: Locale) -> Callable[[], bool]:
@@ -673,9 +717,9 @@ def _credential_collector(holder: _CredentialHolder, locale: Locale) -> Callable
 
     def collect() -> bool:
         try:
-            holder.value = _prompt_password(locale)
+            holder.accept(_prompt_password(locale))
         except typer.Abort:
-            return holder.value is not None
+            return holder.is_set()
         return True
 
     return collect
@@ -704,6 +748,7 @@ def _collect_draft(name: str, previous: dict[str, object], locale: Locale) -> _P
             initial=from_previous(previous),
             password_set=False,
             ask_password=_credential_collector(holder, locale),
+            credential=holder,
             locale=locale,
         )
         if result.status == "cancelled":
@@ -713,7 +758,7 @@ def _collect_draft(name: str, previous: dict[str, object], locale: Locale) -> _P
             return _draft_from_fields(result.fields, holder, locale)
         out.warn(t("CLI.WIZARD_UI_DEGRADED", locale, width=MIN_WIDTH, height=MIN_HEIGHT))
         previous = {**previous, **as_previous(result.fields)}
-    return _prompt_draft(locale, previous, password=holder.value)
+    return _prompt_draft(locale, previous, password=holder.credential())
 
 
 def _draft_from_fields(
@@ -727,12 +772,13 @@ def _draft_from_fields(
     port = normalize_port(fields.port)
     mode = normalize_mode(fields.mode)
     level = normalize_security_level(fields.security_level)
+    credential = holder.credential()
     return _ProfileDraft(
         host=fields.host.strip(),
         port=DEFAULT_PORT if port is None else port,
         database=fields.database.strip(),
         user=fields.user.strip(),
-        password=holder.value if holder.value is not None else _prompt_password(locale),
+        password=_prompt_password(locale) if credential is None else credential,
         mode="read" if mode is None else mode,
         security_level=DEFAULT_SECURITY_LEVEL if level is None else level,
         ca_certs=fields.ca_certs.strip() or None,

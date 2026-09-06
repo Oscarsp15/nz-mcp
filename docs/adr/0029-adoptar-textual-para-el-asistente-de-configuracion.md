@@ -1,8 +1,9 @@
 # ADR 0029 — Adoptar `textual` acotado y confinado para el asistente de configuración
 
-- **Fecha**: 2026-09-06 (adenda 1: 2026-09-06)
-- **Estado**: aceptado, con una adenda que precisa qué garantiza la condición 5 — ver
-  [Adenda 1](#adenda-1-2026-09-06--qué-garantiza-de-verdad-la-condición-5)
+- **Fecha**: 2026-09-06 (adenda 1: 2026-09-06; adenda 2: 2026-09-06)
+- **Estado**: aceptado, con dos adendas — la [1](#adenda-1-2026-09-06--qué-garantiza-de-verdad-la-condición-5)
+  precisa qué garantiza la condición 5, y la [2](#adenda-2-2026-09-06--la-cláusula-2-se-abre-un-campo-que-guarda-un-número)
+  abre su cláusula 2 a un campo interactivo que no guarda la credencial
 - **Decidido por**: DX Engineer (IA) + validación humana (auditor: Security Engineer)
 - **Issue**: [#221](https://github.com/Oscarsp15/nz-mcp/issues/221)
 - **Depende de**: [ADR 0028](0028-asistente-de-configuracion-interactivo.md), que abre la excepción
@@ -155,6 +156,12 @@ en una traza sino en un objeto vivo.
 > estático del paquete **no puede impedir** que la credencial entre —cayó tres veces durante la
 > implementación—, así que la garantía es el test que ejecuta la aplicación y busca el valor real,
 > y el guardarraíl estático es defensa en profundidad.
+
+> **Modificado por la [adenda 2](#adenda-2-2026-09-06--la-cláusula-2-se-abre-un-campo-que-guarda-un-número).**
+> La cláusula 2 decía *"se pide fuera del árbol de widgets"* como si fuera la única forma de
+> cumplir la condición. No lo es: lo que la condición prohíbe es **guardar** la credencial en un
+> widget, y eso admite un widget que no guarda nada. Las cláusulas 1 y 3 no cambian; la 2 se
+> reescribe en la adenda 2, con la suspensión conservada como red.
 
 ## Rango elegido, y por qué ése
 
@@ -419,6 +426,148 @@ credencial, ni un campo de password en el modelo de estado"*, léase también: *
 de ejecución siga ejercitando el camino real y siga buscando un valor real**. Si ese test
 deja de ejecutar la aplicación de verdad, la condición 5 ha dejado de estar comprobada,
 aunque el guardarraíl estático siga en verde.
+
+## Adenda 2 (2026-09-06) — la cláusula 2 se abre: un campo que guarda un número
+
+Esta adenda existe porque el owner miró el asistente terminado y vio la costura: al llegar a
+la contraseña **la interfaz se suspende** y la pregunta se hace fuera. Su pregunta, literal:
+*"cómo harías lo de la contraseña sin perder lo interactivo?"* ([issue #224](https://github.com/Oscarsp15/nz-mcp/issues/224)).
+
+La respuesta corta es que la condición 5 prohíbe menos de lo que su cláusula 2 daba a entender.
+Lo prohibido es **que la credencial se guarde en un widget**. Un widget que no guarda nada no
+está prohibido, solo no se había escrito.
+
+### Lo que se midió esta vez, sobre `textual` 8.2.8
+
+| Prueba | Resultado |
+|---|---|
+| `events.Key` de una tecla imprimible | `character` es una `str` de **un** carácter, y `is_printable` la distingue de las teclas de control sin heurística nuestra |
+| `Input(password=True)` recibe un pegado | `Input.value` pasa a ser la cadena pegada completa, en claro. Confirma la medición original |
+| `events.Paste` | `Paste(text: str)`: el pegado llega **entero**, como `str` desnuda, construido por el parser de la terminal **antes** de que corra ningún manejador nuestro |
+| Vida del mensaje `Paste` tras el manejador | Con `weakref`: **sigue vivo** después del despacho y después de 300 ms de inactividad. Solo se recoge cuando se procesa **otro** mensaje |
+| ¿Se puede soltar esa referencia? | **Sí.** `Paste.text` es un atributo escribible: vaciarlo tras consumirlo deja el mensaje sin la credencial, y su `__rich_repr__` —lo que imprimiría una consola de devtools— pasa a estar vacío |
+| ¿Queda alguna copia más? | **Sí, y no es nuestra.** `pasted_text`, un local del frame suspendido del generador del parser (`parser._gen.gi_frame.f_locals`), conserva una copia completa hasta el siguiente pegado con corchetes |
+| `export_screenshot()` con el campo nuevo lleno | No contiene la credencial. Contiene la máscara |
+| Recorrido del grafo de objetos desde `App` y desde `Screen`, sin tope práctico de profundidad, siguiendo `__dict__`, `__slots__`, `__closure__`, `__self__` y `__func__` | **Limpio.** El único camino que aparece a la credencial pasa por `sys.modules` hasta la variable del propio script de ataque |
+
+### Qué cambia
+
+**La cláusula 2 de la condición 5 se reescribe así:**
+
+> Ningún `Input` del asistente recibe nunca la credencial, ni siquiera con `password=True`. El
+> asistente puede tener un campo propio para la contraseña siempre que **su estado no contenga
+> texto**: `SecretField` guarda tres enteros (cuántos caracteres hay, dónde está el cursor, dónde
+> empezó la selección) y un booleano, dibuja la máscara a partir del contador, y entrega cada
+> pulsación —tecleada o pegada— a un `CredentialSink` que vive fuera del árbol. Ese protocolo es
+> **de solo escritura**: acepta un carácter en una posición, borra un rango y olvida; no se le
+> puede preguntar qué tiene. La suspensión con `App.suspend()` y `cli_output.ask_secret()`
+> **se conserva como red**, en Ctrl+P, para quien prefiera no escribirla en pantalla.
+
+Consecuencias que hay que declarar sin adornos:
+
+1. **Ahora hay dos puertas, no una.** La adenda 1 apoyaba parte de la garantía en que
+   `ask_password: Callable[[], bool]` *no puede transportar una cadena*. Sigue siendo cierto de
+   esa puerta, pero la segunda —`insert(index, character)`— **sí transporta texto**: un carácter,
+   en dirección widget → fuera. El argumento "por construcción" se debilita ahí y se refuerza en
+   otro sitio: el sumidero **no tiene método de lectura**, así que nada que alcance al widget
+   puede reconstruir la credencial a través de él.
+2. **La credencial no existe entera mientras la pantalla está abierta.** El sumidero guarda
+   `list[str]` de un carácter, y se une **una sola vez**, al final, dentro de un `Secret`. No es
+   una astucia para pasar un test: un búfer `str` construiría una copia completa de la credencial
+   en cada pulsación, que es exactamente lo que esta ADR midió dentro de `Input` y la razón por la
+   que se descartó ese widget. La lista es la estructura correcta y la no contigüidad es su
+   consecuencia. También vale la pena decir qué **no** es: no es cifrado. Un volcado de memoria la
+   recompone. La propiedad que se afirma es de alcanzabilidad entre objetos, la misma clase de
+   propiedad que afirma la [ADR 0026](0026-secret-sin-password-en-trazas.md).
+3. **El pegado se permite, y se acepta un riesgo estrecho por escrito.** Aquí la primera versión de
+   esta adenda decía que se prohibía, y estaba equivocada por exceso de celo. Lo que hay que
+   revisar no es la medición, que sigue en pie, sino **la promesa que se le exigía**.
+
+   *Qué se acepta*: la cadena pegada existe entera, como `str` desnuda, durante un instante y
+   dentro de objetos que no son nuestros. No podemos evitar que se cree: la construye el parser
+   antes de que corra ninguna línea nuestra.
+
+   *Cuál es la exposición concreta*. Son **dos** copias, no una, y la lista tiene que estar
+   completa o no sirve de nada. La auditoría del PR #225 señaló que la primera redacción declaraba
+   solo la segunda:
+
+   1. **El propio `event`, en un frame nuestro.** `on_paste` recibe el evento como argumento, así
+      que mientras la llamada esté en la pila el texto es alcanzable por cualquier renderizado que
+      muestre argumentos o locales —pytest por defecto, y el manejador de fallos de `textual`—. La
+      auditoría lo **reprodujo ejecutando**: con un pegado real y el sumidero fallando en el sexto
+      carácter, la traza mostraba `event = Paste(text='<la credencial>')`. Estaba en el camino
+      feliz, que es el error que este proyecto ya ha cometido antes. Se corrige con un `finally`
+      que vacía la referencia pase lo que pase, y hay un test que provoca la excepción de verdad y
+      lee la traza en los cinco estilos de `--tb`. **La ventana se reduce al bloque `try` completo, que incluye las llamadas previas al bucle y no solo su cuerpo (medido: un frame capturado dentro de `credential.clear()`, que corre antes del bucle, todavía alcanza `event.text` entero);
+      no desaparece**: un fallo *dentro* del bucle sigue teniendo el evento vivo en ese instante,
+      solo que ya no queda nada después.
+   2. **`pasted_text`, en un frame que no es nuestro.** Un local del frame suspendido del generador
+      del parser de `textual` conserva una copia completa hasta el siguiente pegado con corchetes.
+      Una traza con locales que pasara por ahí la mostraría, porque ese frame no lo escribimos
+      nosotros y no lleva `Secret`. No hay forma de alcanzarlo desde este paquete.
+
+   *Qué sí está en nuestra mano, y se hace*: soltar la referencia en cuanto se consume.
+   `Paste.text` es escribible, así que el manejador la vacía **en un `finally`** después de
+   recorrerla, y el mensaje que el bus conserva deja de llevar la credencial —igual que su
+   `__rich_repr__`, que es lo que imprimiría una consola de devtools o un log de mensajes—. Es
+   todo lo que se puede estrechar el instante; lo demás no depende de nosotros y así está dicho.
+
+   *Por qué se acepta*: la molestia de no poder pegar es **diaria y segura** —un gestor de
+   contraseñas es la forma normal de escribir una credencial— y el riesgo es **estrecho y raro**.
+   Y hay un argumento que cierra la incoherencia: **`Secret` tampoco protege la memoria**. Guarda
+   el texto real en un `str` y lo que controla es cómo se renderiza. Exigirle al evento de pegado
+   una garantía que nuestro propio tipo no da era pedir de más.
+
+   *Qué sigue garantizado*, que es lo que el modelo de amenaza pide de verdad: no se muestra en
+   pantalla, no entra en registros, no sale en una captura y no aparece en ningún mensaje de error
+   construido por **nuestro** código —incluidos los que se construyen cuando algo falla a mitad de
+   un pegado, que es justo lo que la auditoría encontró roto y ahora tiene test propio—.
+
+   La regla estática que prohibía leer `.text` se **acota** en vez de retirarse: ahora prohíbe
+   *copiarlo* —ligarlo a un nombre, guardarlo en un atributo o pasarlo a una llamada, se escriba
+   con punto o con `getattr`— y permite las dos formas que sí tienen sentido, recorrerlo en el
+   sitio y vaciarlo. Sigue siendo análisis estático y sigue teniendo agujeros conocidos; están
+   enumerados en el propio archivo del guardarraíl, que es donde se leen.
+4. **La máscara enseña la longitud, y solo mientras el campo tiene el foco.** `cli-experience.md`
+   §4 dice que ni enmascarada se muestra la password, y esa frase se refiere a la **recapitulación**
+   —seguir sin mostrarla ahí—; un campo de entrada es otra cosa, es el editor. Aun así la longitud
+   es información, así que el campo dibuja la máscara **solo con el foco puesto** y, sin foco,
+   vuelve a decir únicamente *"definida / sin definir"*. Una pantalla que alguien deja atrás no
+   lleva ni la longitud. Y si la credencial se dio por Ctrl+P, el campo **no aprende su longitud**:
+   se queda en cero y lo dice con palabras.
+5. **El test de ejecución se amplía y se endurece, que es lo que pedía la adenda 1.**
+   `test_the_real_wizard_never_lets_the_credential_into_a_widget` ahora recorre **los dos** caminos
+   —tecleado carácter a carácter y Ctrl+P—, busca el valor en el árbol de widgets, en el estado de
+   la aplicación, en el resultado y en una **captura del framework**; y su búsqueda sigue ahora
+   closures, métodos ligados y funciones, porque el diseño nuevo entrega a un widget un objeto que
+   escribe en el almacén: no seguir los invocables sería estar de acuerdo con el código en vez de
+   comprobarlo. La captura limpia se acompaña de su control negativo: la misma captura, con el
+   valor escrito a mano en un campo, **sí** lo contiene.
+
+### Qué no cambia
+
+- **Cláusula 1**: el modelo de estado del asistente sigue sin campo de password. `DraftFields`
+  tiene siete campos y ninguno es la credencial; lo que viaja al lado es un booleano.
+- **Cláusula 3**: ni devtools ni capturas en el camino de producción. La captura de arriba se toma
+  **en un test**, que es donde el guardarraíl estático la permite y la producción no.
+- **La suspensión sigue existiendo** como red: es la alternativa para quien prefiera no teclear
+  una credencial en una pantalla completa, y el camino que queda si el campo no está disponible.
+- **La adenda 1 sigue mandando** sobre qué garantiza qué: el test de ejecución es la garantía, el
+  guardarraíl estático es defensa en profundidad, y esta adenda no lo presenta como demostración
+  aunque haya crecido con dos reglas nuevas.
+
+### Qué monitorizar, ampliado
+
+- Que el estado de `SecretField` siga siendo enteros y un booleano. Está fijado por nombre y por
+  anotación en las listas blancas del guardarraíl.
+- Que `CredentialSink` **no gane un método de lectura**. El día que lo gane, el argumento "de
+  construcción" de esta adenda desaparece.
+- Que el test de ejecución siga recorriendo los dos caminos y siga siguiendo closures. Si vuelve a
+  buscar solo en `__dict__`, la condición 5 deja de estar comprobada para el diseño nuevo.
+- Si una versión futura de `textual` deja de vaciarse cuando le vaciamos `Paste.text`, o deja de
+  soltar `pasted_text` en el frame del parser, **el riesgo aceptado en la decisión 3 cambia de
+  tamaño** y hay que volver a medirlo. Está aceptado con las cifras de 8.2.8 delante, no en
+  abstracto.
 
 ## Referencias
 

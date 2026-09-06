@@ -32,6 +32,19 @@ from nz_mcp.wizard import (
 )
 
 
+class _Sink:
+    """The write-only credential sink, as small as the protocol allows."""
+
+    def insert(self, index: int, character: str) -> None:
+        del index, character
+
+    def remove(self, start: int, stop: int) -> None:
+        del start, stop
+
+    def clear(self) -> None:
+        return None
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
@@ -206,6 +219,7 @@ def test_the_border_of_the_package_hands_back_a_draft_and_nothing_else(
         initial=DraftFields(host="seed"),
         password_set=False,
         ask_password=lambda: True,
+        credential=_Sink(),
         locale="es",
     )
 
@@ -236,6 +250,7 @@ def test_a_window_closed_without_an_answer_counts_as_cancelled(
         initial=seed,
         password_set=False,
         ask_password=lambda: True,
+        credential=_Sink(),
         locale="es",
     )
 

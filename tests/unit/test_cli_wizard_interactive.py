@@ -106,9 +106,10 @@ def _stub_wizard(
         initial: DraftFields,
         password_set: bool,
         ask_password: Callable[[], bool],
+        credential: object,
         locale: str,
     ) -> WizardResult:
-        del initial, locale
+        del initial, credential, locale
         calls.append(profile)
         captured = ask_password() if types_the_credential else password_set
         return WizardResult(status=status, fields=fields, password_set=captured)
@@ -282,8 +283,9 @@ def test_the_credential_collector_keeps_what_it_already_had_when_the_prompt_is_a
 
     monkeypatch.setattr(out, "ask_secret", lambda _prompt: _PASSWORD)
     assert collect() is True
-    assert holder.value is not None
-    assert holder.value.reveal() == _PASSWORD
+    credential = holder.credential()
+    assert credential is not None
+    assert credential.reveal() == _PASSWORD
 
     def abort(_prompt: str) -> str:
         raise typer.Abort
@@ -303,4 +305,4 @@ def test_the_credential_collector_reports_nothing_when_it_has_nothing(
 
     monkeypatch.setattr(out, "ask_secret", abort)
     assert collect() is False
-    assert holder.value is None
+    assert holder.credential() is None

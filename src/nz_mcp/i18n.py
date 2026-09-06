@@ -579,12 +579,16 @@ MESSAGES: Final[dict[str, Message]] = {
         "en": "Tab field | Enter continue | Esc quit",
     },
     "CLI.WIZARD_UI_PASSWORD_SET": {
-        "es": "definida (Ctrl+P para cambiarla)",
-        "en": "set (Ctrl+P to change it)",
+        "es": "definida (escribe aquí para cambiarla)",
+        "en": "set (type here to change it)",
     },
     "CLI.WIZARD_UI_PASSWORD_UNSET": {
-        "es": "sin definir (Ctrl+P para escribirla)",
-        "en": "not set (Ctrl+P to type it)",
+        "es": "sin definir (escríbela aquí, o Ctrl+P en el terminal)",
+        "en": "not set (type it here, or Ctrl+P on the terminal)",
+    },
+    "CLI.WIZARD_UI_PASSWORD_TERMINAL": {
+        "es": "definida en el terminal (escribe aquí para cambiarla)",
+        "en": "set on the terminal (type here to change it)",
     },
     "CLI.WIZARD_UI_MISSING": {
         "es": "Falta por rellenar: {fields}",

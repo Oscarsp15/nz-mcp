@@ -173,7 +173,7 @@ Nombres de tools MCP, nombres de archivo internos y marcas de reStructuredText f
 ### Se muestra más: la conclusión, en todas partes
 
 - `doctor` termina hoy en *"Idioma (locale): es"* y el veredicto vive solo en el código de salida, que nadie mira. **El informe completo se conserva** —está pensado para pegarlo en un issue y ahí la completitud es la gracia—, pero gana una primera línea con el veredicto y una última con el siguiente paso.
-- El asistente gana una recapitulación antes de validar: host, puerto, base de datos, usuario y modo juntos. **Nunca la password**, ni enmascarada: la regla inviolable no admite matices y una máscara sigue siendo una invitación a comprobar por encima del hombro.
+- El asistente gana una recapitulación antes de validar: host, puerto, base de datos, usuario y modo juntos. **Nunca la password**, ni enmascarada: la regla inviolable no admite matices y una máscara sigue siendo una invitación a comprobar por encima del hombro. Esto habla de la **recapitulación**, no del campo donde se escribe: desde la [adenda 2 del ADR 0029](../adr/0029-adoptar-textual-para-el-asistente-de-configuracion.md#adenda-2-2026-09-06--la-cláusula-2-se-abre-un-campo-que-guarda-un-número) el asistente de pantalla completa tiene un campo propio que sí dibuja una máscara —**solo mientras tiene el foco**, es decir mientras la persona está mirando su teclado—, y que sin foco vuelve a decir únicamente *"definida / sin definir"*. La pantalla que alguien deja atrás sigue sin llevar ni la longitud.
 - Cada comando termina nombrando **un** siguiente paso. Uno.
 
 ### Se muestra más: dónde está apuntando

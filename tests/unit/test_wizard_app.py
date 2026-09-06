@@ -27,6 +27,7 @@ from textual.widgets import Input, Static
 from nz_mcp.i18n import Locale, t
 from nz_mcp.wizard import MIN_HEIGHT, MIN_WIDTH, DraftFields, WizardResult
 from nz_mcp.wizard.app import ProfileWizardApp
+from nz_mcp.wizard.secret_field import SecretField
 
 #: A window with room to spare, and the minimum one, used side by side on purpose.
 _ROOMY: Final[tuple[int, int]] = (100, 30)
@@ -41,11 +42,31 @@ def _complete_draft() -> DraftFields:
     return DraftFields(host="nz.example.com", database="PROD", user="svc")
 
 
+class _Sink:
+    """A stand-in for ``cli._CredentialHolder``: characters, kept apart, outside the tree."""
+
+    def __init__(self) -> None:
+        self.characters: list[str] = []
+
+    def insert(self, index: int, character: str) -> None:
+        self.characters.insert(index, character)
+
+    def remove(self, start: int, stop: int) -> None:
+        del self.characters[start:stop]
+
+    def clear(self) -> None:
+        self.characters.clear()
+
+    def joined(self) -> str:
+        return "".join(self.characters)
+
+
 def _app(
     *,
     initial: DraftFields | None = None,
     password_set: bool = True,
     ask_password: Callable[[], bool] | None = None,
+    credential: _Sink | None = None,
     locale: Locale = "es",
 ) -> ProfileWizardApp:
     """Build the wizard with everything already answered unless a test says otherwise."""
@@ -54,6 +75,7 @@ def _app(
         initial=_complete_draft() if initial is None else initial,
         password_set=password_set,
         ask_password=(lambda: True) if ask_password is None else ask_password,
+        credential=_Sink() if credential is None else credential,
         locale=locale,
     )
 
@@ -199,24 +221,35 @@ async def test_the_focused_field_explains_itself() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_credential_is_asked_for_when_it_is_the_only_thing_left() -> None:
-    """Pressing continue with everything else filled goes straight to the one gap."""
+async def test_the_credential_is_the_last_gap_and_the_focus_goes_to_it() -> None:
+    """Pressing continue with everything else filled moves to the one gap, in place.
+
+    It used to suspend the whole interface here and ask outside. Issue #224 replaced that
+    with the field: the credential row is now a row like the other seven, and continuing
+    lands the focus on it instead of tearing the screen down.
+    """
     asked: list[int] = []
+    sink = _Sink()
 
     def ask_password() -> bool:
         asked.append(1)
         return True
 
-    app = _app(password_set=False, ask_password=ask_password)
+    app = _app(password_set=False, ask_password=ask_password, credential=sink)
     async with app.run_test(size=_ROOMY) as pilot:
         await pilot.press("enter")
         await pilot.pause()
-        assert asked == [1]
+        assert asked == [], "the interface must not be suspended just to ask"
+        assert isinstance(app.focused, SecretField)
+        await pilot.press(*"hunter2")
+        await pilot.pause()
         assert _status(app) == t("CLI.WIZARD_UI_READY", "es")
         await pilot.press("enter")
         await pilot.pause()
 
     assert _result(app).status == "completed"
+    assert _result(app).password_set is True
+    assert sink.joined() == "hunter2"
 
 
 @pytest.mark.asyncio
