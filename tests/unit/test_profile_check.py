@@ -8,7 +8,7 @@ import pytest
 
 from nz_mcp.config import Profile
 from nz_mcp.errors import ConnectionError as NzConnectionError
-from nz_mcp.profile_check import run_checks
+from nz_mcp.profile_check import iter_checks, run_checks
 
 _BASE_PROFILE: dict[str, Any] = {
     "name": "dev",
@@ -79,6 +79,27 @@ class _FakeConn:
 
     def close(self) -> None:
         self.closed = True
+
+
+class _RecordingCursor(_FakeCursor):
+    """Cursor that notes which catalog query ran, so laziness can be observed from outside."""
+
+    def __init__(self, conn: _RecordingConn) -> None:
+        super().__init__(conn)
+        self._log = conn.executed
+
+    def execute(self, sql: str, params: tuple[str | None, str | None] | None = None) -> None:
+        self._log.append(_kind(sql))
+        super().execute(sql, params)
+
+
+class _RecordingConn(_FakeConn):
+    def __init__(self, executed: list[str]) -> None:
+        super().__init__()
+        self.executed = executed
+
+    def cursor(self) -> _FakeCursor:
+        return _RecordingCursor(self)
 
 
 def _patch_open(monkeypatch: pytest.MonkeyPatch, conn: _FakeConn) -> None:
@@ -155,6 +176,61 @@ def test_levels_one_runs_only_the_connection_check(monkeypatch: pytest.MonkeyPat
     assert len(report.outcomes) == 1
     assert report.outcomes[0].level == "connect"
     assert report.ok is True
+
+
+def test_the_session_is_not_opened_until_the_first_outcome_is_pulled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Laziness is the feature, not an accident of using a generator.
+
+    The caller needs a moment *before* the connection is attempted to say what it is waiting
+    on; if building the iterator already opened the session, that moment would not exist and
+    the indicator would only ever appear after the wait it was meant to cover.
+    """
+    opened: list[str] = []
+
+    def _open(profile: Profile, _password: str) -> _FakeConn:
+        opened.append(profile.host)
+        return _FakeConn()
+
+    monkeypatch.setattr("nz_mcp.profile_check.open_connection", _open)
+
+    ladder = iter_checks(_profile(), "pw")
+    assert opened == []
+
+    first = next(ladder)
+    assert opened == ["nz.example.com"]
+    assert first.level == "connect"
+    ladder.close()
+
+
+def test_iter_checks_hands_over_one_level_at_a_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each level resolves on its own ``next()``, in ladder order, one entry per level."""
+    executed: list[str] = []
+    conn = _RecordingConn(executed)
+    monkeypatch.setattr("nz_mcp.profile_check.open_connection", lambda _p, _w: conn)
+
+    ladder = iter_checks(_profile(), "pw")
+    assert next(ladder).level == "connect"
+    assert executed == ["version"]
+    assert next(ladder).level == "catalog_read"
+    assert executed == ["version", "databases"]
+    assert next(ladder).level == "default_database"
+    assert executed == ["version", "databases", "schemas"]
+    assert list(ladder) == []
+    assert conn.closed is True
+
+
+def test_closing_the_ladder_early_closes_the_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A caller that stops half-way must not leave a Netezza session waiting for the GC."""
+    conn = _FakeConn()
+    _patch_open(monkeypatch, conn)
+
+    ladder = iter_checks(_profile(), "pw")
+    next(ladder)
+    ladder.close()
+
+    assert conn.closed is True
 
 
 def test_unusable_database_name_fails_at_the_catalog_level(

@@ -62,7 +62,14 @@ from nz_mcp.errors import (
 from nz_mcp.i18n import MESSAGES, Locale, resolve_locale, t
 from nz_mcp.logging_config import configure_logging_for_stdio
 from nz_mcp.logging_utils import sanitize
-from nz_mcp.profile_check import CheckOutcome, ValidationReport, run_checks
+from nz_mcp.profile_check import (
+    CHECK_LEVELS,
+    CheckLevel,
+    CheckOutcome,
+    ValidationReport,
+    iter_checks,
+    run_checks,
+)
 from nz_mcp.secret import Secret
 from nz_mcp.server import run_stdio_server
 from nz_mcp.tools.session import SwitchProfileInput, nz_switch_profile
@@ -276,7 +283,14 @@ def test_connection_cmd(
         raise typer.Exit(code=1) from exc
 
     # Level 1 of the validation ladder the wizard also runs (profile_check.run_checks).
-    outcome = run_checks(prof, password, levels=1).outcomes[0]
+    # The wait is a TCP session over a VPN and can last until the driver times out, so it
+    # is announced while it happens instead of after: naming host, port and user is what
+    # tells someone with the VPN down where to look. Never the password.
+    waiting = t(
+        "CLI.TEST_CONNECTION_RUNNING", locale, host=prof.host, port=prof.port, user=prof.user
+    )
+    with out.progress(waiting):
+        outcome = run_checks(prof, password, levels=1).outcomes[0]
     if outcome.status != "ok":
         out.fail(f"FAIL: {outcome.detail}")
         hint = outcome.hint_es if locale == "es" else outcome.hint_en
@@ -501,8 +515,7 @@ def _validate_before_saving(
         return True
     while True:
         out.heading(t("CLI.VALIDATE_HEADER", locale))
-        report = _run_ladder(name, draft, previous)
-        _print_report(report, draft.database, locale)
+        report = _run_ladder(_draft_profile(name, draft, previous), draft.password, locale)
         if report.ok:
             out.success(t("CLI.VALIDATE_ALL_OK", locale))
             return True
@@ -517,10 +530,10 @@ def _validate_before_saving(
             _fix_one_field(draft, locale)
 
 
-def _run_ladder(name: str, draft: _ProfileDraft, previous: dict[str, object]) -> ValidationReport:
-    """Validate the draft as if it were already a profile, without persisting it."""
+def _draft_profile(name: str, draft: _ProfileDraft, previous: dict[str, object]) -> Profile:
+    """Shape the draft as a ``Profile`` so it can be validated without being persisted."""
     overrides = previous.get("catalog_overrides")
-    profile = Profile(
+    return Profile(
         name=name,
         host=draft.host,
         port=draft.port,
@@ -531,7 +544,34 @@ def _run_ladder(name: str, draft: _ProfileDraft, previous: dict[str, object]) ->
         ca_certs=draft.ca_certs,
         catalog_overrides=cast(dict[str, str], overrides) if isinstance(overrides, dict) else {},
     )
-    return run_checks(profile, draft.password)
+
+
+def _run_ladder(profile: Profile, password: Secret, locale: Locale) -> ValidationReport:
+    """Run the ladder level by level, saying what is running and printing each result.
+
+    This is the longest silence of the whole install path: level 1 opens a TCP session,
+    usually over a VPN, and used to show nothing until the driver gave up — at which point
+    all three lines appeared at once. Someone with the VPN down could not tell "still
+    trying" from "hung", and the natural reaction, Ctrl+C, threw away eight answers.
+
+    So each level announces itself before it runs and its result line replaces the
+    indicator when it ends. The indicator is indeterminate because Netezza does not report
+    how far a query has got; a percentage here would be invented. Without a terminal
+    nothing is announced at all and the output is exactly the three result lines, as before.
+    """
+    outcomes: list[CheckOutcome] = []
+    with contextlib.closing(iter_checks(profile, password)) as ladder:
+        for level in CHECK_LEVELS:
+            with out.progress(_render_running(level, profile, locale)):
+                outcome = next(ladder, None)
+            if outcome is None:
+                break
+            outcomes.append(outcome)
+            out.status(
+                _render_outcome(outcome, profile.database, locale),
+                style=_outcome_style(outcome),
+            )
+    return ValidationReport(tuple(outcomes))
 
 
 _OUTCOME_MESSAGE_KEYS: Final[dict[tuple[str, str], str]] = {
@@ -549,10 +589,24 @@ _OUTCOME_MESSAGE_KEYS: Final[dict[tuple[str, str], str]] = {
 }
 
 
-def _print_report(report: ValidationReport, database: str, locale: Locale) -> None:
-    """Report every level on its own line: what failed and what that means."""
-    for outcome in report.outcomes:
-        out.status(_render_outcome(outcome, database, locale), style=_outcome_style(outcome))
+#: What the indicator says while each level is in flight. Same numbering as the result
+#: lines, so the line that replaces it reads as the answer to the same question.
+_RUNNING_MESSAGE_KEYS: Final[dict[CheckLevel, str]] = {
+    "connect": "CLI.VALIDATE_CONNECT_RUNNING",
+    "catalog_read": "CLI.VALIDATE_CATALOG_RUNNING",
+    "default_database": "CLI.VALIDATE_DATABASE_RUNNING",
+}
+
+
+def _render_running(level: CheckLevel, profile: Profile, locale: Locale) -> str:
+    """Name the level in flight. Host, port and database only: never the credential."""
+    return t(
+        _RUNNING_MESSAGE_KEYS[level],
+        locale,
+        host=profile.host,
+        port=profile.port,
+        database=profile.database,
+    )
 
 
 def _render_outcome(outcome: CheckOutcome, database: str, locale: Locale) -> str:

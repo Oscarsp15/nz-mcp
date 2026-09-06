@@ -141,6 +141,10 @@ def test_test_connection_ok(monkeypatch: pytest.MonkeyPatch, two_profiles: Path)
     assert "OK: connected to" in result.stderr
     assert "NPS 7.2.1-1" in result.stderr
     assert "svc_dev" in result.stderr
+    # Issue #205: the wait is announced on a terminal and nowhere else. Redirected, the
+    # verdict line is still the only thing in the file.
+    assert "\r" not in result.stderr
+    assert "Connecting to" not in result.stderr
 
 
 def test_test_connection_profile_flag_ok(

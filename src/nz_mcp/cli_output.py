@@ -20,7 +20,12 @@ snippet. Payload is never styled.
 :func:`success`, :func:`warn`, :func:`fail`) write to **stderr**. They carry
 everything a person reads that is not the payload: progress, confirmations,
 warnings, errors. Decoration lives here and only here, and so does any future
-spinner or table.
+table.
+
+:func:`progress` is the same channel in its transient form: an indeterminate
+activity indicator on stderr for the waits that are real, erased when the block
+ends so the caller's result line replaces it. It is the only code allowed to
+write a control character, and it writes none at all when there is no terminal.
 
 :func:`ask`, :func:`ask_int`, :func:`ask_secret` and :func:`confirm` put their
 prompt on **stderr** and read the answer from stdin. A question is not payload
@@ -53,8 +58,10 @@ from __future__ import annotations
 
 import contextlib
 import io
+import itertools
 import os
 import sys
+import threading
 from collections.abc import Iterator
 from typing import Final, Literal, Protocol, TextIO
 
@@ -71,6 +78,25 @@ _STYLE_COLORS: Final[dict[Style, str | None]] = {
 }
 
 _DUMB_TERM: Final[str] = "dumb"
+
+#: Frames of the activity indicator, in ASCII on purpose. A Windows console running a
+#: legacy code page renders anything outside ASCII as ``?``, which is what the CLI design
+#: found while walking the install path, so braille dots and block characters are out.
+_SPINNER_FRAMES: Final[tuple[str, ...]] = ("-", "\\", "|", "/")
+
+#: Seconds between frames. Fast enough to read as motion, slow enough not to flood a
+#: slow terminal or a serial console.
+_SPINNER_INTERVAL_S: Final[float] = 0.12
+
+#: Seconds of silence before the first frame is drawn. Below this, a person has not
+#: started waiting yet and an indicator that appears and vanishes is flicker, not
+#: information: a level that resolves instantly — a skipped one, a local error — prints
+#: its result line and nothing else.
+_SPINNER_GRACE_S: Final[float] = 0.25
+
+#: How long :func:`progress` waits for the animation thread to clear its line. Only
+#: relevant if the terminal blocks on write; the thread is a daemon either way.
+_SPINNER_JOIN_S: Final[float] = 1.0
 
 #: Standard descriptors. The guarantee is about these numbers, not about the
 #: ``sys.stdout`` object: that is the whole point of doing it down here.
@@ -103,6 +129,79 @@ def color_enabled(stream: SupportsIsatty | None = None) -> bool:
         return False
     target = sys.stderr if stream is None else stream
     return bool(target.isatty())
+
+
+def animation_enabled(stream: SupportsIsatty | None = None) -> bool:
+    """Report whether a moving indicator may be drawn on ``stream`` (default: stderr).
+
+    Deliberately not the same predicate as :func:`color_enabled`. ``NO_COLOR`` is a
+    convention about *colour*, and an indicator carries information colour does not — the
+    command is alive — so it survives ``NO_COLOR`` on a real terminal. What it does not
+    survive is the absence of a terminal (redirection, pipe, CI) or ``TERM=dumb``, because
+    then the carriage returns it relies on are just bytes in a file.
+    """
+    if os.environ.get("TERM", "").strip().lower() == _DUMB_TERM:
+        return False
+    target = sys.stderr if stream is None else stream
+    return bool(target.isatty())
+
+
+def _write_live(text: str) -> None:
+    """Write an in-place update to stderr, ignoring a stream that closed underneath."""
+    with contextlib.suppress(ValueError, OSError):
+        sys.stderr.write(text)
+        sys.stderr.flush()
+
+
+def _animate(message: str, stop: threading.Event) -> None:
+    """Redraw ``message`` with a rotating frame until ``stop`` is set, then clear the line."""
+    if stop.wait(_SPINNER_GRACE_S):
+        return
+    for frame in itertools.cycle(_SPINNER_FRAMES):
+        _write_live(f"\r{frame} {message}")
+        if stop.wait(_SPINNER_INTERVAL_S):
+            break
+    # Erase with spaces rather than an ANSI clear-line: the indicator then needs no escape
+    # sequence at all, only a carriage return, so nothing here depends on what the terminal
+    # understands. The width covers the frame and the space that follow the carriage return.
+    _write_live("\r" + " " * (len(message) + 2) + "\r")
+
+
+@contextlib.contextmanager
+def progress(message: str) -> Iterator[None]:
+    """Show an indeterminate activity indicator on stderr while the block runs.
+
+    Indeterminate on purpose. Netezza does not report how far a query has got, so the only
+    honest thing a percentage could be built from does not exist: a bar that advances on
+    its own is an animated lie, and the design rules it out everywhere except where a real
+    denominator exists. This says "still working, on this step" and nothing more.
+
+    The line is transient: it is erased when the block ends, so the caller's result line
+    takes its place instead of piling up under it.
+
+    Without a terminal — redirected to a file, piped into another process, running in CI,
+    or ``TERM=dumb`` — **nothing at all is written**: no frames, no carriage returns, no
+    escape sequences, no thread. What lands in the file is exactly what landed there before
+    this indicator existed. That is checked, not assumed; see
+    ``tests/unit/test_cli_progress.py``.
+
+    Args:
+        message: What is being waited on, already localized by the caller. Never a
+            credential, and never anything that would be wrong to leave in a log.
+    """
+    if not animation_enabled():
+        yield
+        return
+    stop = threading.Event()
+    # Daemon: a hung write on the terminal must never keep the interpreter alive, and the
+    # only state this thread owns is one line it is about to erase.
+    worker = threading.Thread(target=_animate, args=(message, stop), daemon=True)
+    worker.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        worker.join(timeout=_SPINNER_JOIN_S)
 
 
 @contextlib.contextmanager
@@ -247,6 +346,7 @@ def confirm(prompt: str, *, default: bool = False) -> bool:
 __all__: Final[tuple[str, ...]] = (
     "Style",
     "SupportsIsatty",
+    "animation_enabled",
     "ask",
     "ask_int",
     "ask_secret",
@@ -256,6 +356,7 @@ __all__: Final[tuple[str, ...]] = (
     "fail",
     "heading",
     "note",
+    "progress",
     "status",
     "stdout_is_reserved",
     "stdout_reserved_for_protocol",

@@ -175,6 +175,32 @@ def test_wizard_reports_the_three_levels_and_prints_the_claude_config(
     assert get_password("dev") == "pw123456"
 
 
+def test_the_ladder_reads_the_same_without_a_terminal(
+    monkeypatch: pytest.MonkeyPatch, tmp_profiles: Path
+) -> None:
+    """Issue #205: the indicator buys motion for a person, never a line for a log.
+
+    The three result lines, in ladder order, and nothing else between them: no frame, no
+    carriage return, and none of the "in flight" texts, which exist only to be overwritten on
+    a terminal. This is what someone redirecting the wizard to a file gets, and it has to be
+    byte-identical to what they got before the indicator existed.
+    """
+    _patch_connection(monkeypatch)
+    result = runner.invoke(app, ["add-profile", "dev"], input=_answers())
+    assert result.exit_code == 0
+
+    prefixes = ("1/3", "2/3", "3/3")
+    ladder = [line for line in result.stderr.splitlines() if line.startswith(prefixes)]
+    assert ladder == [
+        "1/3 Conexión: OK — Netezza responde: NPS 11.2.1.11",
+        "2/3 Lectura del catálogo: OK — el usuario ve 1 bases de datos.",
+        "3/3 Visibilidad en DB: OK — el usuario ve 1 esquemas.",
+    ]
+    assert "abriendo sesión contra" not in result.stderr
+    assert "\r" not in result.stderr
+    assert "\x1b" not in result.stderr
+
+
 def test_wizard_can_skip_validation_entirely(
     monkeypatch: pytest.MonkeyPatch, tmp_profiles: Path
 ) -> None:
