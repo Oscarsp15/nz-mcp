@@ -1,7 +1,7 @@
 # ADR 0027 — Adoptar `rich` como dependencia directa acotada para la presentación del CLI
 
-- **Fecha**: 2026-09-05 (adenda 1: 2026-09-06)
-- **Estado**: aceptado, con una adenda que precisa la condición 1 — ver [Adenda 1](#adenda-1-2026-09-06--la-condición-1-pasa-a-ser-ninguna-consola-escribe-a-stdout)
+- **Fecha**: 2026-09-05 (adenda 1: 2026-09-06 · adenda 2: 2026-09-06)
+- **Estado**: aceptado, con dos adendas — ver [Adenda 1](#adenda-1-2026-09-06--la-condición-1-pasa-a-ser-ninguna-consola-escribe-a-stdout) y [Adenda 2](#adenda-2-2026-09-06--el-suelo-de-rich-sube-a-142-y-deja-de-fijarlo-typer)
 - **Decidido por**: Tech Lead (IA) + validación humana (auditor: DX Engineer)
 - **Issue**: [#204](https://github.com/Oscarsp15/nz-mcp/issues/204) · sale de [`docs/architecture/cli-experience.md`](../architecture/cli-experience.md) §7
 
@@ -90,7 +90,9 @@ implementación:
 - **Suelo `>=13.8`**: es el mismo que `typer` exige hoy, así que no introduce un conflicto de
   resolución, y es la primera versión que este proyecto puede garantizar que trae lo que usa
   (`Console(stderr=True)`, `Console.status`, `NO_COLOR` y `TERM=dumb` respetados). Bajar de ahí
-  sería declarar un suelo que nadie ha probado.
+  sería declarar un suelo que nadie ha probado. **Obsoleto desde la
+  [adenda 2](#adenda-2-2026-09-06--el-suelo-de-rich-sube-a-142-y-deja-de-fijarlo-typer)**: el
+  suelo real es `>=14.2` y ya no lo fija `typer`.
 - **Tope `<16`**: `rich` sube de major cada año o poco más (13 → 14 → 15) y cada major toca la
   API de consola. El tope no dice "`rich 16` es malo"; dice "`rich 16` no lo ha leído nadie
   todavía". Subirlo es un PR con la suite en verde, que es exactamente el trabajo que el #187
@@ -233,8 +235,39 @@ para informe humano por stderr.
 de las que *escriben*. `table()` es la primera; la regla para cualquier otra es la misma —si
 devuelve texto, su consola va contra un buffer; si escribe, va contra stderr.
 
+## Adenda 2 (2026-09-06) — el suelo de `rich` sube a 14.2, y deja de fijarlo `typer`
+
+Esta adenda existe porque el auditor del PR #222 señaló que faltaba **la nota hacia adelante**:
+el [ADR 0029](0029-adoptar-textual-para-el-asistente-de-configuracion.md) referencia a éste, pero
+éste no decía nada de aquél, igual que el [ADR 0005](0005-sin-frontend.md) sí avisa del 0028 en
+su cabecera. Un documento que se queda obsoleto sin decirlo es peor que uno que nunca se escribió.
+
+**Qué cambia**: el rango declarado en `pyproject.toml` pasa de `rich>=13.8,<16` a
+`rich>=14.2,<16`.
+
+**Por qué**: el ADR 0029 adopta `textual>=8.2,<9`, y `textual` 8.2.8 exige `rich>=14.2.0`. Desde
+ese momento el `13.8` de arriba **no se puede resolver**, así que no es un suelo conservador sino
+una ficción en el archivo. La implementación del 0029 (issue #221) lo sube.
+
+**Qué no cambia**:
+
+- **El tope sigue siendo `<16`.** `rich` va por un major al año y esta adenda no toca ese
+  razonamiento.
+- **El confinamiento sigue intacto.** `rich` se importa solo desde `cli_output.py`; el paquete
+  del asistente lo recibe por dentro de `textual` y no lo nombra. Ahora hay dos paquetes
+  confinados y el detector AST lo comprueba con un mapa módulo → destino en vez de con un
+  conjunto.
+- **La adenda 1 sigue vigente.** Ninguna consola escribe a stdout.
+
+**Lo que sí queda desmentido** es una frase del apartado *"La premisa de partida era falsa"*: el
+suelo de `rich` ya **no** lo fija `typer`. Lo fija `textual`, y por encima de él lo fijamos
+nosotros, que es exactamente lo que la condición 4 de este ADR pedía —que el rango sea nuestro y
+sea cierto— solo que por un motivo que en 2026-09-05 todavía no existía.
+
 ## Referencias
 
+- [ADR 0029](0029-adoptar-textual-para-el-asistente-de-configuracion.md) — adopta `textual`, y con ello sube el suelo de `rich` (adenda 2)
+- [ADR 0028](0028-asistente-de-configuracion-interactivo.md) — la enmienda al ADR 0005 que hace falta para que exista el 0029
 - [docs/architecture/cli-experience.md](../architecture/cli-experience.md) §2, §3 y §7 — restricciones y recomendación
 - [docs/roles/dx-engineer.md](../roles/dx-engineer.md) — "Qué NO decide este rol": la librería la decide un ADR
 - [ADR 0005](0005-sin-frontend.md) — sin frontend ni TUI

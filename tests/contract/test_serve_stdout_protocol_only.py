@@ -78,11 +78,25 @@ _FORBIDDEN_DYNAMIC: Final[frozenset[tuple[str, str]]] = frozenset(
     }
 )
 
-#: Modules whose import outside the output layer is itself the violation, whatever is done
-#: with them afterwards. ``rich.console.Console`` writes to **stdout** by default — exactly
-#: the byte that corrupts the JSON-RPC of ``serve`` — so condition 2 of ADR 0027 confines the
-#: whole package to ``cli_output.py``, where the channel is decided once.
-_LAYER_ONLY_MODULES: Final[frozenset[str]] = frozenset({"rich"})
+#: Third-party packages that exactly one place in the project may import, and where that
+#: place is. Importing one of them anywhere else is the violation by itself, whatever is
+#: done with it afterwards.
+#:
+#: - ``rich``: ``rich.console.Console`` writes to **stdout** by default — exactly the byte
+#:   that corrupts the JSON-RPC of ``serve`` — so condition 2 of ADR 0027 confines the whole
+#:   package to ``cli_output.py``, where the channel is decided once.
+#: - ``textual``: condition 2 of ADR 0029 confines it to the wizard package, and pointedly
+#:   **not** to the output layer, which would then be two things at once. It writes to
+#:   ``sys.__stdout__``, which a name-based protection would miss entirely; the descriptor
+#:   swap covers it, and this keeps it away from the ``serve`` import graph as well.
+#:
+#: The values are paths under ``src/nz_mcp`` and match as prefixes, so a whole directory
+#: can own a package. Everything outside its home is forbidden — including, for each of
+#: these two, the home of the other.
+_LAYER_ONLY_MODULES: Final[dict[str, str]] = {
+    "rich": "cli_output.py",
+    "textual": "wizard",
+}
 
 _ANSI: Final[re.Pattern[str]] = re.compile("\x1b\\[")
 
@@ -332,23 +346,36 @@ def _dynamic_lookup(node: ast.Call, aliases: dict[str, str]) -> str | None:
     return None
 
 
-def _layer_only_imports(tree: ast.AST) -> list[str]:
-    """Find imports of packages that only the output layer may name."""
+def _layer_only_imports(tree: ast.AST, forbidden: frozenset[str] | None = None) -> list[str]:
+    """Find imports of confined packages that the module being parsed may not name.
+
+    ``forbidden`` defaults to *every* confined package, which is what a caller checking a
+    snippet in isolation wants. The walk over the real tree passes the subset that applies
+    to each file, because each package is allowed in exactly one place.
+    """
+    names = _LAYER_ONLY_MODULES.keys() if forbidden is None else forbidden
     found: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             found.extend(
                 f"line {node.lineno}: import {alias.name}"
                 for alias in node.names
-                if alias.name.split(".")[0] in _LAYER_ONLY_MODULES
+                if alias.name.split(".")[0] in names
             )
         elif (
-            isinstance(node, ast.ImportFrom)
-            and node.module
-            and node.module.split(".")[0] in _LAYER_ONLY_MODULES
+            isinstance(node, ast.ImportFrom) and node.module and node.module.split(".")[0] in names
         ):
             found.append(f"line {node.lineno}: from {node.module} import ...")
     return found
+
+
+def _confined_elsewhere(relative: Path) -> frozenset[str]:
+    """Which confined packages this module is not allowed to import."""
+    return frozenset(
+        package
+        for package, home in _LAYER_ONLY_MODULES.items()
+        if relative.parts[: len(Path(home).parts)] != Path(home).parts
+    )
 
 
 def _terminal_writes(tree: ast.AST) -> list[str]:
@@ -383,12 +410,14 @@ def test_no_module_writes_to_the_terminal_outside_the_output_layer() -> None:
     package = _project_root() / "src" / "nz_mcp"
     offenders: dict[str, list[str]] = {}
     for module in sorted(package.rglob("*.py")):
-        if module.name == _OUTPUT_LAYER:
-            continue
+        relative = module.relative_to(package)
         tree = ast.parse(module.read_text(encoding="utf-8"))
-        writes = _terminal_writes(tree) + _layer_only_imports(tree)
+        # The output layer is the one module allowed to write to the terminal; it is not
+        # allowed to import every confined package, so the second check still applies.
+        writes = [] if module.name == _OUTPUT_LAYER else _terminal_writes(tree)
+        writes += _layer_only_imports(tree, _confined_elsewhere(relative))
         if writes:
-            offenders[str(module.relative_to(package))] = writes
+            offenders[str(relative)] = writes
     assert offenders == {}, (
         f"direct terminal writes found outside {_OUTPUT_LAYER}: {offenders} — "
         "use nz_mcp.cli_output.emit() for command payload or .status() for anything a person reads."
@@ -412,6 +441,38 @@ def test_rich_may_not_be_imported_outside_the_output_layer(source: str) -> None:
     stray ``from rich.console import Console`` fails CI rather than a user's MCP client.
     """
     assert _layer_only_imports(ast.parse(source)) != []
+
+
+@pytest.mark.contract
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param("import textual\n", id="import-textual"),
+        pytest.param("from textual.app import App\n", id="from-textual-app"),
+        pytest.param("import textual.widgets as w\n", id="aliased-textual-submodule"),
+    ],
+)
+def test_textual_may_not_be_imported_outside_the_wizard(source: str) -> None:
+    """Condition 2 of ADR 0029, enforced instead of merely written down.
+
+    ``textual`` is a whole application framework with its own event loop, and it writes to
+    ``sys.__stdout__``. Confining it to ``src/nz_mcp/wizard/`` keeps a future major inside
+    one directory and keeps it out of the ``serve`` import graph, where the JSON-RPC lives.
+    """
+    assert _layer_only_imports(ast.parse(source)) != []
+
+
+@pytest.mark.contract
+def test_each_confined_package_is_forbidden_in_the_other_ones_home() -> None:
+    """The confinement is symmetric: the wizard does not import ``rich`` either.
+
+    It gets ``rich`` underneath ``textual``, which is the same rendering stack the output
+    layer already uses. Naming it directly would be a second route to the same library and
+    the beginning of a second way to decide a channel.
+    """
+    assert _confined_elsewhere(Path("wizard/app.py")) == frozenset({"rich"})
+    assert _confined_elsewhere(Path("cli_output.py")) == frozenset({"textual"})
+    assert _confined_elsewhere(Path("cli.py")) == frozenset({"rich", "textual"})
 
 
 @pytest.mark.contract

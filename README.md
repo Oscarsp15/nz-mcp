@@ -136,7 +136,13 @@ Cada perfil vive en `~/.nz-mcp/profiles.toml`; la password va al keyring del SO,
 
 ### El asistente guiado paso a paso
 
-`nz-mcp init` y `nz-mcp add-profile <nombre>` explican en una línea cada concepto no obvio antes de preguntarlo:
+`nz-mcp init` y `nz-mcp add-profile <nombre>` abren una **pantalla con los ocho campos a la vez**: te mueves con Tab, corriges cualquiera sin rehacer los demás, la pantalla te dice qué falta y explica el campo que tienes seleccionado. La password se pide **fuera** de la pantalla, con el eco apagado, y nunca aparece en ella.
+
+Si tu terminal no puede con esa pantalla —salida o entrada redirigida, `TERM=dumb`, un `TERM` vacío o desconocido en POSIX (habitual dentro de contenedores), consola de Windows sin secuencias VT, o una ventana más pequeña que 60x21— el asistente **cae solo** a las mismas ocho preguntas encadenadas de siempre, sin avisos ni errores, y configura exactamente igual. Si prefieres las preguntas siempre, fija `NZ_MCP_NO_TUI=1` en tu shell. Y si achicas la ventana a mitad del asistente, se pasa a las preguntas **conservando lo que ya habías escrito**.
+
+Los otros comandos (`test-connection`, `list-profiles`, `switch-profile`, `edit-profile`, `remove-profile`, `doctor`, `probe-catalog`, `version` y `serve`) siguen siendo texto puro: se ejecutan, imprimen y terminan.
+
+Los dos caminos explican en una línea cada concepto no obvio antes de preguntarlo:
 
 - **Modo**: `read` solo consultas, `write` añade escritura de datos, `admin` añade DDL. El modo **no otorga** permisos en Netezza: solo recorta los que ya tenga tu usuario.
 - **Nivel de seguridad** (`security_level`, default `2`): si la conexión viaja cifrada y si se exige TLS.

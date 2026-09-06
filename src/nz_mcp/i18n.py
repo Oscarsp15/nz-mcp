@@ -529,6 +529,81 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Ruta al bundle CA en PEM (Enter para omitir)",
         "en": "Path to the PEM CA bundle (Enter to skip)",
     },
+    "CLI.WIZARD_PORT_INVALID": {
+        "es": "Puerto inválido: {value}. Usa un número entre 1 y 65535.",
+        "en": "Invalid port: {value}. Use a number between 1 and 65535.",
+    },
+    # Full-screen wizard (ADR 0028 / 0029). Short labels, because here they sit in a
+    # column next to the field instead of on a line of their own; the long explanations
+    # are the same CLI.WIZARD_*_EXPLAIN entries the chained questions already print.
+    "CLI.WIZARD_FIELD_HOST": {
+        "es": "Host",
+        "en": "Host",
+    },
+    "CLI.WIZARD_FIELD_PORT": {
+        "es": "Puerto",
+        "en": "Port",
+    },
+    "CLI.WIZARD_FIELD_DATABASE": {
+        "es": "Base de datos",
+        "en": "Database",
+    },
+    "CLI.WIZARD_FIELD_USER": {
+        "es": "Usuario",
+        "en": "User",
+    },
+    "CLI.WIZARD_FIELD_MODE": {
+        "es": "Modo",
+        "en": "Mode",
+    },
+    "CLI.WIZARD_FIELD_SECURITY": {
+        "es": "Seguridad",
+        "en": "Security",
+    },
+    "CLI.WIZARD_FIELD_CA_CERTS": {
+        "es": "Bundle CA",
+        "en": "CA bundle",
+    },
+    "CLI.WIZARD_FIELD_PASSWORD": {
+        "es": "Password",
+        "en": "Password",
+    },
+    "CLI.WIZARD_UI_TITLE": {
+        "es": "nz-mcp: perfil '{profile}'",
+        "en": "nz-mcp: profile '{profile}'",
+    },
+    # The password key is not repeated here: its own row already carries it, and the line
+    # has to fit in the narrowest window the wizard accepts.
+    "CLI.WIZARD_UI_KEYS": {
+        "es": "Tab campo | Enter continuar | Esc salir",
+        "en": "Tab field | Enter continue | Esc quit",
+    },
+    "CLI.WIZARD_UI_PASSWORD_SET": {
+        "es": "definida (Ctrl+P para cambiarla)",
+        "en": "set (Ctrl+P to change it)",
+    },
+    "CLI.WIZARD_UI_PASSWORD_UNSET": {
+        "es": "sin definir (Ctrl+P para escribirla)",
+        "en": "not set (Ctrl+P to type it)",
+    },
+    "CLI.WIZARD_UI_MISSING": {
+        "es": "Falta por rellenar: {fields}",
+        "en": "Still missing: {fields}",
+    },
+    "CLI.WIZARD_UI_READY": {
+        "es": "Listo. Enter para validar contra Netezza y guardar.",
+        "en": "Ready. Enter to validate against Netezza and save.",
+    },
+    "CLI.WIZARD_UI_DEGRADED": {
+        "es": (
+            "La ventana se ha quedado por debajo de {width}x{height}, así que sigo con "
+            "preguntas. No se pierde nada de lo que ya has escrito."
+        ),
+        "en": (
+            "The window dropped below {width}x{height}, so I am carrying on with "
+            "questions. Nothing you already typed is lost."
+        ),
+    },
     # Validation ladder run before persisting the profile
     "CLI.VALIDATE_ASK": {
         "es": (

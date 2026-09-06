@@ -36,8 +36,15 @@ dependencies = [
     "typer>=0.15",
     # Terminal presentation for the CLI (ADR 0027). Already pulled in transitively by
     # ``typer`` (which hard-requires ``rich>=13.8.0``); declared here so the floor and the
-    # cap belong to this project instead of being inherited without notice.
-    "rich>=13.8,<16",
+    # cap belong to this project instead of being inherited without notice. The floor is
+    # 14.2 and not the 13.8 the ADR 0027 first declared because ``textual`` requires
+    # ``rich>=14.2.0``: below that the tree no longer resolves (ADR 0029).
+    "rich>=14.2,<16",
+    # Full-screen configuration wizard, and nothing else (ADR 0029). Confined to
+    # ``src/nz_mcp/wizard/`` by the AST detector in
+    # ``tests/contract/test_serve_stdout_protocol_only.py``; the cap is a single major
+    # because textual shipped eight of them in fourteen months.
+    "textual>=8.2,<9",
 ]
 
 [project.optional-dependencies]
