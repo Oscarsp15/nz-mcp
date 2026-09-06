@@ -18,7 +18,12 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
+import shutil
+import sys
+import sysconfig
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Final, cast
 
 import typer
@@ -400,8 +405,7 @@ def _add_profile_interactive(*, name: str, set_active: bool) -> None:
     store_password(name, draft.password)
     out.success(t("CLI.PROFILE_SAVED", locale, profile=name, path=profiles_path()))
     out.note(t("CLI.PROFILE_NEXT_STEP", locale, profile=name))
-    out.note(t("CLI.CLAUDE_CONFIG_HEADER", locale))
-    out.emit(_claude_desktop_snippet(name))
+    _print_claude_desktop_block(name, locale)
     out.note(t("CLI.PROBE_SUGGESTION", locale, profile=name))
 
 
@@ -604,18 +608,94 @@ def _reprompt_field(draft: _ProfileDraft, field: str, locale: Locale) -> None:
         draft.ca_certs = _prompt_ca_certs(locale, draft.ca_certs)
 
 
-def _claude_desktop_snippet(profile: str) -> str:
-    """Render the claude_desktop_config.json block with the profile name substituted."""
+#: Name of the console script declared in ``pyproject.toml`` (``[project.scripts]``).
+_EXECUTABLE_NAME: Final[str] = "nz-mcp"
+
+
+def _executable_file_name() -> str:
+    return f"{_EXECUTABLE_NAME}.exe" if os.name == "nt" else _EXECUTABLE_NAME
+
+
+def _executable_candidates() -> list[Path]:
+    """Where the console script of the *running* installation may live, best guess first.
+
+    Covers the two documented install methods on the three platforms: a virtual environment
+    (``<venv>/Scripts`` or ``<venv>/bin``, which is what ``sysconfig`` reports from inside it)
+    and pipx (each app gets its own venv, so the same lookup applies). The user scheme is
+    checked too, because ``pip install --user`` lands scripts outside the interpreter prefix.
+    """
+    name = _executable_file_name()
+    user_scheme = "nt_user" if os.name == "nt" else "posix_user"
+    directories = [
+        sysconfig.get_path("scripts"),
+        sysconfig.get_path("scripts", user_scheme),
+        str(Path(sys.executable).parent),
+    ]
+    seen: list[Path] = []
+    for directory in directories:
+        candidate = Path(directory) / name
+        if directory and candidate not in seen:
+            seen.append(candidate)
+    return seen
+
+
+def resolve_executable_path() -> str | None:
+    """Absolute path of the ``nz-mcp`` executable, or ``None`` when it cannot be determined.
+
+    The installation that is running wins over whatever sits on ``PATH``: a globally installed
+    ``nz-mcp`` may be a different one (see ``docs/guides/claude-desktop-setup.md``). ``PATH`` is
+    only consulted as a fallback, for the case where the CLI runs as ``python -m nz_mcp`` and no
+    console script exists next to the interpreter.
+    """
+    for candidate in _executable_candidates():
+        if candidate.is_file():
+            return str(candidate)
+    on_path = shutil.which(_EXECUTABLE_NAME)
+    return str(Path(on_path).resolve()) if on_path else None
+
+
+def _how_to_find_executable() -> str:
+    """The command that prints the absolute path, per platform."""
+    return "where.exe nz-mcp" if os.name == "nt" else "which nz-mcp"
+
+
+def _claude_desktop_snippet(profile: str, command: str) -> str:
+    """Render the claude_desktop_config.json block for ``profile`` and ``command``.
+
+    ``json.dumps`` escapes the Windows backslashes, so the result is valid JSON and can be
+    pasted as it is printed.
+    """
     block = {
         "mcpServers": {
             "netezza": {
-                "command": "nz-mcp",
+                "command": command,
                 "args": ["serve"],
                 "env": {"NZ_MCP_PROFILE": profile},
             }
         }
     }
     return json.dumps(block, indent=2, ensure_ascii=False)
+
+
+def _print_claude_desktop_block(profile: str, locale: Locale) -> None:
+    """Print the block to paste, with the real executable path resolved at runtime.
+
+    Claude Desktop does not start with the terminal ``PATH``, so a bare ``nz-mcp`` in
+    ``command`` fails silently and much later, inside the client log. When the path cannot be
+    determined the block carries an obvious placeholder instead of a value that would probably
+    not work, plus the command that prints the right one.
+
+    The two channels of the output layer split this cleanly: the JSON block is payload — it is
+    literally copied, and ``nz-mcp init > block.json`` has to yield a parsable file — so it goes
+    to stdout through ``emit``. The heading and the warning are text for a person and go to
+    stderr, which is also what keeps them out of that redirected file.
+    """
+    executable = resolve_executable_path()
+    placeholder = t("CLI.CLAUDE_CONFIG_PATH_PLACEHOLDER", locale)
+    out.note(t("CLI.CLAUDE_CONFIG_HEADER", locale))
+    out.emit(_claude_desktop_snippet(profile, executable or placeholder))
+    if executable is None:
+        out.note(t("CLI.CLAUDE_CONFIG_PATH_UNKNOWN", locale, command=_how_to_find_executable()))
 
 
 def _ensure_config_dir() -> None:

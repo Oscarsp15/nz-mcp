@@ -676,6 +676,24 @@ MESSAGES: Final[dict[str, Message]] = {
             "> Developer > Edit config) and restart Claude Desktop:"
         ),
     },
+    "CLI.CLAUDE_CONFIG_PATH_PLACEHOLDER": {
+        "es": "<ruta absoluta de nz-mcp>",
+        "en": "<absolute path to nz-mcp>",
+    },
+    "CLI.CLAUDE_CONFIG_PATH_UNKNOWN": {
+        "es": (
+            "No se ha podido determinar la ruta del ejecutable, así que 'command' lleva un "
+            "marcador. Obtén la ruta con '{command}' y sustitúyelo antes de pegar el bloque: "
+            "Claude Desktop no arranca con el PATH de tu terminal, y un 'nz-mcp' a secas no le "
+            "funciona."
+        ),
+        "en": (
+            "The executable path could not be determined, so 'command' carries a placeholder. "
+            "Get the path with '{command}' and replace it before pasting the block: Claude "
+            "Desktop does not start with your terminal PATH, and a bare 'nz-mcp' will not work "
+            "for it."
+        ),
+    },
     "CLI.PROBE_SUGGESTION": {
         "es": (
             "Opcional, solo si algo se comporta raro: 'nz-mcp probe-catalog --profile {profile}' "
