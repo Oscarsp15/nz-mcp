@@ -39,7 +39,14 @@ import typer
 from nz_mcp import __version__
 from nz_mcp import cli_output as out
 from nz_mcp.auth import delete_password, get_password, store_password
-from nz_mcp.catalog.probe import probe_has_hard_failure, probe_run_to_json_dict, run_probe_catalog
+from nz_mcp.catalog.probe import (
+    ProbeResult,
+    ProbeRun,
+    probe_has_hard_failure,
+    probe_run_to_json_dict,
+    run_probe_catalog,
+)
+from nz_mcp.catalog.queries import ALL_QUERIES
 from nz_mcp.config import (
     DEFAULT_MAX_ROWS,
     DEFAULT_PORT,
@@ -309,8 +316,17 @@ def probe_catalog_cmd(
         help=_help("CLI.HELP.OPT.PROFILE"),
     ),
     as_json: bool = typer.Option(False, "--json", help=_help("CLI.HELP.OPT.JSON")),
+    verbose: bool = typer.Option(
+        False, "--verbose", help="Show every query in a table, not just the ones worth acting on"
+    ),
 ) -> None:
-    """Run every registered catalog query with dummy parameters against Netezza."""
+    """Run every registered catalog query with dummy parameters against Netezza.
+
+    Fourteen queries in a row, so this is the longest wait the CLI has. Two channels, and each
+    carries one thing: the progress indicator is transient and goes to stderr, the report is
+    the whole report and goes to stderr as one block. ``--json`` is the machine surface and
+    owns stdout by itself, unchanged.
+    """
     locale = resolve_locale()
     try:
         prof = get_profile(profile) if profile is not None else get_active_profile()
@@ -321,29 +337,11 @@ def probe_catalog_cmd(
         out.fail(t("INVALID_CONFIG", locale, detail=str(exc)))
         raise typer.Exit(code=1) from exc
 
-    run = run_probe_catalog(prof)
+    run = _run_probe_showing_progress(prof, locale)
     if as_json:
         out.emit(json.dumps(probe_run_to_json_dict(run), indent=2, ensure_ascii=False))
     else:
-        out.heading(t("PROBE_CATALOG.HEADER", locale, profile=run.profile_name))
-        if run.config_error is not None:
-            out.fail(t("PROBE_CATALOG.CONFIG_ERROR", locale, detail=run.config_error))
-        for row in run.results:
-            if row.status == "ok":
-                ms = row.duration_ms if row.duration_ms is not None else 0.0
-                rc = row.row_count if row.row_count is not None else 0
-                out.note(t("PROBE_CATALOG.LINE_OK", locale, query_id=row.query_id, ms=ms, rows=rc))
-            elif row.status == "structural_warning":
-                detail = row.error_detail or ""
-                out.warn(t("PROBE_CATALOG.LINE_WARN", locale, query_id=row.query_id, detail=detail))
-            else:
-                parts = []
-                if row.detail:
-                    parts.append(row.detail)
-                if row.error_detail:
-                    parts.append(row.error_detail)
-                detail = " — ".join(parts) if parts else "error"
-                out.fail(t("PROBE_CATALOG.LINE_FAIL", locale, query_id=row.query_id, detail=detail))
+        _report_probe_run(run, locale, verbose=verbose)
 
     code = 0 if not probe_has_hard_failure(run) else 1
     raise typer.Exit(code=code)
@@ -414,6 +412,111 @@ def _render_profiles(file: ProfilesFile, active: str | None, locale: Locale) -> 
         for name in names
     ]
     return out.table([*labels, t("CLI.PROFILES_COLUMN_ACTIVE", locale)], rows)
+
+
+# --- probe-catalog: progress while it runs, one report when it ends -----------
+
+#: ASCII status markers, deliberately untranslated: they are identifiers the README, the JSON
+#: output and the line messages already share, and a person greps for them.
+_PROBE_STATUS_MARK: Final[dict[str, str]] = {
+    "ok": "OK",
+    "structural_warning": "WARN",
+    "failure": "FAIL",
+}
+
+
+def _run_probe_showing_progress(profile: Profile, locale: Locale) -> ProbeRun:
+    """Run the probe with a determinate indicator naming the query in flight.
+
+    This is the only place in the CLI where a counter is honest: the query list is known in
+    advance, so ``7/14`` is counted rather than invented. The point is less the animation than
+    the name next to it — when a run stops responding, that name is the answer to "on which
+    one?", which fourteen queries of silence used to hide.
+
+    Nothing is written when there is no terminal: the indicator disappears entirely and a
+    redirected run leaves exactly the report behind.
+    """
+    with out.steps(len(ALL_QUERIES)) as step:
+
+        def announce(query_id: str, position: int, _total: int) -> None:
+            step(position, t("PROBE_CATALOG.RUNNING", locale, query_id=query_id))
+
+        return run_probe_catalog(profile, on_query=announce)
+
+
+def _probe_failure_detail(row: ProbeResult) -> str:
+    """The human part of a failure first, the driver text after it."""
+    parts = [part for part in (row.detail, row.error_detail) if part]
+    return " — ".join(parts) if parts else "error"
+
+
+def _probe_verbose_table(run: ProbeRun, locale: Locale) -> str:
+    """All fourteen rows, aligned: with ``--verbose`` the point is to compare them."""
+    headers = [
+        t("PROBE_CATALOG.COLUMN_QUERY", locale),
+        t("PROBE_CATALOG.COLUMN_STATUS", locale),
+        t("PROBE_CATALOG.COLUMN_MS", locale),
+        t("PROBE_CATALOG.COLUMN_ROWS", locale),
+    ]
+    rows = [
+        [
+            row.query_id,
+            _PROBE_STATUS_MARK[row.status],
+            f"{row.duration_ms:.1f}" if row.duration_ms is not None else "-",
+            str(row.row_count) if row.row_count is not None else "-",
+        ]
+        for row in run.results
+    ]
+    return out.table(headers, rows)
+
+
+def _report_probe_run(run: ProbeRun, locale: Locale, *, verbose: bool) -> None:
+    """Print the whole report on stderr: what needs acting on first, one conclusion last.
+
+    The default view stays quiet about the queries that worked. Printing all fourteen lines,
+    eleven of them ``[OK]``, is how a failure ends up buried in the middle of good news; the
+    successes are worth exactly one closing sentence, and ``--verbose`` is there for whoever
+    wants the matrix.
+    """
+    out.heading(t("PROBE_CATALOG.HEADER", locale, profile=run.profile_name))
+    if run.config_error is not None:
+        out.fail(t("PROBE_CATALOG.CONFIG_ERROR", locale, detail=run.config_error))
+        out.note(t("PROBE_CATALOG.NEXT_STEP_FAILED", locale))
+        return
+    for row in run.results:
+        if row.status == "failure":
+            detail = _probe_failure_detail(row)
+            out.fail(t("PROBE_CATALOG.LINE_FAIL", locale, query_id=row.query_id, detail=detail))
+    for row in run.results:
+        if row.status == "structural_warning":
+            detail = row.error_detail or ""
+            out.warn(t("PROBE_CATALOG.LINE_WARN", locale, query_id=row.query_id, detail=detail))
+    if verbose:
+        out.note(_probe_verbose_table(run, locale))
+    _report_probe_summary(run, locale)
+
+
+def _report_probe_summary(run: ProbeRun, locale: Locale) -> None:
+    """One sentence for the outcome, one line for what to do next. One of each."""
+    total = len(run.results)
+    failed = sum(1 for row in run.results if row.status == "failure")
+    warned = sum(1 for row in run.results if row.status == "structural_warning")
+    if failed or warned:
+        out.status(
+            t(
+                "PROBE_CATALOG.SUMMARY",
+                locale,
+                ok=total - failed - warned,
+                total=total,
+                failed=failed,
+                warned=warned,
+            ),
+            style="warning" if not failed else "error",
+        )
+    else:
+        out.success(t("PROBE_CATALOG.SUMMARY_ALL_OK", locale, total=total))
+    key = "PROBE_CATALOG.NEXT_STEP_FAILED" if failed else "PROBE_CATALOG.NEXT_STEP_OK"
+    out.note(t(key, locale, total=total))
 
 
 # --- helpers ------------------------------------------------------------------

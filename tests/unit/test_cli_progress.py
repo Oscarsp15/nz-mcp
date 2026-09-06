@@ -183,6 +183,85 @@ def test_a_wait_shorter_than_the_grace_period_draws_nothing(
     assert terminal.rendered() == ""
 
 
+_STEPS_CHILD_SOURCE: Final[str] = "\n".join(
+    [
+        "from nz_mcp import cli_output as out",
+        "with out.steps(3) as step:",
+        "    for n in (1, 2, 3):",
+        "        step(n, f'query_{n}')",
+        f"out.note({_RESULT_LINE!r})",
+    ]
+)
+
+
+def test_the_determinate_indicator_writes_nothing_without_a_terminal() -> None:
+    """Redirected, ``probe-catalog`` must leave the report in the file and nothing else.
+
+    A subprocess with a real pipe, not an in-process capture: what is asserted here is what
+    would land in ``informe.txt``, decided by the operating system and not by pytest.
+    """
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(_project_root() / "src") + os.pathsep + env.get("PYTHONPATH", "")
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["FORCE_COLOR"] = "1"
+    env["TERM"] = "xterm-256color"
+    proc = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", _STEPS_CHILD_SOURCE],
+        check=False,
+        capture_output=True,
+        timeout=120,
+        cwd=_project_root(),
+        env=env,
+    )
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    assert proc.stdout == b"", "the indicator must never touch stdout"
+    body = _normalized(proc.stderr)
+    assert body == _RESULT_LINE.encode() + b"\n"
+    assert b"\r" not in body
+    assert b"\x1b" not in body
+
+
+def test_the_determinate_indicator_counts_and_names_the_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A percentage is only honest with a real denominator, and it must name the step.
+
+    The name is the part that answers "on which one did it hang?" — the question fourteen
+    queries of silence used to leave open. It is also what makes the bar worth drawing at all.
+    """
+    terminal = _FakeTerminal()
+    monkeypatch.setattr(sys, "stderr", terminal)
+    monkeypatch.delenv("TERM", raising=False)
+
+    with cli_output.steps(14) as step:
+        step(1, "list_databases")
+        step(7, "table_stats")
+
+    rendered = terminal.rendered()
+    assert "1/14" in rendered
+    assert "7/14 table_stats" in rendered
+    assert cli_output._BAR_DONE in rendered
+    assert cli_output._BAR_TODO in rendered
+    assert "\x1b" not in rendered, "redrawing must not need an escape sequence"
+    assert rendered.endswith("\r"), "the indicator left its line on screen instead of erasing it"
+
+
+def test_the_determinate_indicator_erases_the_widest_line_it_drew(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A long step name followed by a short one must not leave half a word behind."""
+    terminal = _FakeTerminal()
+    monkeypatch.setattr(sys, "stderr", terminal)
+    monkeypatch.delenv("TERM", raising=False)
+
+    with cli_output.steps(2) as step:
+        step(1, "a_very_long_catalog_query_identifier")
+        step(2, "short")
+
+    assert "a_very_long_catalog_query_identifier" not in terminal.writes[-1]
+    assert terminal.writes[-1].count(" ") >= len("a_very_long_catalog_query_identifier")
+
+
 def test_the_indicator_lets_a_failure_through(monkeypatch: pytest.MonkeyPatch) -> None:
     """It decorates a wait; it never swallows what happened during it."""
     terminal = _FakeTerminal()

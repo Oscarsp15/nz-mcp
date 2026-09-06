@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
 from typing import Any, Final, Literal, cast
@@ -186,8 +187,21 @@ def probe_one_row(
     )
 
 
-def run_probe_catalog(profile: Profile) -> ProbeRun:
-    """Run all catalog probes for ``profile`` using a real Netezza connection."""
+def run_probe_catalog(
+    profile: Profile,
+    *,
+    on_query: Callable[[str, int, int], None] | None = None,
+) -> ProbeRun:
+    """Run all catalog probes for ``profile`` using a real Netezza connection.
+
+    Args:
+        profile: Connection profile to probe.
+        on_query: Called **before** each query with its id, its 1-based position and the
+            total. Before and not after on purpose: the point of announcing progress here is
+            to name the query that is running when a run stops responding, and a callback
+            that fired on completion would never mention the one that hung. Optional, so a
+            non-interactive caller keeps the previous behaviour exactly.
+    """
     try:
         resolve_query(ALL_QUERIES[0].id, profile)
     except (InvalidProfileError, GuardRejectedError) as exc:
@@ -207,7 +221,9 @@ def run_probe_catalog(profile: Profile) -> ProbeRun:
     try:
         with closing(connection.cursor()) as cursor:
             cur = cast(Any, cursor)
-            for cq in ALL_QUERIES:
+            for position, cq in enumerate(ALL_QUERIES, start=1):
+                if on_query is not None:
+                    on_query(cq.id, position, len(ALL_QUERIES))
                 results.append(probe_one_row(cur, profile, cq, password=password))
     finally:
         connection.close()

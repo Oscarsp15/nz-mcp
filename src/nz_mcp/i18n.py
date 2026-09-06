@@ -1015,6 +1015,63 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "[WARN] {query_id} — no validado (falta objeto real): {detail}",
         "en": "[WARN] {query_id} — not validated (needs real object): {detail}",
     },
+    # What the transient indicator says while a query is in flight. It names the query, which
+    # is what tells someone where a run got stuck; the counter is honest because ALL_QUERIES
+    # knows the total.
+    "PROBE_CATALOG.RUNNING": {
+        "es": "consultando {query_id}",
+        "en": "running {query_id}",
+    },
+    # Closing lines. The report says what happened in one sentence, after the failures and
+    # before the next step, so nothing actionable is buried among the successes.
+    "PROBE_CATALOG.SUMMARY_ALL_OK": {
+        "es": "Las {total} consultas del catálogo responden.",
+        "en": "All {total} catalog queries answer.",
+    },
+    "PROBE_CATALOG.SUMMARY": {
+        "es": "{ok} de {total} consultas OK: {failed} con fallo, {warned} sin validar.",
+        "en": "{ok} of {total} queries OK: {failed} failed, {warned} not validated.",
+    },
+    "PROBE_CATALOG.NEXT_STEP_OK": {
+        "es": (
+            "Si algo sigue comportándose raro, no es el catálogo: mira 'nz-mcp doctor'. "
+            "Para ver las {total} consultas una a una: nz-mcp probe-catalog --verbose"
+        ),
+        "en": (
+            "If something still behaves oddly, it is not the catalog: try 'nz-mcp doctor'. "
+            "To see the {total} queries one by one: nz-mcp probe-catalog --verbose"
+        ),
+    },
+    "PROBE_CATALOG.NEXT_STEP_FAILED": {
+        "es": (
+            "Cada fallo señala una consulta del catálogo. Si has puesto un override, revisa "
+            "catalog_overrides.<consulta> en tu perfil de profiles.toml, o borra esa entrada "
+            "para volver a la consulta integrada."
+        ),
+        "en": (
+            "Each failure points at one catalog query. If you set an override, review "
+            "catalog_overrides.<query> in your profile in profiles.toml, or delete that entry "
+            "to fall back to the built-in query."
+        ),
+    },
+    # Columns of --verbose. The status markers stay ASCII and untranslated: they are the same
+    # OK / WARN / FAIL the rest of the CLI and the README already use.
+    "PROBE_CATALOG.COLUMN_QUERY": {
+        "es": "Consulta",
+        "en": "Query",
+    },
+    "PROBE_CATALOG.COLUMN_STATUS": {
+        "es": "Estado",
+        "en": "Status",
+    },
+    "PROBE_CATALOG.COLUMN_MS": {
+        "es": "ms",
+        "en": "ms",
+    },
+    "PROBE_CATALOG.COLUMN_ROWS": {
+        "es": "Filas",
+        "en": "Rows",
+    },
 }
 
 
