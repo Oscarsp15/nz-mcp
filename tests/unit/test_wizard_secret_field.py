@@ -33,6 +33,10 @@ _CREDENTIAL: Final[str] = "Zzq-Krd4471-Xyw"
 
 _ROOMY: Final[tuple[int, int]] = (100, 30)
 
+#: What gets pasted into one of the seven ordinary fields, to show the refusal belongs to
+#: the credential row and not to the form.
+_PASTED_HOST: Final[str] = "pasted-host-row"
+
 
 class _Sink:
     """A stand-in for ``cli._CredentialHolder``: characters, kept apart, outside the tree."""
@@ -323,12 +327,15 @@ async def test_a_paste_into_one_of_the_other_seven_fields_still_works() -> None:
     async with app.run_test(size=_ROOMY) as pilot:
         host = app.query_one("#field-host", Input)
         host.focus()
-        host.post_message(events.Paste("pasted.example.com"))
+        host.value = ""
+        host.post_message(events.Paste(_PASTED_HOST))
         await pilot.pause()
         value = host.value
         await pilot.press("escape")
 
-    assert "pasted.example.com" in value
+    # Equality rather than a substring: this is the whole content of the field, and a
+    # substring check on something host-shaped reads as URL sanitisation to a scanner.
+    assert value == _PASTED_HOST
 
 
 # --- the net, and how it meets the field --------------------------------------
