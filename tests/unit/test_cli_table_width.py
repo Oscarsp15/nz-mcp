@@ -49,8 +49,25 @@ class _FakeStream:
         return self._terminal
 
 
+#: The long value every narrow case squeezes. Named so the assertions can compare a cell
+#: with it instead of searching a rendered table for a hostname: a containment check
+#: against a host literal is what CodeQL reads as a half-written URL check, and comparing
+#: the cell is the stricter assertion anyway - it says *where* the value is, not just that
+#: it is somewhere.
+_LONG_HOST: Final[str] = _ROWS[1][1]
+
+
 def _widest_line(rendered: str) -> int:
     return max(len(line) for line in rendered.splitlines())
+
+
+def _cell(rendered: str, row: int, column: int) -> str:
+    """The text of one cell of a rendered table, padding removed.
+
+    Rows are counted from the first data row: a rendered table starts with its headers and
+    the rule underneath them.
+    """
+    return rendered.splitlines()[row + 2].split("|")[column].strip()
 
 
 @pytest.mark.parametrize("width", [200, 100, 72, 60, 50, _HEADERS_ONLY_WIDTH])
@@ -66,7 +83,7 @@ def test_a_wide_window_changes_nothing() -> None:
     wide enough gets the same bytes it got before any of this existed.
     """
     wide = cli_output.table(_HEADERS, _ROWS, width=200)
-    assert "nz-prod-01.corp.example.com" in wide
+    assert _cell(wide, 1, 1) == _LONG_HOST
     assert cli_output._ELLIPSIS not in wide
 
 
@@ -81,7 +98,7 @@ def test_the_widest_column_pays_first() -> None:
     assert "admin" in rendered
     assert "read" in rendered
     assert "DESA_MODELOS" in rendered
-    assert "nz-prod-01.corp.example.com" not in rendered
+    assert _cell(rendered, 1, 1) != _LONG_HOST
 
 
 def test_a_cell_loses_its_middle_and_keeps_both_ends() -> None:
@@ -125,7 +142,7 @@ def test_below_the_headers_it_stops_being_a_table() -> None:
     """
     rendered = cli_output.table(_HEADERS, _ROWS, width=_HEADERS_ONLY_WIDTH - 1)
     assert "|" not in rendered
-    assert "Host: nz-prod-01.corp.example.com" in rendered
+    assert f"Host: {_LONG_HOST}" in rendered
     assert "Perfil: nzsaas" in rendered
     # One blank line between records, and only there: the blocks are what separates rows.
     assert rendered.count("\n\n") == 1
@@ -160,7 +177,7 @@ def test_without_a_terminal_no_width_is_guessed(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr("sys.stdout", _FakeStream(terminal=False))
     monkeypatch.setenv("COLUMNS", "40")
     assert cli_output.display_width() == cli_output._WIDTH_WITHOUT_TERMINAL
-    assert "nz-prod-01.corp.example.com" in cli_output.table(_HEADERS, _ROWS)
+    assert _cell(cli_output.table(_HEADERS, _ROWS), 1, 1) == _LONG_HOST
 
 
 def test_with_a_terminal_the_width_is_the_terminal_width(
