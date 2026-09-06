@@ -191,9 +191,64 @@ InteractiveBlocker = Literal[
     "opted_out",
     "term_dumb",
     "no_terminal",
+    "terminal_without_capabilities",
     "console_without_vt",
     "window_too_small",
 ]
+
+#: The terminfo capability a full-screen application cannot do without: absolute cursor
+#: addressing. A terminal type that does not declare it cannot be painted on, whatever
+#: else it can do.
+_CURSOR_ADDRESSING: Final[str] = "cup"
+
+
+def _terminfo_declares_full_screen(term: str) -> bool:
+    """Whether the terminfo database describes ``term`` as paintable.
+
+    POSIX only; on Windows there is no terminfo and the question is answered by
+    :func:`rich.console.detect_legacy_windows` instead.
+
+    ``curses.setupterm`` is the same lookup every curses program does, and it fails for a
+    terminal type the system has never heard of. On top of that the entry has to declare
+    absolute cursor addressing, which is the one capability a full-screen wizard cannot
+    work around. Anything that goes wrong here - no terminfo database, a broken entry, a
+    build of Python without ``curses`` - counts as "no guarantees", because that is what
+    it is.
+    """
+    try:
+        import curses  # noqa: PLC0415 - POSIX only, and only on this path
+    except ImportError:  # pragma: no cover - CPython ships curses on POSIX
+        return False
+    try:
+        # The descriptor is passed explicitly. Left to itself ``setupterm`` calls
+        # ``sys.stdout.fileno()``, and under a test runner - or anywhere else that
+        # replaced the stream - that raises and the lookup would report "unknown" for a
+        # terminal that is perfectly well known.
+        curses.setupterm(term, _STDERR_FD)
+    except (curses.error, OSError, TypeError, ValueError):
+        return False
+    return curses.tigetstr(_CURSOR_ADDRESSING) is not None
+
+
+def _terminal_type_is_capable() -> bool:
+    """Whether ``TERM`` describes something a full-screen application can be drawn on.
+
+    The seventh trigger, and the one that was missing: ``TERM=dumb`` is not the only way
+    to end up without guarantees. An **empty or unset** ``TERM`` is routine inside
+    containers and in some multiplexed SSH sessions, and an unknown value is routine on a
+    host whose terminfo database does not carry the client's terminal type. In both cases
+    there is a real terminal on all three streams and a perfectly valid window size, so
+    none of the other six triggers fires - and the wizard would start with no guarantee
+    that a single escape sequence or key it sends means anything.
+
+    Only asked on POSIX. On Windows ``TERM`` is normally unset and says nothing; there the
+    equivalent question is whether the console speaks VT, which is the trigger after this
+    one.
+    """
+    if os.name != "posix":
+        return True
+    term = os.environ.get("TERM", "").strip()
+    return bool(term) and _terminfo_declares_full_screen(term)
 
 
 def _opted_out_of_the_tui() -> bool:
@@ -219,17 +274,21 @@ def interactive_ui_blocker(*, min_width: int, min_height: int) -> InteractiveBlo
     to read input rather than *whether* to start. A TUI library will try to paint wherever
     it is allowed to; declining is this project's job.
 
-    The five start-up triggers, in the order that costs least to check:
+    The six start-up triggers, in the order that costs least to check:
 
     1. ``NZ_MCP_NO_TUI`` - an explicit request, honoured without argument.
     2. ``TERM=dumb`` - a terminal that has told us it understands nothing.
     3. No terminal at all on input, payload or status: redirected, piped, in CI, or
        driven by another process. Note that ``nz-mcp init > block.json``, which the
        install guide suggests, lands here on purpose.
-    4. A Windows console that does not speak VT sequences. Legacy code pages turn box
+    4. On POSIX, a ``TERM`` that is empty, unset or unknown to terminfo, or that does not
+       declare cursor addressing. Common inside containers and in some multiplexed SSH
+       sessions, and invisible to every other trigger: the streams are terminals and the
+       window is a good size.
+    5. A Windows console that does not speak VT sequences. Legacy code pages turn box
        drawing into ``?``; the wizard is ASCII, but a console without VT cannot position
-       a cursor either.
-    5. A window below the declared minimum. The sixth trigger - shrinking below it
+       a cursor either. Triggers 4 and 5 are the same question asked per platform.
+    6. A window below the declared minimum. The seventh trigger - shrinking below it
        *during* the session - cannot be seen from here and belongs to the application.
 
     Args:
@@ -239,18 +298,30 @@ def interactive_ui_blocker(*, min_width: int, min_height: int) -> InteractiveBlo
     Returns:
         The name of the first trigger that fired, or ``None`` when none did.
     """
-    if _opted_out_of_the_tui():
-        return "opted_out"
-    if os.environ.get("TERM", "").strip().lower() == _DUMB_TERM:
-        return "term_dumb"
-    if not all(_is_a_terminal(stream) for stream in (sys.stdin, sys.stdout, sys.stderr)):
-        return "no_terminal"
-    if detect_legacy_windows():
-        return "console_without_vt"
+    # The triggers as data rather than as a chain of returns: the list of reasons a wizard
+    # may not start is the interesting part of this function, and a test can walk it.
+    triggers: tuple[tuple[InteractiveBlocker, Callable[[], bool]], ...] = (
+        ("opted_out", _opted_out_of_the_tui),
+        ("term_dumb", _term_is_dumb),
+        ("no_terminal", lambda: not _standard_streams_are_terminals()),
+        ("terminal_without_capabilities", lambda: not _terminal_type_is_capable()),
+        ("console_without_vt", detect_legacy_windows),
+        ("window_too_small", lambda: _window_is_smaller_than(min_width, min_height)),
+    )
+    return next((name for name, fired in triggers if fired()), None)
+
+
+def _term_is_dumb() -> bool:
+    return os.environ.get("TERM", "").strip().lower() == _DUMB_TERM
+
+
+def _standard_streams_are_terminals() -> bool:
+    return all(_is_a_terminal(stream) for stream in (sys.stdin, sys.stdout, sys.stderr))
+
+
+def _window_is_smaller_than(min_width: int, min_height: int) -> bool:
     size = shutil.get_terminal_size()
-    if size.columns < min_width or size.lines < min_height:
-        return "window_too_small"
-    return None
+    return size.columns < min_width or size.lines < min_height
 
 
 def interactive_ui_enabled(*, min_width: int, min_height: int) -> bool:

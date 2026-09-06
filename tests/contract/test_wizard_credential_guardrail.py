@@ -12,25 +12,60 @@ written rule. Nothing stops someone adding an input field with the real credenti
 months from now."* The precedent is expensive - the ``Secret`` regression of PR #193
 passed 1 204 tests and two audits because **nothing exercised the real path**.
 
-So there are two barriers here, and neither is sufficient alone:
+Why this file is an allowlist, and not a list of forbidden names
+----------------------------------------------------------------
+The first version of this check chased suspicious names: anything called ``password``,
+``secret``, ``credential``. The audit of PR #223 broke it in one line, by calling the
+credential ``auth_material`` and putting it straight into an ``Input``. Zero of the five
+rules fired. It also got past them through a dictionary and through the return value of a
+function with an innocent name.
 
-1. :func:`test_the_wizard_package_cannot_hold_the_credential` parses every module under
-   ``src/nz_mcp/wizard`` and enforces five rules at review time, naming the offending
-   line. Like the detector that confines ``rich``, it is a name-based check and therefore
-   a blacklist.
+That is not a bug in the rules, it is what a blacklist **is**. The same thing happened to
+the stdout barrier a few hours earlier, and it was fixed the same way it is fixed here:
+stop naming what is forbidden and start naming what is allowed. There, the protocol moved
+to a private descriptor nothing else could name. Here, the package's whole surface is
+enumerated:
+
+============ =========================================================================
+Allowlist    What it pins
+============ =========================================================================
+``IMPORTS``  the modules the package may import at all
+``PARAMS``   every parameter of every function, by name **and** annotation
+``STATE``    every attribute the application may hold, by name and annotation
+``FIELDS``   every field of ``DraftFields``, which is the only data object here
+``MODULE``   every module-level name the package may define
+``WIDGETS``  the expressions allowed to carry content into a widget
+============ =========================================================================
+
+Those six are exhaustive: a value inside this package has to come from an import, a
+parameter, an attribute, a data field or a module constant. There is no seventh way. So a
+credential cannot be **held** here regardless of what it is called - which is the property
+the rename attack disproved for the old rules and cannot disprove for these. Renaming it
+does not help, because the name is not what is being checked: the *slot* is, and there are
+no free slots.
+
+The cost is deliberate. Adding a field, a parameter or an import to the wizard means
+editing a list in this file, on purpose, in a diff a reviewer sees.
+
+Two barriers, not one
+---------------------
+1. :func:`test_the_wizard_package_cannot_hold_the_credential` - the six allowlists above,
+   at review time, naming the offending line.
 2. :func:`test_the_real_wizard_never_lets_the_credential_into_a_widget` drives the real
    application through the real credential path, with a real value, and then walks the
    whole finished widget tree, the application's own attributes and its return value
-   looking for that value. This one does not care what anything is called.
+   looking for that value. This one does not care what anything is called either, and it
+   is the one that would have caught PR #193.
 
-Both are needed. The first catches the mistake in the diff; the second is the one that
-would have caught PR #193.
+And the property that makes both of them belt-and-braces rather than the only defence:
+the single door into this package is ``ask_password: Callable[[], bool]``, which by its
+own type cannot carry the credential across. The type contract is the barrier; these tests
+are what stops someone widening the door without noticing.
 """
 
 from __future__ import annotations
 
 import ast
-import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Final
@@ -41,37 +76,136 @@ from nz_mcp.i18n import Locale
 from nz_mcp.wizard.app import ProfileWizardApp
 from nz_mcp.wizard.fields import DraftFields
 
-#: Anything named like this could be holding the credential, so it has to prove it is not.
-_CREDENTIAL_NAME: Final[re.Pattern[str]] = re.compile(
-    r"password|passwd|pwd|credential|secret", re.IGNORECASE
+# --- the six allowlists -------------------------------------------------------
+#
+# Every entry below was added by a person who thought about it. That is the point: the
+# lists are short because the package is small, and they stay short because growing one
+# is a visible edit.
+
+#: Modules ``src/nz_mcp/wizard/`` may import. Matched on the dotted prefix, so
+#: ``textual.widgets`` is covered by ``textual``.
+#:
+#: None of these can produce a credential. ``nz_mcp.config`` reads ``profiles.toml``,
+#: which by design never contains the password - it lives in the OS keyring - and
+#: ``nz_mcp.i18n`` is a dictionary of static text. ``nz_mcp.auth``, ``nz_mcp.secret``,
+#: ``keyring`` and ``os`` are not on the list, so they cannot be imported, and no
+#: renaming gets round that.
+_ALLOWED_IMPORTS: Final[frozenset[str]] = frozenset(
+    {
+        "__future__",
+        "collections.abc",
+        "dataclasses",
+        "typing",
+        "textual",
+        "nz_mcp.config",
+        "nz_mcp.i18n",
+        "nz_mcp.wizard",
+    }
 )
 
-#: The only annotations a credential-shaped name may carry inside the package. Both are
-#: booleans: "there is one" and "ask for one, and tell me whether there is one now".
-_BOOLEAN_ANNOTATIONS: Final[frozenset[str]] = frozenset({"bool", "Callable[[], bool]"})
-
-#: The single exemption, named rather than pattern-matched so it cannot quietly grow.
-#: ``CREDENTIAL_SLOT`` is the *identifier of a row* in the "what is still missing" list -
-#: the string ``"password"`` used as a label. It is a module-level constant with a literal
-#: value and nothing is ever stored in it. Exempting it by name keeps the rule honest;
-#: exempting a pattern would have exempted the next real field too.
-_EXEMPT_NAMES: Final[frozenset[str]] = frozenset({"CREDENTIAL_SLOT"})
-
-#: Modules the wizard may not import: the credential only exists as a ``Secret`` in
-#: production code (ADR 0026), and the keyring is where it goes afterwards. A package that
-#: cannot name either of them cannot be holding one.
-_FORBIDDEN_IMPORTS: Final[frozenset[str]] = frozenset(
-    {"nz_mcp.secret", "nz_mcp.auth", "textual.devtools"}
+#: Every parameter of every function in the package, as ``(name, annotation)``. This is
+#: the door: a value that is not a module-level constant has to come through one of these.
+#: ``ask_password`` is the only one that touches the credential at all, and its type says
+#: it hands back a **boolean**.
+_ALLOWED_PARAMETERS: Final[frozenset[tuple[str, str]]] = frozenset(
+    {
+        # nz_mcp.wizard.fields - the shared rules
+        ("slot", "str"),
+        ("value", "str"),
+        ("raw", "str"),
+        ("draft", "DraftFields"),
+        ("password_set", "bool"),
+        ("previous", "dict[str, object]"),
+        # nz_mcp.wizard.app / __init__ - building and running the screen
+        ("profile", "str"),
+        ("initial", "DraftFields"),
+        ("ask_password", "Callable[[], bool]"),
+        ("locale", "Locale"),
+        ("event", "events.Resize"),
+        ("event", "Input.Changed"),
+        ("event", "Input.Submitted"),
+        ("event", "events.DescendantFocus"),
+        ("status", "WizardStatus"),
+    }
 )
 
-#: Calls that would write the application state to disk. The ADR measured that today a
-#: screenshot of a masked field does not leak it; it also measured that everything *else*
-#: on screen is in there, and that the measurement holds for 8.2.8 rather than for ever.
-_FORBIDDEN_CALLS: Final[frozenset[str]] = frozenset({"save_screenshot", "export_screenshot"})
+#: Parameter names that carry no value of their own.
+_STRUCTURAL_PARAMETERS: Final[frozenset[str]] = frozenset({"self", "cls"})
 
-#: Widget attributes that end up rendered or stored. Assigning a credential-shaped name to
-#: one of these is the exact mistake this file exists to prevent.
-_WIDGET_SINKS: Final[frozenset[str]] = frozenset({"value", "text", "content", "renderable"})
+#: Every attribute :class:`ProfileWizardApp` may hold, with its annotation and whether its
+#: value is allowed to be drawn on screen. This is the application's entire state model,
+#: and ADR 0029 condition 5 clause 1 is the line that says ``bool`` next to the credential.
+_ALLOWED_APP_STATE: Final[dict[str, tuple[str, bool]]] = {
+    "_profile": ("str", True),
+    "_initial": ("DraftFields", True),
+    "_password_set": ("bool", False),
+    "_ask_password": ("Callable[[], bool]", False),
+    "_locale": ("Locale", True),
+    "_mounted": ("bool", False),
+}
+
+#: Every field of :class:`DraftFields`, which is the only object in this package that
+#: holds what a person typed. Adding an eighth is a conscious edit of this line - and the
+#: rename attack of PR #223 is exactly a field being added without one.
+_ALLOWED_DRAFT_FIELDS: Final[dict[str, str]] = {
+    "host": "str",
+    "port": "str",
+    "database": "str",
+    "user": "str",
+    "mode": "str",
+    "security_level": "str",
+    "ca_certs": "str",
+}
+
+#: Every module-level name the package may define. Without this, a constant would be a
+#: seventh way to hold a value, outside every other list.
+_ALLOWED_MODULE_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        # nz_mcp.wizard.fields
+        "MODES",
+        "CREDENTIAL_SLOT",
+        "MIN_WIDTH",
+        "MIN_HEIGHT",
+        "WizardStatus",
+        "FIELD_SPECS",
+        "FIELD_KEYS",
+        "_MAX_PORT",
+        "_SLOT_LABEL_KEYS",
+        "_SHAPE_ERROR_KEYS",
+        # nz_mcp.wizard.app
+        "_FIELD_ID_PREFIX",
+        # nz_mcp.wizard
+        "__all__",
+    }
+)
+
+#: Keyword arguments of a widget that carry structure rather than content: identifiers,
+#: CSS classes and booleans. Everything else passed to a widget is content and has to be
+#: an allowed source.
+_STRUCTURAL_WIDGET_KEYWORDS: Final[frozenset[str]] = frozenset(
+    {
+        "id",
+        "classes",
+        "name",
+        "compact",
+        "markup",
+        "select_on_focus",
+        "disabled",
+        "expand",
+        "shrink",
+        "show",
+    }
+)
+
+#: The one function whose result may be drawn: the i18n catalog lookup. Its positional
+#: arguments choose a catalog entry and a language; its keyword arguments are interpolated
+#: into the text, so those are checked like any other content.
+_CATALOG_LOOKUP: Final[str] = "t"
+
+#: Carved out of an allowed package. ``textual`` is on the import allowlist because the
+#: wizard is built with it, and a prefix match would let its developer tooling in with it;
+#: clause 3 of ADR 0029 condition 5 says the wizard does not run under devtools.
+_CARVED_OUT_IMPORTS: Final[frozenset[str]] = frozenset({"textual.devtools"})
 
 
 def _wizard_package() -> Path:
@@ -79,7 +213,13 @@ def _wizard_package() -> Path:
 
 
 def _dotted(node: ast.AST) -> str | None:
-    """Resolve a dotted expression to its written form, or ``None``."""
+    """Resolve a dotted expression to its written form, or ``None``.
+
+    ``None`` for anything that is not a plain name or attribute chain - a subscript, a
+    call, a comprehension. Those simply are not allowed sources, so failing to name them
+    is the correct answer rather than a gap: this function feeds an allowlist, and an
+    unnameable expression is not on it.
+    """
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):
@@ -88,64 +228,8 @@ def _dotted(node: ast.AST) -> str | None:
     return None
 
 
-def _is_credential_name(node: ast.AST) -> bool:
-    """Whether a name or attribute reads like it could be holding the credential."""
-    dotted = _dotted(node)
-    if dotted is None:
-        return False
-    leaf = dotted.rsplit(".", maxsplit=1)[-1]
-    return leaf not in _EXEMPT_NAMES and _CREDENTIAL_NAME.search(leaf) is not None
-
-
-def _is_boolean_leaf(node: ast.AST) -> bool:
-    """Whether a single expression can only be a boolean.
-
-    A call qualifies only when it is ``bool(...)``: ``ask_secret_raw()`` must not, however
-    convincingly it is named. A credential-shaped name qualifies because every one of them
-    is forced to be a boolean by :func:`_binding_violations`, which is what makes this
-    whole set of rules close on itself.
-    """
-    if isinstance(node, ast.Constant):
-        return isinstance(node.value, bool)
-    if isinstance(node, ast.Compare):
-        return True
-    if isinstance(node, ast.Call):
-        return _dotted(node.func) == "bool"
-    return _is_credential_name(node)
-
-
-def _is_boolean_shaped(node: ast.AST) -> bool:
-    """Whether an expression can only evaluate to a boolean, however it is composed."""
-    if isinstance(node, ast.UnaryOp):
-        return isinstance(node.op, ast.Not)
-    if isinstance(node, ast.BoolOp):
-        return all(_is_boolean_shaped(value) for value in node.values)
-    if isinstance(node, ast.IfExp):
-        return _is_boolean_shaped(node.body) and _is_boolean_shaped(node.orelse)
-    return _is_boolean_leaf(node)
-
-
-def _import_violations(tree: ast.AST) -> Iterator[str]:
-    """Rule 1: the package may not name the type the credential travels in."""
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name in _FORBIDDEN_IMPORTS:
-                    yield f"line {node.lineno}: import {alias.name}"
-        elif isinstance(node, ast.ImportFrom) and node.module in _FORBIDDEN_IMPORTS:
-            names = ", ".join(alias.name for alias in node.names)
-            yield f"line {node.lineno}: from {node.module} import {names}"
-        elif isinstance(node, ast.Name) and node.id == "Secret":
-            yield f"line {node.lineno}: the name Secret"
-
-
 def _import_aliases(tree: ast.AST) -> dict[str, str]:
-    """Map the names a module uses locally to what they really are.
-
-    Same reason as in the detector that confines ``rich``: ``import textual.widgets as w``
-    must not let ``w.Input(...)`` through a check that compares against the literal string
-    ``"textual"``.
-    """
+    """Map the names a module uses locally to what they really are."""
     aliases: dict[str, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -157,108 +241,259 @@ def _import_aliases(tree: ast.AST) -> dict[str, str]:
     return aliases
 
 
+def _resolved(dotted: str, aliases: dict[str, str]) -> str:
+    root, _, rest = dotted.partition(".")
+    resolved = aliases.get(root, root)
+    return f"{resolved}.{rest}" if rest else resolved
+
+
+def _draft_typed_names(tree: ast.AST) -> frozenset[str]:
+    """Names annotated ``DraftFields`` in this module, plus the state attributes that are.
+
+    A read off one of these is a read of a draft field, and :data:`_ALLOWED_DRAFT_FIELDS`
+    pins what those fields are - so the read is safe by construction, whatever the field
+    happens to be called at the call site.
+    """
+    names = {
+        f"self.{attr}"
+        for attr, (annotation, _) in _ALLOWED_APP_STATE.items()
+        if annotation == "DraftFields"
+    }
+    for node in ast.walk(tree):
+        if isinstance(node, ast.arg) and node.annotation is not None:
+            if ast.unparse(node.annotation) == "DraftFields":
+                names.add(node.arg)
+        elif isinstance(node, ast.AnnAssign) and ast.unparse(node.annotation) == "DraftFields":
+            target = _dotted(node.target)
+            if target is not None:
+                names.add(target)
+    return frozenset(names)
+
+
+# --- rule 1: imports ----------------------------------------------------------
+
+
+def _import_violations(tree: ast.AST) -> Iterator[str]:
+    """Only the listed modules may be imported. Everything else is a violation."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Import | ast.ImportFrom):
+            continue
+        modules = (
+            [alias.name for alias in node.names]
+            if isinstance(node, ast.Import)
+            else [node.module or ""]
+        )
+        for module in modules:
+            allowed = any(
+                module == prefix or module.startswith(f"{prefix}.") for prefix in _ALLOWED_IMPORTS
+            )
+            if module in _CARVED_OUT_IMPORTS:
+                yield f"line {node.lineno}: imports {module!r}, carved out of an allowed package"
+            elif not allowed:
+                yield f"line {node.lineno}: imports {module!r}, which is not on the allowlist"
+
+
+# --- rule 2: parameters -------------------------------------------------------
+
+
+def _parameter_violations(tree: ast.AST) -> Iterator[str]:
+    """Every parameter has to be a listed ``(name, annotation)`` pair.
+
+    This is the door into the package. A credential can only get in as an argument, and
+    the only argument that goes anywhere near one promises a ``bool``.
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.arg) or node.arg in _STRUCTURAL_PARAMETERS:
+            continue
+        annotation = "" if node.annotation is None else ast.unparse(node.annotation)
+        if (node.arg, annotation) not in _ALLOWED_PARAMETERS:
+            shown = annotation or "<untyped>"
+            yield f"line {node.lineno}: parameter {node.arg}: {shown} is not on the allowlist"
+
+
+# --- rule 3: the application's state model ------------------------------------
+
+
+def _state_violations(tree: ast.AST) -> Iterator[str]:
+    """Every ``self.<attr>`` assignment has to be a listed attribute of the listed type."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign | ast.AnnAssign):
+            continue
+        targets = list(node.targets) if isinstance(node, ast.Assign) else [node.target]
+        annotation = ast.unparse(node.annotation) if isinstance(node, ast.AnnAssign) else ""
+        for target in targets:
+            dotted = _dotted(target)
+            if dotted is None or not dotted.startswith("self."):
+                continue
+            attribute = dotted.removeprefix("self.")
+            if attribute not in _ALLOWED_APP_STATE:
+                yield f"line {node.lineno}: self.{attribute} is not on the state allowlist"
+            elif annotation and annotation != _ALLOWED_APP_STATE[attribute][0]:
+                expected = _ALLOWED_APP_STATE[attribute][0]
+                yield f"line {node.lineno}: self.{attribute}: {annotation}, expected {expected}"
+
+
+# --- rule 4: the data object --------------------------------------------------
+
+
+def _draft_field_violations(tree: ast.AST) -> Iterator[str]:
+    """``DraftFields`` has to declare exactly the listed fields, with the listed types."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef) or node.name != "DraftFields":
+            continue
+        declared: dict[str, str] = {
+            statement.target.id: ast.unparse(statement.annotation)
+            for statement in node.body
+            if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
+        }
+        for name, annotation in declared.items():
+            if name not in _ALLOWED_DRAFT_FIELDS:
+                yield f"line {node.lineno}: DraftFields.{name} is not on the field allowlist"
+            elif annotation != _ALLOWED_DRAFT_FIELDS[name]:
+                expected = _ALLOWED_DRAFT_FIELDS[name]
+                yield f"line {node.lineno}: DraftFields.{name}: {annotation}, expected {expected}"
+        for missing in _ALLOWED_DRAFT_FIELDS.keys() - declared.keys():
+            yield f"line {node.lineno}: DraftFields no longer declares {missing}"
+
+
+# --- rule 5: module-level names -----------------------------------------------
+
+
+def _module_name_violations(tree: ast.AST) -> Iterator[str]:
+    """A module-level constant would be a place to hold a value outside every other list."""
+    if not isinstance(tree, ast.Module):
+        return
+    for node in tree.body:
+        targets = (
+            [node.target]
+            if isinstance(node, ast.AnnAssign)
+            else list(node.targets)
+            if isinstance(node, ast.Assign)
+            else []
+        )
+        for target in targets:
+            name = _dotted(target)
+            if name is not None and name not in _ALLOWED_MODULE_NAMES:
+                yield f"line {node.lineno}: module-level {name} is not on the allowlist"
+
+
+# --- rule 6: what may be drawn ------------------------------------------------
+
+
 def _is_widget_call(node: ast.Call, aliases: dict[str, str]) -> bool:
     """Whether this call builds something that comes from ``textual``."""
     dotted = _dotted(node.func)
+    return dotted is not None and _resolved(dotted, aliases).split(".")[0] == "textual"
+
+
+def _is_allowed_content(node: ast.expr, aliases: dict[str, str], drafts: frozenset[str]) -> bool:
+    """Whether an expression is on the allowlist of things a widget may be given.
+
+    Four shapes, and nothing else. A subscript (``state["password"]``), a call to anything
+    but the catalog (``fetch_it()``), an attribute of something that is not a draft - all
+    of them fall through to ``False``, which is the whole difference from the version the
+    audit broke.
+    """
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, str | bool | int) or node.value is None
+    if isinstance(node, ast.JoinedStr):
+        return all(
+            _is_allowed_content(part.value, aliases, drafts)
+            for part in node.values
+            if isinstance(part, ast.FormattedValue)
+        )
+    if isinstance(node, ast.Call):
+        return _is_allowed_call(node, aliases, drafts)
+    return _is_allowed_read(_dotted(node), drafts)
+
+
+def _is_allowed_read(dotted: str | None, drafts: frozenset[str]) -> bool:
+    """Whether a plain name or attribute chain is something a widget may be given."""
     if dotted is None:
         return False
-    root, _, rest = dotted.partition(".")
-    resolved = f"{aliases.get(root, root)}{'.' + rest if rest else ''}"
-    return resolved.split(".", maxsplit=1)[0] == "textual"
+    if dotted in drafts:
+        return True
+    base, _, attribute = dotted.rpartition(".")
+    if base in drafts:
+        # A field of a draft. The field allowlist says which fields can exist at all.
+        return attribute in _ALLOWED_DRAFT_FIELDS
+    if base == "self":
+        return _ALLOWED_APP_STATE.get(attribute, ("", False))[1]
+    # Anything else - a bare local, a spec attribute, an unknown object - is not a source.
+    return False
 
 
-def _widget_violations(tree: ast.AST) -> Iterator[str]:
-    """Rule 2: nothing credential-shaped may be handed to a widget, ever.
+def _is_allowed_call(node: ast.Call, aliases: dict[str, str], drafts: frozenset[str]) -> bool:
+    """The catalog lookup, and ``getattr`` on a draft. Nothing else may be drawn."""
+    dotted = _dotted(node.func)
+    if dotted == _CATALOG_LOOKUP:
+        # Positional arguments select the entry and the language; keyword arguments are
+        # interpolated into it, so they are content and are checked as such.
+        return all(
+            keyword.value is None or _is_allowed_content(keyword.value, aliases, drafts)
+            for keyword in node.keywords
+        )
+    if dotted == "getattr" and node.args:
+        # ``getattr(<a draft>, ...)`` can only ever reach one of the allowed fields.
+        return _dotted(node.args[0]) in drafts
+    return False
 
-    Not even with ``password=True``. That keyword masks the *screen*; the ADR measured
-    that the value behind it is a live ``str`` in the DOM for the whole session, which is
-    the thing being prevented here. The ``password=`` ban is unscoped - no call in this
-    package has any business taking that keyword - while the "do not pass it in" rule
-    applies to calls that build ``textual`` objects, since handing ``password_set`` to a
-    plain dataclass is the design rather than a breach of it.
-    """
+
+def _widget_content_violations(tree: ast.AST) -> Iterator[str]:
+    """Every non-structural argument of a widget has to be an allowed content source."""
     aliases = _import_aliases(tree)
+    drafts = _draft_typed_names(tree)
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
+        if not isinstance(node, ast.Call) or not _is_widget_call(node, aliases):
             continue
-        for keyword in node.keywords:
-            if keyword.arg == "password":
-                yield f"line {node.lineno}: a call with password="
-        if not _is_widget_call(node, aliases):
-            continue
-        for keyword in node.keywords:
-            if keyword.value is not None and _is_credential_name(keyword.value):
-                yield f"line {node.lineno}: widget built with {keyword.arg}=<credential-shaped>"
         for argument in node.args:
-            if _is_credential_name(argument):
-                yield f"line {node.lineno}: credential-shaped name passed to a widget"
+            if not _is_allowed_content(argument, aliases, drafts):
+                shown = ast.unparse(argument)
+                yield f"line {node.lineno}: widget given {shown}, which is not an allowed source"
+        for keyword in node.keywords:
+            if keyword.arg in _STRUCTURAL_WIDGET_KEYWORDS or keyword.value is None:
+                continue
+            if not _is_allowed_content(keyword.value, aliases, drafts):
+                shown = f"{keyword.arg}={ast.unparse(keyword.value)}"
+                yield f"line {node.lineno}: widget given {shown}, which is not an allowed source"
 
 
-def _sink_violations(tree: ast.AST) -> Iterator[str]:
-    """Rule 3: nothing credential-shaped may be written into a rendered attribute."""
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and _is_credential_name(node.value):
-            for target in node.targets:
-                if isinstance(target, ast.Attribute) and target.attr in _WIDGET_SINKS:
-                    yield f"line {node.lineno}: assignment to .{target.attr}"
-        # ``setattr`` reaches the same place without naming the attribute in the source.
-        if (
-            isinstance(node, ast.Call)
-            and _dotted(node.func) == "setattr"
-            and len(node.args) == 3
-            and _is_credential_name(node.args[2])
-        ):
-            yield f"line {node.lineno}: setattr of a credential-shaped name"
+# --- extras -------------------------------------------------------------------
+
+#: Calls that would write the application state where it could be read back. Not part of
+#: the allowlist argument - clause 3 of ADR 0029 condition 5 is a separate promise - but
+#: cheap to keep, and the ADR asked for it in writing.
+_FORBIDDEN_DUMPS: Final[frozenset[str]] = frozenset({"save_screenshot", "export_screenshot"})
 
 
 def _dump_violations(tree: ast.AST) -> Iterator[str]:
-    """Rule 4: the application state is never written anywhere it could be read back."""
+    """Clause 3 of ADR 0029 condition 5: no screenshots, no devtools, in production."""
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             dotted = _dotted(node.func) or ""
-            if dotted.rsplit(".", maxsplit=1)[-1] in _FORBIDDEN_CALLS:
+            if dotted.rsplit(".", maxsplit=1)[-1] in _FORBIDDEN_DUMPS:
                 yield f"line {node.lineno}: {dotted}()"
-
-
-def _binding_violations(tree: ast.AST) -> Iterator[str]:
-    """Rule 5: every credential-shaped name in the package is a boolean.
-
-    This is the rule that makes the other four hold. A parameter, a field or an attribute
-    that reads like the credential must be annotated ``bool`` (or the callable that
-    returns one), and a plain assignment to such a name must have a right-hand side that
-    can only be a boolean. There is therefore nowhere in this package for a credential to
-    live, whatever it is called.
-    """
-    for node in ast.walk(tree):
-        if isinstance(node, ast.arg) and _CREDENTIAL_NAME.search(node.arg):
-            annotation = "" if node.annotation is None else ast.unparse(node.annotation)
-            if annotation not in _BOOLEAN_ANNOTATIONS:
-                yield f"line {node.lineno}: parameter {node.arg}: {annotation or '<untyped>'}"
-        elif isinstance(node, ast.AnnAssign) and _is_credential_name(node.target):
-            annotation = ast.unparse(node.annotation)
-            if annotation not in _BOOLEAN_ANNOTATIONS:
-                yield f"line {node.lineno}: {ast.unparse(node.target)}: {annotation}"
-        elif isinstance(node, ast.Assign):
-            for target in node.targets:
-                if _is_credential_name(target) and not _is_boolean_shaped(node.value):
-                    yield f"line {node.lineno}: {ast.unparse(target)} = {ast.unparse(node.value)}"
+        elif isinstance(node, ast.Call | ast.keyword) and getattr(node, "arg", None) == "password":
+            yield f"line {node.lineno}: a call with password="
 
 
 def collect_credential_violations(source: str) -> list[str]:
-    """Every rule, over one module's source. Empty means the module is clean."""
+    """Every allowlist, over one module's source. Empty means the module is clean."""
     tree = ast.parse(source)
     return [
         *_import_violations(tree),
-        *_widget_violations(tree),
-        *_sink_violations(tree),
+        *_parameter_violations(tree),
+        *_state_violations(tree),
+        *_draft_field_violations(tree),
+        *_module_name_violations(tree),
+        *_widget_content_violations(tree),
         *_dump_violations(tree),
-        *_binding_violations(tree),
     ]
 
 
 @pytest.mark.contract
 def test_the_wizard_package_cannot_hold_the_credential() -> None:
-    """Barrier one: the rule of ADR 0029 condition 5, checked instead of written down."""
+    """Barrier one: six allowlists that leave the credential nowhere to live."""
     offenders: dict[str, list[str]] = {}
     package = _wizard_package()
     for module in sorted(package.rglob("*.py")):
@@ -266,42 +501,64 @@ def test_the_wizard_package_cannot_hold_the_credential() -> None:
         if violations:
             offenders[module.name] = violations
     assert offenders == {}, (
-        f"the credential may be reaching the widget tree: {offenders} — the wizard holds "
-        "seven fields and a boolean; the credential is asked for outside it, through the "
-        "callable the CLI passes in (ADR 0029, condition 5)."
+        f"the wizard package grew a slot the allowlists do not know about: {offenders} — "
+        "if the addition is legitimate, add it to the list in this file on purpose "
+        "(ADR 0029, condition 5)."
     )
 
 
-#: One injected violation per rule, each of them a plausible six-months-from-now diff.
-#: A detector that stopped detecting would make this file pass while proving nothing.
+#: One injected diff per way in, including the three the audit of PR #223 used to walk
+#: straight past the previous version of this check. A rule that stopped ruling would make
+#: this file pass while proving nothing.
 _INJECTED_VIOLATIONS: Final[tuple[tuple[str, str], ...]] = (
+    # The three evasions the audit demonstrated. None of them mentions a suspicious word.
+    (
+        "renamed-and-put-in-a-widget",
+        "from textual.widgets import Input\nInput(value=self._initial.auth_material)\n",
+    ),
+    (
+        "renamed-as-a-draft-field",
+        "@dataclass\nclass DraftFields:\n    host: str = ''\n    auth_material: str = ''\n",
+    ),
+    (
+        "renamed-as-a-parameter",
+        "def build(auth_material: str) -> None:\n    pass\n",
+    ),
+    (
+        "through-a-dictionary",
+        "from textual.widgets import Input\nInput(value=state['password'])\n",
+    ),
+    (
+        "through-a-renamed-dictionary",
+        "from textual.widgets import Input\nInput(value=cache['whatever'])\n",
+    ),
+    (
+        "through-the-return-of-a-function",
+        "from textual.widgets import Input\nInput(value=fetch_it())\n",
+    ),
+    # The ways the old blacklist did catch, kept so the coverage never narrows.
     ("secret-import", "from nz_mcp.secret import Secret\n"),
     ("auth-import", "from nz_mcp.auth import get_password\n"),
-    ("secret-name", "def f(x):\n    return Secret(x)\n"),
+    ("keyring-import", "import keyring\n"),
+    ("os-import", "import os\n"),
+    ("devtools-import", "import textual.devtools\n"),
     ("masked-input", "from textual.widgets import Input\nInput(password=True)\n"),
     (
-        "input-gets-the-credential",
-        "from textual.widgets import Input\nInput(value=password)\n",
-    ),
-    (
-        "positional-credential",
-        "from textual.widgets import Input\nInput(self._password)\n",
-    ),
-    (
-        "aliased-widget-gets-the-credential",
+        "aliased-widget-gets-it",
         "import textual.widgets as w\nw.Input(value=self._password)\n",
     ),
-    ("assign-to-widget-value", "field.value = password\n"),
-    ("setattr-into-a-widget", "setattr(field, 'value', password)\n"),
     ("screenshot", "app.save_screenshot('out.svg')\n"),
     ("export-screenshot", "self.export_screenshot()\n"),
-    ("devtools", "import textual.devtools\n"),
-    ("untyped-parameter", "def ask(password):\n    return password\n"),
-    ("string-typed-parameter", "def ask(password: str) -> None:\n    pass\n"),
-    ("string-field", "class S:\n    password: str = ''\n"),
-    ("attribute-holds-it", "self._password: str = value\n"),
-    ("plain-assignment", "self._password_set = ask_secret_raw()\n"),
-    ("reactive-field", "password = reactive('')\n"),
+    (
+        "an-attribute-that-is-not-on-the-state-list",
+        "class A:\n    def f(self) -> None:\n        self._auth_material = value\n",
+    ),
+    ("a-module-level-constant", "AUTH_MATERIAL = 'x'\n"),
+    ("an-untyped-parameter", "def ask(anything):\n    return anything\n"),
+    (
+        "a-catalog-placeholder-carrying-it",
+        "from textual.widgets import Static\nStatic(t('KEY', locale, value=fetch_it()))\n",
+    ),
 )
 
 
@@ -310,7 +567,7 @@ _INJECTED_VIOLATIONS: Final[tuple[tuple[str, str], ...]] = (
     "source", [pytest.param(src, id=name) for name, src in _INJECTED_VIOLATIONS]
 )
 def test_the_guardrail_rejects_an_injected_violation(source: str) -> None:
-    """Barrier one, exercised: each of these is a way the credential could come back."""
+    """Barrier one, exercised. Three of these are the audit's own evasions of PR #223."""
     assert collect_credential_violations(source) != []
 
 
@@ -323,17 +580,22 @@ def test_the_guardrail_rejects_an_injected_violation(source: str) -> None:
             "def build(ask_password: Callable[[], bool]) -> None:\n    pass\n",
             id="the-callable",
         ),
-        pytest.param("self._password_set = True\n", id="setting-the-boolean"),
-        pytest.param("self._password_set = bool(captured)\n", id="narrowing-to-a-boolean"),
         pytest.param(
-            "self._password_set = self._password_set or self._had_password\n",
-            id="folding-two-booleans",
+            "class A:\n    def f(self) -> None:\n        self._password_set = True\n",
+            id="setting-the-boolean",
         ),
-        pytest.param("CREDENTIAL_SLOT: Final[str] = 'password'\n", id="the-named-exemption"),
-        pytest.param("WizardResult(password_set=self._password_set)\n", id="the-plain-dataclass"),
+        pytest.param("CREDENTIAL_SLOT = 'password'\n", id="a-listed-module-constant"),
         pytest.param(
             "from textual.widgets import Input\nInput(value=self._initial.host, compact=True)\n",
-            id="an-ordinary-field",
+            id="a-declared-draft-field",
+        ),
+        pytest.param(
+            "from textual.widgets import Static\nStatic(t('KEY', locale), id='title')\n",
+            id="a-catalog-lookup",
+        ),
+        pytest.param(
+            "from textual.widgets import Input\nInput(value=getattr(self._initial, spec.key))\n",
+            id="any-field-of-a-draft",
         ),
     ],
 )

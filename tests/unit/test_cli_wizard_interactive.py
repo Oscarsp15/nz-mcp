@@ -174,7 +174,7 @@ def test_cancelling_the_screen_writes_nothing(
 def test_shrinking_the_window_falls_back_to_the_questions_without_losing_answers(
     monkeypatch: pytest.MonkeyPatch, tmp_profiles: Path
 ) -> None:
-    """The sixth trigger, seen from the command instead of from the application.
+    """The seventh trigger, seen from the command instead of from the application.
 
     The screen gives back what was typed; those answers become the **defaults** of the
     chained questions, so pressing Enter through them reproduces the same profile. The

@@ -9,7 +9,7 @@ What is checked here:
 
 - the form collects what was typed, and the draft that comes out carries it;
 - the status line names what is still missing, and what will not parse;
-- the three exits: completed, cancelled, and the sixth degradation trigger - a window
+- the three exits: completed, cancelled, and the seventh degradation trigger - a window
   shrunk **below the minimum mid-session**, which must give back everything typed;
 - the screen adapts between the minimum and a large window (ADR 0028, condition 4);
 - both languages render.
@@ -245,7 +245,7 @@ async def test_escape_cancels_and_says_so() -> None:
 
 @pytest.mark.asyncio
 async def test_shrinking_the_window_mid_session_degrades_without_losing_anything() -> None:
-    """The sixth trigger, added by the audit of PR #222.
+    """The seventh trigger, added by the audit of PR #222.
 
     The other five are decided before the application starts. This one can only be seen
     from inside it, and it is the routine case over SSH: someone drags the corner of the

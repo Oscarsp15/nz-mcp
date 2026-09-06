@@ -17,20 +17,20 @@ It never enters the widget tree, and this module is built so that it *cannot*:
 - the state model is :class:`nz_mcp.wizard.fields.DraftFields`, which has no password
   field, and one boolean next to it;
 - asking for it is a callable handed in from outside, invoked inside ``App.suspend()`` so
-  the question happens on the real terminal, and it returns a **boolean**;
-- nothing in this package imports ``nz_mcp.secret`` or ``nz_mcp.auth``, so the type the
-  credential travels in does not exist here.
+  the question happens on the real terminal, and it returns a **boolean**.
 
-That is checked, not promised: ``tests/contract/test_wizard_credential_guardrail.py``
-parses this package and fails the build on a violation, and a second test drives the real
-application and walks the finished widget tree looking for the value.
+That is checked rather than promised, and checked by **allowlist** rather than by hunting
+for suspicious names: ``tests/contract/test_wizard_credential_guardrail.py`` enumerates
+every import, parameter, attribute, data field and module-level name this package is
+allowed to have, so a value has nowhere to live here whatever it is called. A second test
+drives the real application and walks the finished widget tree looking for the value.
 
 Degradation (ADR 0028, condition 1)
 -----------------------------------
-The five start-up triggers are decided before this module is even imported, by
-``cli_output.interactive_ui_enabled()``. The sixth one lives here, because only a running
-application can see it: a window shrunk **below the minimum during the session** closes
-the screen with ``degraded`` and hands back everything typed so far, so the chained
+The six start-up triggers are decided before this module is even imported, by
+``cli_output.interactive_ui_enabled()``. The seventh one lives here, because only a
+running application can see it: a window shrunk **below the minimum during the session**
+closes the screen with ``degraded`` and hands back everything typed so far, so the chained
 questions resume with those answers as their defaults instead of from nothing.
 """
 
@@ -159,8 +159,10 @@ class ProfileWizardApp(App[WizardResult]):
             locale: Language of every visible string.
         """
         super().__init__()
-        self._profile = profile
-        self._initial = initial
+        # Every attribute is annotated, and the list of them is an allowlist the contract
+        # test pins: this is the whole state this application is allowed to hold.
+        self._profile: str = profile
+        self._initial: DraftFields = initial
         self._password_set: bool = password_set
         self._ask_password: Callable[[], bool] = ask_password
         self._locale: Locale = locale
@@ -211,7 +213,7 @@ class ProfileWizardApp(App[WizardResult]):
     def on_resize(self, event: events.Resize) -> None:
         """Degrade when the window drops below the minimum, keeping what was typed.
 
-        The sixth trigger of ADR 0028, added by the audit of PR #222: shrinking a window
+        The seventh trigger, and the one the audit of PR #222 asked for: shrinking a window
         mid-session is routine over SSH, and the other five only look at start-up. Leaving
         with ``degraded`` rather than repainting a broken screen is what turns a bug into a
         documented fallback - and the draft goes back with it, because losing eight

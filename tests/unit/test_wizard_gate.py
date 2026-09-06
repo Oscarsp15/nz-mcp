@@ -1,17 +1,18 @@
 """The gate that decides whether a full-screen wizard may start (ADR 0028, condition 1).
 
 Degradation is the condition that can sink the whole feature: **nobody may end up unable
-to configure nz-mcp because an interface would not start.** So each of the five start-up
+to configure nz-mcp because an interface would not start.** So each of the six start-up
 triggers gets a test of its own, starting from a helper that opens the gate completely -
 otherwise a test would pass because a *different* trigger fired, which is how a broken
 gate stays green.
 
-The sixth trigger, shrinking the window mid-session, cannot be seen from here: it belongs
-to the running application and is tested in ``tests/unit/test_wizard_app.py``.
+The seventh - shrinking the window below the minimum mid-session - cannot be seen from
+this side and lives in ``tests/unit/test_wizard_app.py``.
 """
 
 from __future__ import annotations
 
+import os
 from typing import Final
 
 import pytest
@@ -46,11 +47,16 @@ def open_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     reinstates its own capture objects on ``sys.stdout`` and ``sys.stderr`` when the call
     phase begins, which is *after* fixture setup, so a fixture that replaced them would be
     quietly undone and every test here would pass for the wrong reason.
+
+    The terminfo lookup is stubbed so these tests answer the same on every platform: the
+    real one is exercised separately, against the real database, in
+    :func:`test_the_terminfo_lookup_answers_about_the_real_database`.
     """
     monkeypatch.delenv(out.NO_TUI_ENV, raising=False)
     monkeypatch.setenv("TERM", "xterm-256color")
     for stream in ("stdin", "stdout", "stderr"):
         monkeypatch.setattr(f"sys.{stream}", _FakeStream(terminal=True))
+    monkeypatch.setattr(out, "_terminfo_declares_full_screen", lambda _term: True)
     monkeypatch.setattr(out, "detect_legacy_windows", lambda: False)
     _set_size(monkeypatch, *_ROOMY)
 
@@ -125,6 +131,64 @@ def test_a_stream_that_cannot_answer_closes_it(monkeypatch: pytest.MonkeyPatch) 
     open_the_gate(monkeypatch)
     monkeypatch.setattr("sys.stdin", object())
     assert _blocker() == "no_terminal"
+
+
+@pytest.mark.parametrize("term", ["", "   ", "banana-9000", "unknown"])
+def test_a_posix_terminal_without_guarantees_closes_it(
+    monkeypatch: pytest.MonkeyPatch, term: str
+) -> None:
+    """Trigger 4, the one the first round of this work missed.
+
+    ``TERM=dumb`` is not the only way to have no guarantees. An empty or unset ``TERM`` is
+    routine inside containers and in some multiplexed SSH sessions, and a value the host's
+    terminfo database has never heard of is routine when the client's terminal type is not
+    installed on the server. In both cases the three streams *are* terminals and the window
+    *is* a good size, so not one of the other six triggers fires - and a full-screen
+    application would start with no guarantee that any escape sequence or key it uses means
+    anything. Because the size is fine, the live-resize net would not catch it either.
+    """
+    open_the_gate(monkeypatch)
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setenv("TERM", term)
+    # An unknown type reaches the lookup; an empty one never gets that far.
+    monkeypatch.setattr(out, "_terminfo_declares_full_screen", lambda _term: False)
+    assert _blocker() == "terminal_without_capabilities"
+
+
+def test_a_posix_terminal_the_database_knows_opens_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The trigger has to let a normal terminal through, or it is just a switch that is off."""
+    open_the_gate(monkeypatch)
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setenv("TERM", "xterm-256color")
+    assert _blocker() is None
+
+
+def test_windows_does_not_ask_terminfo_because_there_is_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On Windows ``TERM`` is normally unset and says nothing about the console.
+
+    The equivalent question there is whether the console speaks VT, which is the trigger
+    right after this one. Asking terminfo on Windows would close the gate on every single
+    Windows user, which is the platform this product mostly runs on.
+    """
+    open_the_gate(monkeypatch)
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.delenv("TERM", raising=False)
+    monkeypatch.setattr(out, "_terminfo_declares_full_screen", lambda _term: False)
+    assert _blocker() is None
+
+
+@pytest.mark.skipif(os.name != "posix", reason="terminfo is a POSIX database")
+def test_the_terminfo_lookup_answers_about_the_real_database() -> None:
+    """The stub above has to stand for something real, so here it is unstubbed.
+
+    ``xterm`` is present on any system that has a terminfo database at all; the other name
+    is not going to be. Without this test, the four above would prove only that a lambda
+    returns what it was told to.
+    """
+    assert out._terminfo_declares_full_screen("xterm")
+    assert not out._terminfo_declares_full_screen("nz-mcp-no-such-terminal-9137")
 
 
 def test_a_console_without_vt_sequences_closes_it(monkeypatch: pytest.MonkeyPatch) -> None:
