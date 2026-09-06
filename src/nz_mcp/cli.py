@@ -1,17 +1,25 @@
 """Command-line interface — typer.
 
-Commands:
+Commands are **defined in the order they are used**, not in the order they were written,
+because typer lists them in registration order and that list is the first screen of the
+product: install, prove it works, then live with it, then diagnose, then the parts you
+rarely type by hand.
+
 - ``init``               first-time wizard: creates the first profile.
-- ``add-profile``        add another profile.
-- ``remove-profile``     delete a profile and its keyring password.
-- ``list-profiles``      list configured profiles.
+- ``test-connection``    verify the active profile against Netezza.
+- ``list-profiles``      show the profiles and where each one points.
 - ``switch-profile``     make an existing profile the active one.
+- ``add-profile``        add another profile.
 - ``edit-profile``       update an existing profile (mode, database, limits).
+- ``remove-profile``     delete a profile and its keyring password.
 - ``doctor``             print local diagnostics (no Netezza connection).
 - ``probe-catalog``      execute every catalog query with dummy parameters (validates overrides).
-- ``test-connection``    verify the active profile (opens Netezza, runs ``VERSION()``).
-- ``serve``              run the MCP server over stdio.
 - ``version``            print the package version.
+- ``serve``              run the MCP server over stdio.
+
+Every user-facing string here — help texts included — comes from the i18n catalog. Help is
+resolved once at import time into ``_HELP_LOCALE``: typer reads ``help=`` while the module is
+being imported, so there is no later moment at which to pick a language.
 """
 
 from __future__ import annotations
@@ -74,21 +82,31 @@ from nz_mcp.secret import Secret
 from nz_mcp.server import run_stdio_server
 from nz_mcp.tools.session import SwitchProfileInput, nz_switch_profile
 
+#: Language of ``--help``. Resolved once, at import time, because typer captures the ``help=``
+#: strings while the decorators run: by the time a command executes, the help screen has
+#: already been built. Everything else in this module resolves the locale per call.
+_HELP_LOCALE: Final[Locale] = resolve_locale()
+
+
+def _help(key: str) -> str:
+    """Localized help text for a command, an argument or an option."""
+    return t(key, _HELP_LOCALE)
+
+
 app = typer.Typer(
     name="nz-mcp",
-    help="MCP server for IBM Netezza Performance Server.",
+    help=_help("CLI.HELP.APP"),
     no_args_is_help=True,
     add_completion=False,
 )
 
+#: Title of the panel typer draws around the command list. Set on every command so the list
+#: stays a single block: several panels would group the commands, and grouping eleven
+#: commands into boxes buys structure the ordering already provides.
+_COMMANDS_PANEL: Final[str] = _help("CLI.HELP.COMMANDS_PANEL")
 
-@app.command("version")
-def version_cmd() -> None:
-    """Print the installed nz-mcp version."""
-    out.emit(__version__)
 
-
-@app.command("init")
+@app.command("init", help=_help("CLI.HELP.INIT"), rich_help_panel=_COMMANDS_PANEL)
 def init_cmd() -> None:
     """Interactive wizard: create the first profile."""
     locale = resolve_locale()
@@ -98,43 +116,56 @@ def init_cmd() -> None:
     _add_profile_interactive(name=name, set_active=True)
 
 
-@app.command("add-profile")
-def add_profile_cmd(
-    name: str = typer.Argument(..., help="Profile name"),
-    set_active: bool = typer.Option(
-        False,
-        "--active/--no-active",
-        help="Mark the new profile as active",
-    ),
+@app.command(
+    "test-connection",
+    help=_help("CLI.HELP.TEST_CONNECTION"),
+    rich_help_panel=_COMMANDS_PANEL,
+)
+def test_connection_cmd(
+    profile: str | None = typer.Option(None, "--profile", "-p", help=_help("CLI.HELP.OPT.PROFILE")),
 ) -> None:
-    """Add a new profile (interactive)."""
-    _add_profile_interactive(name=name, set_active=set_active)
-
-
-@app.command("remove-profile")
-def remove_profile_cmd(
-    name: str = typer.Argument(..., help="Profile name to delete"),
-) -> None:
-    """Delete a profile from profiles.toml and its password from the OS keyring."""
+    """Verify connectivity: open Netezza, run a version query, report OK or FAIL (exit 0/1)."""
     locale = resolve_locale()
-    file = _load_profiles_or_exit(locale)
-    if name not in file.profiles:
-        exc = _profile_not_found(name, list(file.profiles))
+    try:
+        prof = get_profile(profile) if profile is not None else get_active_profile()
+    except ProfileNotFoundError as exc:
         out.fail(_format_profile_not_found_cli(locale, exc))
+        raise typer.Exit(code=1) from exc
+    except InvalidProfileError as exc:
+        out.fail(t("INVALID_CONFIG", locale, detail=str(exc)))
+        raise typer.Exit(code=1) from exc
+
+    try:
+        password = get_password(prof.name)
+    except (CredentialNotFoundError, KeyringUnavailableError) as exc:
+        detail = sanitize(str(exc), known_secrets=())
+        out.fail(f"FAIL: {detail}")
+        raise typer.Exit(code=1) from exc
+
+    # Level 1 of the validation ladder the wizard also runs (profile_check.run_checks).
+    # The wait is a TCP session over a VPN and can last until the driver times out, so it
+    # is announced while it happens instead of after: naming host, port and user is what
+    # tells someone with the VPN down where to look. Never the password.
+    waiting = t(
+        "CLI.TEST_CONNECTION_RUNNING", locale, host=prof.host, port=prof.port, user=prof.user
+    )
+    with out.progress(waiting):
+        outcome = run_checks(prof, password, levels=1).outcomes[0]
+    if outcome.status != "ok":
+        out.fail(f"FAIL: {outcome.detail}")
+        hint = outcome.hint_es if locale == "es" else outcome.hint_en
+        if hint:
+            out.warn(f"HINT: {hint}")
         raise typer.Exit(code=1)
-    prompt = t("CLI.PROFILE_REMOVE_CONFIRM", locale, profile=name, path=profiles_path())
-    if not out.confirm(prompt, default=False):
-        out.warn(t("CLI.PROFILE_REMOVE_CANCELLED", locale, profile=name))
-        raise typer.Exit(code=1)
-    _delete_password_or_warn(name, locale)
-    was_active = remove_profile(name)
-    out.success(t("CLI.PROFILE_REMOVED", locale, profile=name, path=profiles_path()))
-    if was_active:
-        out.warn(t("CLI.ACTIVE_PROFILE_CLEARED", locale, path=profiles_path()))
+    out.success(f"OK: connected to {outcome.detail} as {prof.user}")
     raise typer.Exit(code=0)
 
 
-@app.command("list-profiles")
+@app.command(
+    "list-profiles",
+    help=_help("CLI.HELP.LIST_PROFILES"),
+    rich_help_panel=_COMMANDS_PANEL,
+)
 def list_profiles_cmd() -> None:
     """List configured profile names."""
     names = list_profile_names()
@@ -145,11 +176,15 @@ def list_profiles_cmd() -> None:
         out.emit(n)
 
 
-@app.command("switch-profile")
+@app.command(
+    "switch-profile",
+    help=_help("CLI.HELP.SWITCH_PROFILE"),
+    rich_help_panel=_COMMANDS_PANEL,
+)
 def switch_profile_cmd(
-    name: str = typer.Argument(..., help="Existing profile name to activate"),
+    name: str = typer.Argument(..., help=_help("CLI.HELP.OPT.EXISTING_PROFILE_NAME")),
 ) -> None:
-    """Make an existing profile the active one (same logic as the nz_switch_profile tool)."""
+    """Make an existing profile the active one."""
     locale = resolve_locale()
     try:
         # Single source of truth: the CLI delegates to the MCP tool instead of
@@ -165,13 +200,30 @@ def switch_profile_cmd(
     raise typer.Exit(code=0)
 
 
-@app.command("edit-profile")
+@app.command("add-profile", help=_help("CLI.HELP.ADD_PROFILE"), rich_help_panel=_COMMANDS_PANEL)
+def add_profile_cmd(
+    name: str = typer.Argument(..., help=_help("CLI.HELP.OPT.NEW_PROFILE_NAME")),
+    set_active: bool = typer.Option(
+        False,
+        "--active/--no-active",
+        help=_help("CLI.HELP.OPT.SET_ACTIVE"),
+    ),
+) -> None:
+    """Add a new profile (interactive)."""
+    _add_profile_interactive(name=name, set_active=set_active)
+
+
+@app.command("edit-profile", help=_help("CLI.HELP.EDIT_PROFILE"), rich_help_panel=_COMMANDS_PANEL)
 def edit_profile_cmd(
-    name: str = typer.Argument(..., help="Existing profile name"),
-    mode: str | None = typer.Option(None, "--mode", help="read | write | admin"),
-    database: str | None = typer.Option(None, "--database", help="Default database"),
-    max_rows_default: int | None = typer.Option(None, "--max-rows-default"),
-    timeout_s_default: int | None = typer.Option(None, "--timeout-s-default"),
+    name: str = typer.Argument(..., help=_help("CLI.HELP.OPT.EXISTING_PROFILE_NAME")),
+    mode: str | None = typer.Option(None, "--mode", help=_help("CLI.HELP.OPT.MODE")),
+    database: str | None = typer.Option(None, "--database", help=_help("CLI.HELP.OPT.DATABASE")),
+    max_rows_default: int | None = typer.Option(
+        None, "--max-rows-default", help=_help("CLI.HELP.OPT.MAX_ROWS_DEFAULT")
+    ),
+    timeout_s_default: int | None = typer.Option(
+        None, "--timeout-s-default", help=_help("CLI.HELP.OPT.TIMEOUT_S_DEFAULT")
+    ),
 ) -> None:
     """Update fields of an existing profile (password stays in the OS keyring)."""
     locale = resolve_locale()
@@ -200,7 +252,34 @@ def edit_profile_cmd(
     raise typer.Exit(code=0)
 
 
-@app.command("doctor")
+@app.command(
+    "remove-profile",
+    help=_help("CLI.HELP.REMOVE_PROFILE"),
+    rich_help_panel=_COMMANDS_PANEL,
+)
+def remove_profile_cmd(
+    name: str = typer.Argument(..., help=_help("CLI.HELP.OPT.PROFILE_TO_DELETE")),
+) -> None:
+    """Delete a profile from profiles.toml and its password from the OS keyring."""
+    locale = resolve_locale()
+    file = _load_profiles_or_exit(locale)
+    if name not in file.profiles:
+        exc = _profile_not_found(name, list(file.profiles))
+        out.fail(_format_profile_not_found_cli(locale, exc))
+        raise typer.Exit(code=1)
+    prompt = t("CLI.PROFILE_REMOVE_CONFIRM", locale, profile=name, path=profiles_path())
+    if not out.confirm(prompt, default=False):
+        out.warn(t("CLI.PROFILE_REMOVE_CANCELLED", locale, profile=name))
+        raise typer.Exit(code=1)
+    _delete_password_or_warn(name, locale)
+    was_active = remove_profile(name)
+    out.success(t("CLI.PROFILE_REMOVED", locale, profile=name, path=profiles_path()))
+    if was_active:
+        out.warn(t("CLI.ACTIVE_PROFILE_CLEARED", locale, path=profiles_path()))
+    raise typer.Exit(code=0)
+
+
+@app.command("doctor", help=_help("CLI.HELP.DOCTOR"), rich_help_panel=_COMMANDS_PANEL)
 def doctor_cmd() -> None:
     """Print local diagnostics (package, Python, profiles metadata, keyring) — no Netezza."""
     report = collect_diagnostic()
@@ -209,15 +288,19 @@ def doctor_cmd() -> None:
     raise typer.Exit(code=0 if report.is_healthy else 1)
 
 
-@app.command("probe-catalog")
+@app.command(
+    "probe-catalog",
+    help=_help("CLI.HELP.PROBE_CATALOG"),
+    rich_help_panel=_COMMANDS_PANEL,
+)
 def probe_catalog_cmd(
     profile: str | None = typer.Option(
         None,
         "--profile",
         "-p",
-        help="Profile name (default: active)",
+        help=_help("CLI.HELP.OPT.PROFILE"),
     ),
-    as_json: bool = typer.Option(False, "--json", help="Print machine-readable JSON"),
+    as_json: bool = typer.Option(False, "--json", help=_help("CLI.HELP.OPT.JSON")),
 ) -> None:
     """Run every registered catalog query with dummy parameters against Netezza."""
     locale = resolve_locale()
@@ -258,50 +341,13 @@ def probe_catalog_cmd(
     raise typer.Exit(code=code)
 
 
-@app.command("test-connection")
-def test_connection_cmd(
-    profile: str | None = typer.Option(
-        None, "--profile", "-p", help="Profile to test (defaults to active profile)"
-    ),
-) -> None:
-    """Verify connectivity: open Netezza, run ``VERSION()``, report OK or FAIL (exit 0/1)."""
-    locale = resolve_locale()
-    try:
-        prof = get_profile(profile) if profile is not None else get_active_profile()
-    except ProfileNotFoundError as exc:
-        out.fail(_format_profile_not_found_cli(locale, exc))
-        raise typer.Exit(code=1) from exc
-    except InvalidProfileError as exc:
-        out.fail(t("INVALID_CONFIG", locale, detail=str(exc)))
-        raise typer.Exit(code=1) from exc
-
-    try:
-        password = get_password(prof.name)
-    except (CredentialNotFoundError, KeyringUnavailableError) as exc:
-        detail = sanitize(str(exc), known_secrets=())
-        out.fail(f"FAIL: {detail}")
-        raise typer.Exit(code=1) from exc
-
-    # Level 1 of the validation ladder the wizard also runs (profile_check.run_checks).
-    # The wait is a TCP session over a VPN and can last until the driver times out, so it
-    # is announced while it happens instead of after: naming host, port and user is what
-    # tells someone with the VPN down where to look. Never the password.
-    waiting = t(
-        "CLI.TEST_CONNECTION_RUNNING", locale, host=prof.host, port=prof.port, user=prof.user
-    )
-    with out.progress(waiting):
-        outcome = run_checks(prof, password, levels=1).outcomes[0]
-    if outcome.status != "ok":
-        out.fail(f"FAIL: {outcome.detail}")
-        hint = outcome.hint_es if locale == "es" else outcome.hint_en
-        if hint:
-            out.warn(f"HINT: {hint}")
-        raise typer.Exit(code=1)
-    out.success(f"OK: connected to {outcome.detail} as {prof.user}")
-    raise typer.Exit(code=0)
+@app.command("version", help=_help("CLI.HELP.VERSION"), rich_help_panel=_COMMANDS_PANEL)
+def version_cmd() -> None:
+    """Print the installed nz-mcp version."""
+    out.emit(__version__)
 
 
-@app.command("serve")
+@app.command("serve", help=_help("CLI.HELP.SERVE"), rich_help_panel=_COMMANDS_PANEL)
 def serve_cmd() -> None:
     """Run the MCP server over stdio."""
     # Logging is configured first so structlog binds the real stderr; only then is

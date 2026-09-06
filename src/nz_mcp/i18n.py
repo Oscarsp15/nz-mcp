@@ -722,6 +722,119 @@ MESSAGES: Final[dict[str, Message]] = {
             "{profile}' runs every catalog query (slow and noisy; not needed to get started)."
         ),
     },
+    # nz-mcp --help — the first screen of the product (issue #209).
+    #
+    # Three rules apply to every "CLI.HELP.*" value and are enforced by
+    # tests/unit/test_cli_help.py, because this is the one screen read by someone who has
+    # no context at all:
+    #
+    # 1. What the command is *for*, not how it works. No MCP tool names, no file names, no
+    #    reStructuredText markup: whoever reads the help has not read the code.
+    # 2. Encodable in the legacy Windows console code pages (cp437 / cp850). Lowercase
+    #    accented letters, "ñ" and "¿" are fine there; em dashes, ellipsis characters,
+    #    arrows and *uppercase* accented vowels are not, and the console renders them
+    #    as "?" — which is what the CLI design walk found on the "doctor" line.
+    # 3. One sentence where one sentence does. The list is read top to bottom by someone
+    #    deciding what to type next.
+    "CLI.HELP.APP": {
+        "es": (
+            "Servidor MCP para IBM Netezza: conecta tu asistente de IA a tus bases de datos.\n\n"
+            "Si acabas de instalarlo, empieza por: nz-mcp init"
+        ),
+        "en": (
+            "MCP server for IBM Netezza: connects your AI assistant to your databases.\n\n"
+            "If you just installed it, start with: nz-mcp init"
+        ),
+    },
+    "CLI.HELP.COMMANDS_PANEL": {
+        "es": "Comandos (en el orden en que se usan)",
+        "en": "Commands (in the order you use them)",
+    },
+    "CLI.HELP.INIT": {
+        "es": "Crea tu primer perfil de conexión, paso a paso. Empieza por aquí.",
+        "en": "Create your first connection profile, step by step. Start here.",
+    },
+    "CLI.HELP.TEST_CONNECTION": {
+        "es": "Comprueba que el perfil activo llega a Netezza, y dice qué mirar si no llega.",
+        "en": "Check that the active profile reaches Netezza, and say what to look at if not.",
+    },
+    "CLI.HELP.LIST_PROFILES": {
+        "es": "Muestra los perfiles y a qué host y base de datos apunta cada uno.",
+        "en": "Show the configured profiles and which host and database each one points to.",
+    },
+    "CLI.HELP.SWITCH_PROFILE": {
+        "es": "Elige el perfil que usarán los próximos comandos y el servidor.",
+        "en": "Pick the profile the next commands and the server will use.",
+    },
+    "CLI.HELP.ADD_PROFILE": {
+        "es": "Añade otro perfil, por ejemplo para un segundo entorno.",
+        "en": "Add another profile, for example for a second environment.",
+    },
+    "CLI.HELP.EDIT_PROFILE": {
+        "es": "Cambia campos sueltos de un perfil sin repetir el asistente entero.",
+        "en": "Change single fields of a profile without going through the whole wizard.",
+    },
+    "CLI.HELP.REMOVE_PROFILE": {
+        "es": "Borra un perfil y su password del gestor de credenciales del sistema.",
+        "en": "Delete a profile and its password from your OS credential manager.",
+    },
+    "CLI.HELP.DOCTOR": {
+        "es": "Revisa la instalación sin tocar Netezza: versión, perfiles y credenciales.",
+        "en": "Check the install without connecting to Netezza: version, profiles, credentials.",
+    },
+    "CLI.HELP.PROBE_CATALOG": {
+        "es": "Ejecuta contra Netezza todas las consultas de catálogo y dice cuáles fallan.",
+        "en": "Run every catalog query against Netezza and report which ones fail.",
+    },
+    "CLI.HELP.VERSION": {
+        "es": "Muestra la versión instalada.",
+        "en": "Print the installed version.",
+    },
+    "CLI.HELP.SERVE": {
+        "es": "Arranca el servidor MCP. Lo lanza tu cliente de IA; no hace falta a mano.",
+        "en": "Run the MCP server. Your AI client starts it; you do not need to run it by hand.",
+    },
+    # Options and arguments of those commands.
+    "CLI.HELP.OPT.NEW_PROFILE_NAME": {
+        "es": "Nombre del perfil nuevo",
+        "en": "Name of the new profile",
+    },
+    "CLI.HELP.OPT.EXISTING_PROFILE_NAME": {
+        "es": "Nombre de un perfil ya configurado",
+        "en": "Name of a profile that already exists",
+    },
+    "CLI.HELP.OPT.PROFILE_TO_DELETE": {
+        "es": "Nombre del perfil que se borra",
+        "en": "Name of the profile to delete",
+    },
+    "CLI.HELP.OPT.SET_ACTIVE": {
+        "es": "Deja el perfil nuevo como activo si todavía no hay ninguno",
+        "en": "Make the new profile the active one when there is none yet",
+    },
+    "CLI.HELP.OPT.PROFILE": {
+        "es": "Perfil a usar (por defecto, el activo)",
+        "en": "Profile to use (defaults to the active one)",
+    },
+    "CLI.HELP.OPT.JSON": {
+        "es": "Imprime el resultado como JSON, para leerlo desde un script",
+        "en": "Print the result as JSON, to read it from a script",
+    },
+    "CLI.HELP.OPT.MODE": {
+        "es": "Permiso del perfil: read, write o admin",
+        "en": "Profile permission: read, write or admin",
+    },
+    "CLI.HELP.OPT.DATABASE": {
+        "es": "Base de datos por defecto del perfil",
+        "en": "Default database of the profile",
+    },
+    "CLI.HELP.OPT.MAX_ROWS_DEFAULT": {
+        "es": "Filas que devuelve una consulta cuando nadie pide otro límite",
+        "en": "Rows a query returns when nothing else is asked for",
+    },
+    "CLI.HELP.OPT.TIMEOUT_S_DEFAULT": {
+        "es": "Segundos que se espera a una consulta antes de cortarla",
+        "en": "Seconds a query is given before it is cut off",
+    },
     # nz-mcp doctor (CLI diagnostics — no secrets)
     "DOCTOR.HEADER": {
         "es": "Diagnóstico local (nz-mcp doctor)",
