@@ -12,20 +12,41 @@ written rule. Nothing stops someone adding an input field with the real credenti
 months from now."* The precedent is expensive - the ``Secret`` regression of PR #193
 passed 1 204 tests and two audits because **nothing exercised the real path**.
 
-Why this file is an allowlist, and not a list of forbidden names
-----------------------------------------------------------------
-The first version of this check chased suspicious names: anything called ``password``,
-``secret``, ``credential``. The audit of PR #223 broke it in one line, by calling the
-credential ``auth_material`` and putting it straight into an ``Input``. Zero of the five
-rules fired. It also got past them through a dictionary and through the return value of a
-function with an innocent name.
+Which barrier is the guarantee, and which one is not
+----------------------------------------------------
+Read this part before trusting anything below it.
 
-That is not a bug in the rules, it is what a blacklist **is**. The same thing happened to
-the stdout barrier a few hours earlier, and it was fixed the same way it is fixed here:
-stop naming what is forbidden and start naming what is allowed. There, the protocol moved
-to a private descriptor nothing else could name. Here, the package's whole surface is
-enumerated:
+**The guarantee is :func:`test_the_real_wizard_never_lets_the_credential_into_a_widget`.**
+It starts the real application, drives the real credential path with a real value, and
+then goes looking for that value in the finished widget tree, in the application's own
+attributes and in what it hands back. It checks the **fact**, not the way the code is
+written, so no way of writing it gets past. It is the test PR #193 did not have. If it is
+ever weakened, narrowed or deleted, **nothing else in this file replaces it** - what is
+left would be a check that agrees with the code rather than one that contradicts it.
 
+**The static check is defence in depth.** Its job is to make a mistake visible in the diff
+instead of at run time, which is worth having and is cheaper than a debugging session. It
+is **not** a proof that the credential cannot enter, and this file no longer claims it is.
+It has been wrong three times, each time for the same reason: a negative property cannot
+be established by looking at the shape of source code, only by running it and checking.
+
+1. It chased suspicious names. The audit of PR #223 renamed the credential
+   ``auth_material`` and walked past all five rules.
+2. It was rebuilt as the allowlists below - what may be imported, what may be a parameter,
+   an attribute, a field, a constant, and what may reach a widget. The next audit found
+   ``setattr`` on an already-built widget, which no rule inspected.
+3. That is now covered, and ``widget.update(x)`` still is not, because knowing that
+   ``widget`` is a widget needs type inference this file does not do.
+
+The pattern is the point. It is the same lesson as the stdout barrier, where what held was
+not the AST detector but the private descriptor the protocol moved to.
+
+The one thing that does hold by construction here is neither of these tests: the single
+door into this package is ``ask_password: Callable[[], bool]``, and that signature cannot
+carry a string across. These tests are what stops someone widening that door quietly.
+
+The allowlists, and why they are allowlists
+-------------------------------------------
 ============ =========================================================================
 Allowlist    What it pins
 ============ =========================================================================
@@ -34,33 +55,16 @@ Allowlist    What it pins
 ``STATE``    every attribute the application may hold, by name and annotation
 ``FIELDS``   every field of ``DraftFields``, which is the only data object here
 ``MODULE``   every module-level name the package may define
-``WIDGETS``  the expressions allowed to carry content into a widget
+``WIDGETS``  the expressions allowed to reach a widget, when built and via ``setattr``
 ============ =========================================================================
 
-Those six are exhaustive: a value inside this package has to come from an import, a
-parameter, an attribute, a data field or a module constant. There is no seventh way. So a
-credential cannot be **held** here regardless of what it is called - which is the property
-the rename attack disproved for the old rules and cannot disprove for these. Renaming it
-does not help, because the name is not what is being checked: the *slot* is, and there are
-no free slots.
+Naming what is allowed is still much better than naming what is forbidden - a blacklist is
+walked past by renaming, and an allowlist is not. The first five pin every slot a value
+could be held in, so a credential that got in would at least have to be declared. The
+sixth is the one that cannot be exhaustive, for the reason above.
 
 The cost is deliberate. Adding a field, a parameter or an import to the wizard means
 editing a list in this file, on purpose, in a diff a reviewer sees.
-
-Two barriers, not one
----------------------
-1. :func:`test_the_wizard_package_cannot_hold_the_credential` - the six allowlists above,
-   at review time, naming the offending line.
-2. :func:`test_the_real_wizard_never_lets_the_credential_into_a_widget` drives the real
-   application through the real credential path, with a real value, and then walks the
-   whole finished widget tree, the application's own attributes and its return value
-   looking for that value. This one does not care what anything is called either, and it
-   is the one that would have caught PR #193.
-
-And the property that makes both of them belt-and-braces rather than the only defence:
-the single door into this package is ``ask_password: Callable[[], bool]``, which by its
-own type cannot carry the credential across. The type contract is the barrier; these tests
-are what stops someone widening the door without noticing.
 """
 
 from __future__ import annotations
@@ -439,12 +443,47 @@ def _is_allowed_call(node: ast.Call, aliases: dict[str, str], drafts: frozenset[
     return False
 
 
+def _is_write_into_something_built(node: ast.Call, drafts: frozenset[str]) -> bool:
+    """Whether this ``setattr`` writes into something that is not a declared draft.
+
+    The third audit of PR #223 found the gap: building a widget was checked, writing into
+    one afterwards was not, so ``setattr(field, "value", ...)`` walked past a rule that
+    rejected the very same expression in ``value=``.
+
+    The check is inverted rather than widened. There is no way to know statically that
+    ``field`` is a widget, so every ``setattr`` counts as a write into one **except** the
+    ones whose target is a declared ``DraftFields`` - which is the single legitimate use in
+    this package, reading a widget back into the draft.
+    """
+    return _dotted(node.func) == "setattr" and _dotted(node.args[0]) not in drafts
+
+
 def _widget_content_violations(tree: ast.AST) -> Iterator[str]:
-    """Every non-structural argument of a widget has to be an allowed content source."""
+    """Every value that reaches a widget has to be an allowed content source.
+
+    Two ways in are covered: building a widget with the value, and writing it into one
+    afterwards through ``setattr``.
+
+    **Not exhaustive, and not claimed to be.** ``widget.update(x)``, for one, is a third
+    way this does not inspect, because knowing that ``widget`` is a widget would need type
+    inference this file does not do. That is the honest limit of static analysis here and
+    the reason the runtime search in
+    :func:`test_the_real_wizard_never_lets_the_credential_into_a_widget` is the guarantee
+    rather than the backup. See the module docstring.
+    """
     aliases = _import_aliases(tree)
     drafts = _draft_typed_names(tree)
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not _is_widget_call(node, aliases):
+        if not isinstance(node, ast.Call):
+            continue
+        if _dotted(node.func) == "setattr" and len(node.args) == 3:
+            if _is_write_into_something_built(node, drafts) and not _is_allowed_content(
+                node.args[2], aliases, drafts
+            ):
+                shown = ast.unparse(node.args[2])
+                yield f"line {node.lineno}: written into a widget: {shown}, not an allowed source"
+            continue
+        if not _is_widget_call(node, aliases):
             continue
         for argument in node.args:
             if not _is_allowed_content(argument, aliases, drafts):
@@ -493,7 +532,14 @@ def collect_credential_violations(source: str) -> list[str]:
 
 @pytest.mark.contract
 def test_the_wizard_package_cannot_hold_the_credential() -> None:
-    """Barrier one: six allowlists that leave the credential nowhere to live."""
+    """Defence in depth: six allowlists, so a mistake shows up in the diff.
+
+    **Not the guarantee.** This finds a credential put somewhere it was declared; it does
+    not prove one cannot arrive by a route nobody thought of. That is the job of
+    :func:`test_the_real_wizard_never_lets_the_credential_into_a_widget`, and the module
+    docstring says why. What this buys is the mistake being caught while reading the code
+    rather than while running it.
+    """
     offenders: dict[str, list[str]] = {}
     package = _wizard_package()
     for module in sorted(package.rglob("*.py")):
@@ -536,6 +582,15 @@ _INJECTED_VIOLATIONS: Final[tuple[tuple[str, str], ...]] = (
         "through-the-return-of-a-function",
         "from textual.widgets import Input\nInput(value=fetch_it())\n",
     ),
+    # The fourth way, found by the third audit: build the widget clean, inject afterwards.
+    (
+        "written-into-a-widget-after-it-was-built",
+        "setattr(field, 'value', self._initial.auth_material)\n",
+    ),
+    (
+        "written-into-a-widget-from-a-dictionary",
+        "setattr(field, 'value', cache['whatever'])\n",
+    ),
     # The ways the old blacklist did catch, kept so the coverage never narrows.
     ("secret-import", "from nz_mcp.secret import Secret\n"),
     ("auth-import", "from nz_mcp.auth import get_password\n"),
@@ -567,7 +622,11 @@ _INJECTED_VIOLATIONS: Final[tuple[tuple[str, str], ...]] = (
     "source", [pytest.param(src, id=name) for name, src in _INJECTED_VIOLATIONS]
 )
 def test_the_guardrail_rejects_an_injected_violation(source: str) -> None:
-    """Barrier one, exercised. Three of these are the audit's own evasions of PR #223."""
+    """The static check, exercised. Four of these are audits' own evasions of PR #223.
+
+    A regression list, not a completeness claim: it says these routes are covered, and
+    says nothing about the ones nobody has thought of yet.
+    """
     assert collect_credential_violations(source) != []
 
 
@@ -596,6 +655,10 @@ def test_the_guardrail_rejects_an_injected_violation(source: str) -> None:
         pytest.param(
             "from textual.widgets import Input\nInput(value=getattr(self._initial, spec.key))\n",
             id="any-field-of-a-draft",
+        ),
+        pytest.param(
+            "def read(draft: DraftFields) -> None:\n    setattr(draft, spec.key, widget.value)\n",
+            id="reading-a-widget-back-into-the-draft",
         ),
     ],
 )
@@ -639,12 +702,18 @@ def _search(value: Any, needle: str, seen: set[int], depth: int = 0) -> bool:
 @pytest.mark.contract
 @pytest.mark.asyncio
 async def test_the_real_wizard_never_lets_the_credential_into_a_widget() -> None:
-    """Barrier two: the real path, with a real value, and then a search for it.
+    """**This is the guarantee.** The real path, a real value, and then a search for it.
 
-    This is the test the ``Secret`` regression of PR #193 did not have. It runs the
-    application, presses the key that asks for the credential, lets the real callable
-    return a real value, and then goes looking for that value in every widget of the
-    finished tree, in the application's own attributes and in what it hands back.
+    It runs the application, presses the key that asks for the credential, lets the real
+    callable return a real value, and then goes looking for that value in every widget of
+    the finished tree, in the application's own attributes and in what it hands back. It
+    checks the fact rather than the shape of the source, which is why no way of writing
+    the code gets past it - and why it is the test the ``Secret`` regression of PR #193
+    did not have.
+
+    If a future change makes this awkward, **do not weaken it**: the static allowlists in
+    this file are defence in depth and do not substitute for it. Three separate audits
+    found a way past those; none found a way past this.
 
     It also checks the shape of the result: what leaves the wizard is a **boolean**.
     """

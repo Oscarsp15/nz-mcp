@@ -1,7 +1,8 @@
 # ADR 0029 — Adoptar `textual` acotado y confinado para el asistente de configuración
 
-- **Fecha**: 2026-09-06
-- **Estado**: aceptado
+- **Fecha**: 2026-09-06 (adenda 1: 2026-09-06)
+- **Estado**: aceptado, con una adenda que precisa qué garantiza la condición 5 — ver
+  [Adenda 1](#adenda-1-2026-09-06--qué-garantiza-de-verdad-la-condición-5)
 - **Decidido por**: DX Engineer (IA) + validación humana (auditor: Security Engineer)
 - **Issue**: [#221](https://github.com/Oscarsp15/nz-mcp/issues/221)
 - **Depende de**: [ADR 0028](0028-asistente-de-configuracion-interactivo.md), que abre la excepción
@@ -148,6 +149,12 @@ Con las tres, la propiedad que el ADR 0026 consiguió —**en el código de prod
 punto donde exista una `str` desnuda con la credencial**— sigue siendo cierta con un interfaz
 delante. Sin ellas, dejaría de serlo, y el test de traza no lo vería, porque el problema no estaría
 en una traza sino en un objeto vivo.
+
+> **Precisado por la [adenda 1](#adenda-1-2026-09-06--qué-garantiza-de-verdad-la-condición-5).**
+> Las tres cláusulas siguen siendo la decisión; lo que cambia es qué las sostiene. Un análisis
+> estático del paquete **no puede impedir** que la credencial entre —cayó tres veces durante la
+> implementación—, así que la garantía es el test que ejecuta la aplicación y busca el valor real,
+> y el guardarraíl estático es defensa en profundidad.
 
 ## Rango elegido, y por qué ése
 
@@ -346,6 +353,72 @@ Pasa bajo pytest en 0,5 s, sin TTY y sin proceso hijo. Lo que se afirma con eso:
 - **No autoriza `textual` en ningún otro comando.** El confinamiento de la condición 2 es la
   decisión, no una recomendación.
 - **No implementa nada.** Esta fase es decisión.
+
+## Adenda 1 (2026-09-06) — qué garantiza de verdad la condición 5
+
+Esta adenda existe porque **la implementación descubrió que la condición 5 prometía de
+más**, y un ADR que promete lo que no cumple es peor que uno que no dice nada.
+
+### Lo que decía, y por qué no se sostiene
+
+El comentario del issue [#221](https://github.com/Oscarsp15/nz-mcp/issues/221) pedía *"un
+chequeo automatizado que lo impida"*, y esta condición se leyó como que un análisis
+estático del paquete podía **impedir** que la credencial entrara en un widget. No puede.
+
+Durante la implementación (PR #223) el guardarraíl estático cayó **tres veces**, en tres
+auditorías seguidas, y siempre por el mismo motivo:
+
+1. Perseguía nombres sospechosos (`password`, `secret`, `credential`). Se esquivó llamando
+   `auth_material` a la credencial.
+2. Se reescribió como listas blancas de la superficie del paquete —imports, parámetros,
+   atributos, campos, constantes, y lo que puede llegar a un widget—. Se esquivó con
+   `setattr` sobre un widget ya construido, que ninguna regla miraba.
+3. Eso se cubrió, y sigue sin cubrir `widget.update(x)`, porque saber que `widget` es un
+   widget exige inferencia de tipos que ese archivo no hace.
+
+No es mala suerte tres veces: **una propiedad negativa no se demuestra mirando la forma
+del código fuente**. Es exactamente la lección que el proyecto ya había aprendido con la
+barrera de stdout, donde lo que aguanta no es el detector AST sino la reserva de
+descriptor — y el propio detector lo dice de sí mismo: *"es una lista negra y por
+naturaleza incompleta"*.
+
+### Lo que la condición 5 garantiza, y con qué
+
+Las tres cláusulas de la condición 5 **no cambian**: siguen siendo la decisión de diseño.
+Lo que se corrige es **con qué se sostienen**, por orden de fuerza:
+
+1. **Por construcción, y es lo único que no depende de nadie**: la única puerta hacia
+   `src/nz_mcp/wizard/` es `ask_password: Callable[[], bool]`. Esa firma no puede
+   transportar una cadena. Mientras la puerta no se ensanche, la credencial no entra, y
+   eso no es un test sino un tipo.
+2. **Por ejecución**: el test que arranca la aplicación real, recorre el camino real de la
+   credencial con un valor real y busca ese valor en el árbol de widgets terminado, en los
+   atributos de la aplicación y en su valor de retorno. Comprueba **el hecho**, no cómo
+   está escrito el código, así que ninguna forma de escribirlo se le escapa. **Es la
+   garantía.** Es el test que le faltaba a la regresión del `Secret` del PR #193.
+3. **Por análisis, como defensa en profundidad**: las listas blancas del guardarraíl.
+   Sirven para que un error se detecte **antes**, en el diff, en vez de al ejecutar. Es
+   valioso y es barato. **No es una demostración**, y a partir de aquí no se presenta como
+   tal.
+
+### La regla que queda escrita
+
+- El chequeo automatizado que pedía la auditoría del PR #222 **existe**, y son los dos
+  puntos 2 y 3 juntos: uno detecta antes, el otro garantiza.
+- Si alguna vez alguien **debilita, acota o borra el test de ejecución**, el guardarraíl
+  estático **no lo sustituye**. Quedaría un chequeo que está de acuerdo con el código en
+  vez de uno que lo contradice.
+- El guardarraíl estático puede crecer cuando aparezca una vía nueva, pero perseguir una
+  quinta no es la respuesta a que hayan aparecido cuatro. La respuesta es no confiar en él
+  como si fuera exhaustivo.
+
+### Qué monitorizar, corregido
+
+Donde arriba se dice *"que la condición 5 siga cumpliéndose: ni un `Input` con la
+credencial, ni un campo de password en el modelo de estado"*, léase también: **que el test
+de ejecución siga ejercitando el camino real y siga buscando un valor real**. Si ese test
+deja de ejecutar la aplicación de verdad, la condición 5 ha dejado de estar comprobada,
+aunque el guardarraíl estático siga en verde.
 
 ## Referencias
 

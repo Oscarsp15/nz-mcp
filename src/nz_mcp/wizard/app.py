@@ -12,18 +12,22 @@ it survives).
 
 The credential (ADR 0029, condition 5)
 --------------------------------------
-It never enters the widget tree, and this module is built so that it *cannot*:
+It never enters the widget tree. Two things make that so, and they are not equally strong:
 
-- the state model is :class:`nz_mcp.wizard.fields.DraftFields`, which has no password
-  field, and one boolean next to it;
-- asking for it is a callable handed in from outside, invoked inside ``App.suspend()`` so
-  the question happens on the real terminal, and it returns a **boolean**.
+- **By construction**: the only door into this package is
+  ``ask_password: Callable[[], bool]``, and that signature cannot carry a string across.
+  The state model is :class:`nz_mcp.wizard.fields.DraftFields`, which has no password
+  field, plus one boolean; asking for the credential happens outside, inside
+  ``App.suspend()``, on the real terminal.
+- **By test**: ``tests/contract/test_wizard_credential_guardrail.py`` runs the real
+  application through the real credential path and searches the finished widget tree for
+  the value. **That test is the guarantee** and must not be weakened.
 
-That is checked rather than promised, and checked by **allowlist** rather than by hunting
-for suspicious names: ``tests/contract/test_wizard_credential_guardrail.py`` enumerates
-every import, parameter, attribute, data field and module-level name this package is
-allowed to have, so a value has nowhere to live here whatever it is called. A second test
-drives the real application and walks the finished widget tree looking for the value.
+The same file also carries a set of allowlists over this package's source - imports,
+parameters, attributes, fields, constants, and what may reach a widget. That part is
+**defence in depth**: it turns a mistake into a failed build at review time rather than a
+leak at run time. It is not a proof that nothing can get in, and three audits have found
+routes it did not cover. Do not read it as one.
 
 Degradation (ADR 0028, condition 1)
 -----------------------------------
@@ -283,8 +287,14 @@ class ProfileWizardApp(App[WizardResult]):
     # --- state ---------------------------------------------------------------
 
     def _read_draft(self) -> DraftFields:
-        """The current answers, read back from the fields rather than mirrored."""
-        draft = DraftFields()
+        """The current answers, read back from the fields rather than mirrored.
+
+        The annotation on ``draft`` is load-bearing, not decoration: the contract test
+        treats every ``setattr`` as a write into a widget unless its target is a declared
+        draft, which is what makes this - the one legitimate write in the package - the
+        one that is allowed.
+        """
+        draft: DraftFields = DraftFields()
         for spec in FIELD_SPECS:
             widget = self.query_one(f"#{_FIELD_ID_PREFIX}{spec.key}", Input)
             setattr(draft, spec.key, widget.value)
