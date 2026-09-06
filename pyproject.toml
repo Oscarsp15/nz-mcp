@@ -34,6 +34,10 @@ dependencies = [
     "structlog>=24.1",
     "tomli-w>=1.0",
     "typer>=0.15",
+    # Terminal presentation for the CLI (ADR 0027). Already pulled in transitively by
+    # ``typer`` (which hard-requires ``rich>=13.8.0``); declared here so the floor and the
+    # cap belong to this project instead of being inherited without notice.
+    "rich>=13.8,<16",
 ]
 
 [project.optional-dependencies]

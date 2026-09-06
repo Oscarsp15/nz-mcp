@@ -62,5 +62,6 @@ Ver [tech-lead.md](../roles/tech-lead.md#plantilla-adr-para-copiar-a-docsadrnnnn
 | 0024 | [El SQL que se ejecuta es el que validó el guard, nunca uno re-serializado](0024-sql-ejecutado-sin-reserializar.md) | aceptado | 2026-09-05 |
 | 0025 | [Eliminar `on_conflict="skip"` de `nz_insert`](0025-on-conflict-skip-eliminado.md) | aceptado | 2026-09-05 |
 | 0026 | [La password viaja como `Secret`, nunca como `str` desnuda](0026-secret-sin-password-en-trazas.md) | aceptado | 2026-09-05 |
+| 0027 | [Adoptar `rich` como dependencia directa acotada para la presentación del CLI](0027-adoptar-rich-para-la-presentacion-del-cli.md) | aceptado | 2026-09-05 |
 
 > **Colisión de numeración**: dos ADR comparten el número `0014`. Las referencias en prosa a "ADR 0014" del CHANGELOG y de la ADR 0015 apuntan a [`0014-tool-execute-ddl.md`](0014-tool-execute-ddl.md). No se renumeran para no romper esos enlaces.
