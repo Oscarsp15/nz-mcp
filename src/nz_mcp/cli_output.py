@@ -71,6 +71,15 @@ redirect or a pipe gets exactly the same bytes it got before any of this existed
 is kept and read later, and truncating one to fit a window nobody is looking at would be
 losing data to no one's benefit.
 
+**As long as the content fits in that fixed width**, and the exact promise is worth
+writing down rather than rounding up. A cell wider than 200 cells — a hostname near the
+DNS limit is the realistic way to get one — did not survive before this either: ``rich``
+cut it at the column and marked the cut with a real ellipsis character, so the **end of
+the value was lost** and the marker itself renders as ``?`` on a Windows console with a
+legacy code page. Now the same cell loses its middle instead, keeps both ends and says so
+in ASCII. Neither version keeps it whole; they are not the same bytes; this one is the
+better of the two and that is all it claims.
+
 Colour and terminal detection
 -----------------------------
 :func:`color_enabled` is the only place that decides whether ANSI sequences may

@@ -276,3 +276,33 @@ def test_the_diagnostic_report_never_truncates_a_value() -> None:
     rendered = format_diagnostic_report(report, locale="es")
     assert long_path in rendered
     assert cli_output._ELLIPSIS not in rendered
+
+
+def test_a_cell_wider_than_the_fixed_width_is_where_the_promise_stops() -> None:
+    """The one case where a redirected run is **not** byte for byte what it was.
+
+    The claim "without a terminal you get the same bytes as before" is true for everything
+    this CLI actually shows, and false above the fixed width - which a hostname near the DNS
+    limit reaches. It is written down rather than rounded up, and pinned here at that
+    threshold, because the rest of the tests use hosts of about thirty characters and would
+    never notice.
+
+    What changes, exactly: the value was not kept whole before either - ``rich`` cut it at
+    the column and marked the cut with a real ellipsis character, losing the **end** of the
+    value and printing a marker a legacy Windows console renders as ``?``. Now it loses its
+    middle, both ends survive, and the marker is ASCII. Neither keeps it whole; this one
+    keeps more and says so in characters every console can draw.
+    """
+    long_host = "nz-" + "a" * 200 + ".example.com"
+    assert len(long_host) > cli_output._WIDTH_WITHOUT_TERMINAL
+    rows = [[*_ROWS[0][:1], long_host, *_ROWS[0][2:]], _ROWS[1]]
+
+    rendered = cli_output.table(_HEADERS, rows, width=cli_output._WIDTH_WITHOUT_TERMINAL)
+
+    assert long_host not in rendered
+    assert _widest_line(rendered) <= cli_output._WIDTH_WITHOUT_TERMINAL
+    assert rendered.isascii()
+    host = _cell(rendered, 0, 1)
+    assert host.startswith("nz-a")
+    assert host.endswith(".example.com")
+    assert cli_output._ELLIPSIS in host
