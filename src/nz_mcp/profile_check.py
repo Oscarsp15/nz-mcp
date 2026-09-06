@@ -17,12 +17,17 @@ Levels, reported one by one so the user knows which one failed and what it means
 
 Every level reuses the registered catalog SQL (``resolve_query``), so profile-level
 ``catalog_overrides`` are honoured here exactly as they are by the MCP tools.
+
+Two entry points, same ladder: :func:`run_checks` returns the finished report, and
+:func:`iter_checks` hands the outcomes over one at a time so a caller can say what it is
+waiting on before each level runs. Neither of them prints anything: this module grades,
+the CLI decides how that looks.
 """
 
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable
+from collections.abc import Callable, Generator, Iterator
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
@@ -85,39 +90,70 @@ def run_checks(
 ) -> ValidationReport:
     """Run the first ``levels`` checks over a single connection and report each one.
 
+    Eager: every level runs before anything comes back. Callers that need to show what is
+    happening *while* it happens use :func:`iter_checks` instead.
+
     The wizard passes a draft password that never reached the keyring, so it is re-bound
     to a ``Secret`` here for the same reason as in ``open_connection``: this function and
     every helper below it carries the credential as a frame argument (ADR 0026).
+    """
+    password = Secret(password)
+    with contextlib.closing(iter_checks(profile, password, levels=levels)) as stream:
+        return ValidationReport(tuple(stream))
+
+
+def iter_checks(
+    profile: Profile,
+    password: str,
+    *,
+    levels: int = len(CHECK_LEVELS),
+) -> Generator[CheckOutcome, None, None]:
+    """Yield one outcome per level, resolving each level only when it is asked for.
+
+    Laziness is the whole point. The connection level opens a TCP session, usually over a
+    VPN, and can sit there until the driver times out; a caller that only gets the finished
+    report has no moment at which to say "this is what I am waiting on". Pulling one outcome
+    at a time gives it that moment, on the terminal or anywhere else, without this module
+    knowing what a terminal is.
+
+    Levels after a failure still come back, marked ``skipped``, and they resolve instantly:
+    the sequence always has one entry per requested level.
+
+    The connection is opened on the first ``next()`` and closed when the generator is
+    exhausted or closed. Callers that may stop early should wrap it in
+    ``contextlib.closing`` so the session does not wait for the garbage collector.
     """
     password = Secret(password)
     try:
         connection: Any = open_connection(profile, password)
     except NzConnectionError as exc:
         detail = str(exc.context.get("detail", "")) or str(exc)
-        return _report_of_connect_failure(
+        yield from _report_of_connect_failure(
             detail,
             levels,
             hint_es=str(exc.context.get("hint_es", "")),
             hint_en=str(exc.context.get("hint_en", "")),
-        )
+        ).outcomes
+        return
     try:
-        return _run_levels(connection, profile, password, levels)
+        yield from _iter_levels(connection, profile, password, levels)
     finally:
         with contextlib.suppress(Exception):  # pragma: no cover - driver-specific close
             connection.close()
 
 
-def _run_levels(connection: Any, profile: Profile, password: str, levels: int) -> ValidationReport:
+def _iter_levels(
+    connection: Any, profile: Profile, password: str, levels: int
+) -> Iterator[CheckOutcome]:
     runners: tuple[Callable[[], CheckOutcome], ...] = (
         lambda: _check_connect(connection, password),
         lambda: _check_catalog_read(connection, profile, password),
         lambda: _check_default_database(connection, profile, password),
     )
-    outcomes: list[CheckOutcome] = []
     stopped = False
     for level, run in zip(CHECK_LEVELS[:levels], runners[:levels], strict=True):
         if stopped:
-            outcomes.append(CheckOutcome(level=level, status="skipped"))
+            yield CheckOutcome(level=level, status="skipped")
             continue
         try:
             outcome = run()
@@ -125,9 +161,8 @@ def _run_levels(connection: Any, profile: Profile, password: str, levels: int) -
             # Typed failures raised while building the SQL (unknown catalog override,
             # database name that cannot be interpolated) belong to the level that hit them.
             outcome = CheckOutcome(level=level, status="failed", detail=str(exc))
-        outcomes.append(outcome)
+        yield outcome
         stopped = outcome.status != "ok"
-    return ValidationReport(tuple(outcomes))
 
 
 def _report_of_connect_failure(

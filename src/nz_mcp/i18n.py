@@ -544,6 +544,23 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Validando en tres niveles (todavía no se ha guardado nada):",
         "en": "Validating in three levels (nothing has been saved yet):",
     },
+    # Shown while a ladder level is running; the result line below replaces it.
+    "CLI.VALIDATE_CONNECT_RUNNING": {
+        "es": "1/3 Conexión: abriendo sesión contra {host}:{port}",
+        "en": "1/3 Connection: opening the session to {host}:{port}",
+    },
+    "CLI.VALIDATE_CATALOG_RUNNING": {
+        "es": "2/3 Lectura del catálogo: consultando las bases de datos visibles",
+        "en": "2/3 Catalog read: querying the visible databases",
+    },
+    "CLI.VALIDATE_DATABASE_RUNNING": {
+        "es": "3/3 Visibilidad en {database}: consultando los esquemas",
+        "en": "3/3 Visibility in {database}: querying the schemas",
+    },
+    "CLI.TEST_CONNECTION_RUNNING": {
+        "es": "Conectando con {host}:{port} como {user}",
+        "en": "Connecting to {host}:{port} as {user}",
+    },
     "CLI.VALIDATE_CONNECT_OK": {
         "es": "1/3 Conexión: OK — Netezza responde: {detail}",
         "en": "1/3 Connection: OK — Netezza answers: {detail}",
