@@ -21,6 +21,8 @@ El layout de pipx puede variar según versión y sistema: la fuente de verdad es
 
 En `claude_desktop_config.json`, `command` apunta a **esa ruta completa**, no a un `nz-mcp` cualquiera del `PATH`: Claude Desktop no arranca con el `PATH` de tu terminal, y un `nz-mcp` instalado globalmente puede ser otro.
 
+`nz-mcp init` y `nz-mcp add-profile` ya resuelven esa ruta y la escriben en el bloque que imprimen al terminar: si lo pegas tal cual, no tienes que buscarla. Solo cuando el asistente no puede determinarla deja un marcador en `command` y te dice con qué comando obtenerla.
+
 ### Export de DDL (`nz_export_ddl`)
 
 La tool de lectura `nz_export_ddl` devuelve el DDL de Netezza como **content blocks** MCP: un **resource** embebido (`text/sql`) con URI estable `nz-mcp://ddl/...` más un **texto** de resumen corto. En Claude Desktop se ve como una tarjeta SQL copiable junto al resumen; úsala después de resolver los nombres de los objetos con las tools de listado y describe.
@@ -43,6 +45,8 @@ Always use an **isolated** Python environment for `nz-mcp`, so no other global C
 The pipx layout varies across versions and systems: the source of truth is `pipx list`, or `where.exe nz-mcp` / `which nz-mcp`.
 
 In `claude_desktop_config.json`, `command` points at **that full path**, not at whichever `nz-mcp` sits on `PATH`: Claude Desktop does not start with your terminal `PATH`, and a globally installed `nz-mcp` may be a different one.
+
+`nz-mcp init` and `nz-mcp add-profile` already resolve that path and write it into the block they print at the end: paste it as it is and you never have to look it up. Only when the wizard cannot determine it does it leave a placeholder in `command` and tell you which command prints the real one.
 
 ### DDL export (`nz_export_ddl`)
 
