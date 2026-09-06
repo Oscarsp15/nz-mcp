@@ -50,10 +50,10 @@ from nz_mcp.config import (
     PermissionMode,
     Profile,
     ProfilesFile,
+    active_profile_name,
     config_dir,
     get_active_profile,
     get_profile,
-    list_profile_names,
     load_profiles_file,
     profiles_path,
     remove_profile,
@@ -139,7 +139,7 @@ def test_connection_cmd(
         password = get_password(prof.name)
     except (CredentialNotFoundError, KeyringUnavailableError) as exc:
         detail = sanitize(str(exc), known_secrets=())
-        out.fail(f"FAIL: {detail}")
+        out.fail(t("CLI.TEST_CONNECTION_FAIL", locale, detail=detail))
         raise typer.Exit(code=1) from exc
 
     # Level 1 of the validation ladder the wizard also runs (profile_check.run_checks).
@@ -152,12 +152,12 @@ def test_connection_cmd(
     with out.progress(waiting):
         outcome = run_checks(prof, password, levels=1).outcomes[0]
     if outcome.status != "ok":
-        out.fail(f"FAIL: {outcome.detail}")
+        out.fail(t("CLI.TEST_CONNECTION_FAIL", locale, detail=outcome.detail))
         hint = outcome.hint_es if locale == "es" else outcome.hint_en
         if hint:
-            out.warn(f"HINT: {hint}")
+            out.warn(t("CLI.TEST_CONNECTION_HINT", locale, hint=hint))
         raise typer.Exit(code=1)
-    out.success(f"OK: connected to {outcome.detail} as {prof.user}")
+    out.success(t("CLI.TEST_CONNECTION_OK", locale, detail=outcome.detail, user=prof.user))
     raise typer.Exit(code=0)
 
 
@@ -167,13 +167,24 @@ def test_connection_cmd(
     rich_help_panel=_COMMANDS_PANEL,
 )
 def list_profiles_cmd() -> None:
-    """List configured profile names."""
-    names = list_profile_names()
-    if not names:
-        out.note("(sin perfiles configurados — usa: nz-mcp init)")
+    """Show every configured profile, where it points, and which one is active.
+
+    A bare list of names does not answer the question people actually ask before letting an
+    assistant loose on a database: *which* profile is in use and *what* is it pointing at.
+    """
+    locale = resolve_locale()
+    file = _load_profiles_or_exit(locale)
+    if not file.profiles:
+        out.note(t("CLI.PROFILES_EMPTY", locale))
         raise typer.Exit(code=0)
-    for n in names:
-        out.emit(n)
+    active = active_profile_name(file)
+    out.emit(_render_profiles(file, active, locale))
+    out.note(
+        t("CLI.PROFILES_SINGLE_NEXT_STEP", locale)
+        if len(file.profiles) == 1
+        else t("CLI.PROFILES_NEXT_STEP", locale)
+    )
+    raise typer.Exit(code=0)
 
 
 @app.command(
@@ -228,7 +239,7 @@ def edit_profile_cmd(
     """Update fields of an existing profile (password stays in the OS keyring)."""
     locale = resolve_locale()
     if mode is not None and mode.strip().lower() not in ("read", "write", "admin"):
-        out.fail("Invalid --mode: use read | write | admin.")
+        out.fail(t("CLI.EDIT_PROFILE_INVALID_MODE", locale, value=mode))
         raise typer.Exit(code=2)
     pm: PermissionMode | None = cast(PermissionMode, mode.strip().lower()) if mode else None
     try:
@@ -243,12 +254,9 @@ def edit_profile_cmd(
         out.fail(_format_profile_not_found_cli(locale, exc))
         raise typer.Exit(code=1) from exc
     if result is None:
-        out.note(
-            "No changes: pass at least one of --mode, --database, "
-            "--max-rows-default, --timeout-s-default.",
-        )
+        out.note(t("CLI.EDIT_PROFILE_NO_CHANGES", locale))
         raise typer.Exit(code=0)
-    out.success(f"Updated profile '{result.name}' (mode={result.mode}).")
+    out.success(t("CLI.EDIT_PROFILE_UPDATED", locale, profile=result.name, mode=result.mode))
     raise typer.Exit(code=0)
 
 
@@ -355,6 +363,57 @@ def serve_cmd() -> None:
     configure_logging_for_stdio()
     with out.stdout_reserved_for_protocol() as protocol_stdout:
         run_stdio_server(protocol_stdout=protocol_stdout)
+
+
+# --- list-profiles rendering --------------------------------------------------
+
+#: Shown for a field a profile does not define. Profiles are read as raw sections here, not
+#: validated, so that one hand-edited profile missing its host does not stop the command that
+#: would let someone notice it.
+_PROFILE_FIELD_UNSET: Final[str] = "-"
+
+#: Marks the active row. Text, not colour, and ASCII: it has to survive a redirect to a file,
+#: a terminal without colour, and a Windows console on a legacy code page.
+_ACTIVE_MARK: Final[str] = "*"
+
+#: The four fields that answer "where does this point", in reading order.
+_PROFILE_COLUMNS: Final[tuple[tuple[str, str], ...]] = (
+    ("CLI.PROFILES_COLUMN_NAME", "name"),
+    ("CLI.PROFILES_COLUMN_HOST", "host"),
+    ("CLI.PROFILES_COLUMN_DATABASE", "database"),
+    ("CLI.PROFILES_COLUMN_MODE", "mode"),
+)
+
+
+def _profile_field(section: dict[str, object], field: str, name: str) -> str:
+    """One cell: the raw value as text, or a placeholder when the profile does not set it."""
+    if field == "name":
+        return name
+    value = section.get(field)
+    return str(value) if value not in (None, "") else _PROFILE_FIELD_UNSET
+
+
+def _render_profiles(file: ProfilesFile, active: str | None, locale: Locale) -> str:
+    """Render the profiles as a table, or as ``key: value`` when there is only one.
+
+    A table earns its borders when there are rows to compare and one to choose. With a
+    single profile there is nothing to compare it against and the active column is noise:
+    that profile is the active one by definition.
+    """
+    names = sorted(file.profiles)
+    labels = [t(key, locale) for key, _ in _PROFILE_COLUMNS]
+    if len(names) == 1:
+        section = file.profiles[names[0]]
+        cells = [_profile_field(section, field, names[0]) for _, field in _PROFILE_COLUMNS]
+        return "\n".join(f"{label}: {cell}" for label, cell in zip(labels, cells, strict=True))
+    rows = [
+        [
+            *(_profile_field(file.profiles[name], field, name) for _, field in _PROFILE_COLUMNS),
+            _ACTIVE_MARK if name == active else "",
+        ]
+        for name in names
+    ]
+    return out.table([*labels, t("CLI.PROFILES_COLUMN_ACTIVE", locale)], rows)
 
 
 # --- helpers ------------------------------------------------------------------

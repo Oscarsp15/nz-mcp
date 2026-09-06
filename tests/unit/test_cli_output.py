@@ -85,6 +85,51 @@ def test_status_is_styled_when_color_is_on(
     assert _ESC in capsys.readouterr().err
 
 
+def test_table_returns_text_and_writes_to_neither_stream(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The renderer hands the text back; the caller decides the channel.
+
+    That is what keeps condition 1 of ADR 0027 — precised by its addendum 1 to *no console
+    writes to stdout* — true by construction: the only ``rich`` console this project builds
+    targets a memory buffer and owns no file descriptor, so it cannot put a byte on the
+    stdout that ``serve`` speaks JSON-RPC over.
+    """
+    # No dotted host name in the cells: CodeQL reads ``"a.b.com" in text`` as a URL check
+    # done by substring, and a false alarm in a test is still a blocked pipeline.
+    rendered = cli_output.table(["Perfil", "Host"], [["prod", "nz-prod-01"]])
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    assert "prod" in rendered
+    assert "nz-prod-01" in rendered
+
+
+def test_table_aligns_its_columns() -> None:
+    """Alignment is the whole point: a column you cannot scan is a list with extra bars."""
+    rendered = cli_output.table(["A", "B"], [["short", "1"], ["much-longer-value", "2"]])
+    bar_positions = {line.index("|") for line in rendered.splitlines() if "|" in line}
+    assert len(bar_positions) == 1
+
+
+@pytest.mark.parametrize("code_page", ["cp437", "cp850"])
+def test_table_frame_is_drawable_on_a_legacy_windows_console(code_page: str) -> None:
+    """``rich`` would pick Unicode box characters, which print as "?" on those code pages."""
+    rendered = cli_output.table(["Modo"], [["read"]])
+    rendered.encode(code_page)
+
+
+def test_table_carries_no_colour_and_no_trailing_blanks() -> None:
+    """Colour would be the only carrier of meaning for whoever sees it, and padding is noise.
+
+    Trailing spaces matter because this text is payload: it ends up in redirected files and
+    in issue reports, where invisible characters are pure cost.
+    """
+    rendered = cli_output.table(["A", "B"], [["x", "y"], ["longer", ""]])
+    assert _ESC not in rendered
+    assert all(line == line.rstrip() for line in rendered.splitlines())
+
+
 def test_reserving_stdout_turns_a_stray_payload_write_into_a_loud_error() -> None:
     """In serve mode a payload write is a corrupted protocol; it must raise, not print."""
     assert cli_output.stdout_is_reserved() is False

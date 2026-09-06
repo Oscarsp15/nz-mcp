@@ -78,6 +78,12 @@ _FORBIDDEN_DYNAMIC: Final[frozenset[tuple[str, str]]] = frozenset(
     }
 )
 
+#: Modules whose import outside the output layer is itself the violation, whatever is done
+#: with them afterwards. ``rich.console.Console`` writes to **stdout** by default — exactly
+#: the byte that corrupts the JSON-RPC of ``serve`` — so condition 2 of ADR 0027 confines the
+#: whole package to ``cli_output.py``, where the channel is decided once.
+_LAYER_ONLY_MODULES: Final[frozenset[str]] = frozenset({"rich"})
+
 _ANSI: Final[re.Pattern[str]] = re.compile("\x1b\\[")
 
 _FRAME: Final[str] = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}) + "\n"
@@ -326,6 +332,25 @@ def _dynamic_lookup(node: ast.Call, aliases: dict[str, str]) -> str | None:
     return None
 
 
+def _layer_only_imports(tree: ast.AST) -> list[str]:
+    """Find imports of packages that only the output layer may name."""
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found.extend(
+                f"line {node.lineno}: import {alias.name}"
+                for alias in node.names
+                if alias.name.split(".")[0] in _LAYER_ONLY_MODULES
+            )
+        elif (
+            isinstance(node, ast.ImportFrom)
+            and node.module
+            and node.module.split(".")[0] in _LAYER_ONLY_MODULES
+        ):
+            found.append(f"line {node.lineno}: from {node.module} import ...")
+    return found
+
+
 def _terminal_writes(tree: ast.AST) -> list[str]:
     """Find every direct route to standard output in a parsed module."""
     aliases = _import_aliases(tree)
@@ -360,13 +385,38 @@ def test_no_module_writes_to_the_terminal_outside_the_output_layer() -> None:
     for module in sorted(package.rglob("*.py")):
         if module.name == _OUTPUT_LAYER:
             continue
-        writes = _terminal_writes(ast.parse(module.read_text(encoding="utf-8")))
+        tree = ast.parse(module.read_text(encoding="utf-8"))
+        writes = _terminal_writes(tree) + _layer_only_imports(tree)
         if writes:
             offenders[str(module.relative_to(package))] = writes
     assert offenders == {}, (
         f"direct terminal writes found outside {_OUTPUT_LAYER}: {offenders} — "
         "use nz_mcp.cli_output.emit() for command payload or .status() for anything a person reads."
     )
+
+
+@pytest.mark.contract
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param("import rich\n", id="import-rich"),
+        pytest.param("from rich.console import Console\n", id="from-rich-console"),
+        pytest.param("import rich.table as tbl\n", id="aliased-rich-submodule"),
+    ],
+)
+def test_rich_may_not_be_imported_outside_the_output_layer(source: str) -> None:
+    """Condition 2 of ADR 0027, enforced instead of merely written down.
+
+    ``Console()`` defaults to stdout, so the library that best serves the CLI's presentation
+    is also the one that most easily breaks ``serve``. Confining it to the layer means a
+    stray ``from rich.console import Console`` fails CI rather than a user's MCP client.
+    """
+    assert _layer_only_imports(ast.parse(source)) != []
+
+
+@pytest.mark.contract
+def test_the_layer_only_check_ignores_unrelated_imports() -> None:
+    assert _layer_only_imports(ast.parse("import typer\nfrom nz_mcp import i18n\n")) == []
 
 
 #: Every route that got past the first version of this check, kept as a regression list.

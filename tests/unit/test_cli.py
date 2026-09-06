@@ -23,10 +23,12 @@ def test_version_command() -> None:
     assert __version__ in result.stdout
 
 
-def test_list_profiles_empty(tmp_profiles: Path) -> None:
+def test_list_profiles_empty(monkeypatch: pytest.MonkeyPatch, tmp_profiles: Path) -> None:
+    monkeypatch.setenv("NZ_MCP_LANG", "es")
     result = runner.invoke(app, ["list-profiles"])
     assert result.exit_code == 0
-    assert "sin perfiles" in result.stderr
+    assert "ningún perfil configurado" in result.stderr
+    assert "nz-mcp init" in result.stderr
     assert result.stdout == ""
 
 
@@ -37,10 +39,11 @@ def test_list_profiles_with_two(two_profiles: Path) -> None:
     assert "prod" in result.stdout
 
 
-def test_edit_profile_updates_mode(two_profiles: Path) -> None:
+def test_edit_profile_updates_mode(monkeypatch: pytest.MonkeyPatch, two_profiles: Path) -> None:
+    monkeypatch.setenv("NZ_MCP_LANG", "en")
     result = runner.invoke(app, ["edit-profile", "dev", "--mode", "write"])
     assert result.exit_code == 0
-    assert "Updated" in result.stderr
+    assert "updated" in result.stderr
     from nz_mcp.config import get_profile
 
     assert get_profile("dev", path=two_profiles).mode == "write"
@@ -56,10 +59,12 @@ def test_edit_profile_invalid_mode_exits_2(two_profiles: Path) -> None:
     assert result.exit_code == 2
 
 
-def test_edit_profile_no_flags_noop(two_profiles: Path) -> None:
+def test_edit_profile_no_flags_noop(monkeypatch: pytest.MonkeyPatch, two_profiles: Path) -> None:
+    monkeypatch.setenv("NZ_MCP_LANG", "en")
     result = runner.invoke(app, ["edit-profile", "dev"])
     assert result.exit_code == 0
-    assert "No changes" in result.stderr
+    assert "Nothing changed" in result.stderr
+    assert "--max-rows-default" in result.stderr
 
 
 def test_serve_runs_stdio_server(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -131,6 +136,7 @@ class _FakeConn:
 
 def test_test_connection_ok(monkeypatch: pytest.MonkeyPatch, two_profiles: Path) -> None:
     store_password("dev", "devpass123")
+    monkeypatch.setenv("NZ_MCP_LANG", "en")
 
     def _open(_prof: object, _pwd: str) -> _FakeConn:
         return _FakeConn()
@@ -165,6 +171,7 @@ def test_test_connection_execute_error_redacts_password(
     monkeypatch: pytest.MonkeyPatch, two_profiles: Path
 ) -> None:
     store_password("dev", "devpass123")
+    monkeypatch.setenv("NZ_MCP_LANG", "en")
 
     monkeypatch.setattr(
         "nz_mcp.profile_check.open_connection", lambda _p, _w: _FakeConn(fail_execute=True)
@@ -184,6 +191,8 @@ def test_test_connection_profile_not_found(two_profiles: Path) -> None:
 def test_test_connection_credential_not_found(
     monkeypatch: pytest.MonkeyPatch, two_profiles: Path
 ) -> None:
+    monkeypatch.setenv("NZ_MCP_LANG", "en")
+
     def _no_password(name: str) -> str:
         raise CredentialNotFoundError(profile=name)
 
@@ -232,7 +241,7 @@ def test_test_connection_prints_cause_hint(
     combined = result.stdout + result.stderr
 
     assert result.exit_code == 1
-    assert "HINT: Netezza rejected the credentials." in combined
+    assert "What to look at: Netezza rejected the credentials." in combined
 
 
 # --- profile lifecycle: add-profile / remove-profile --------------------------

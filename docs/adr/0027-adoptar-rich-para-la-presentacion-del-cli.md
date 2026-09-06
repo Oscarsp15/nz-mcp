@@ -1,7 +1,7 @@
 # ADR 0027 — Adoptar `rich` como dependencia directa acotada para la presentación del CLI
 
-- **Fecha**: 2026-09-05
-- **Estado**: aceptado
+- **Fecha**: 2026-09-05 (adenda 1: 2026-09-06)
+- **Estado**: aceptado, con una adenda que precisa la condición 1 — ver [Adenda 1](#adenda-1-2026-09-06--la-condición-1-pasa-a-ser-ninguna-consola-escribe-a-stdout)
 - **Decidido por**: Tech Lead (IA) + validación humana (auditor: DX Engineer)
 - **Issue**: [#204](https://github.com/Oscarsp15/nz-mcp/issues/204) · sale de [`docs/architecture/cli-experience.md`](../architecture/cli-experience.md) §7
 
@@ -69,6 +69,9 @@ implementación:
    siquiera detrás de una comprobación de terminal. `rich.console.Console()` escribe por
    **stdout** por defecto: es exactamente el byte que rompe el JSON-RPC de `serve`. Solo se
    admite `Console(stderr=True)`, y eso queda cubierto por un test.
+   > **Precisada por la [Adenda 1](#adenda-1-2026-09-06--la-condición-1-pasa-a-ser-ninguna-consola-escribe-a-stdout)**:
+   > la condición vigente es *"ninguna consola escribe a stdout"*, que admite además la consola
+   > contra un buffer en memoria. Léase esa adenda antes de aplicar esta cláusula.
 2. **`rich` se importa únicamente desde `src/nz_mcp/cli_output.py`.** Ningún otro módulo lo
    nombra. Lo vigila el detector AST de `tests/contract/test_serve_stdout_protocol_only.py`, que
    ya rechaza rutas directas a la salida estándar fuera de la capa; el día que se use `rich` se
@@ -184,6 +187,51 @@ solo nos privaría de usar lo que el usuario ya se ha descargado.
 - **No obliga a usar `rich` donde no aporta.** El indicador indeterminado del #205 se implementa
   sin él y está bien así: la decisión es *poder* usarlo con red de seguridad, no usarlo en todas
   partes.
+
+## Adenda 1 (2026-09-06) — la condición 1 pasa a ser "ninguna consola escribe a stdout"
+
+- **Origen**: primera implementación de la decisión, en el PR de la tabla de `list-profiles`
+  ([#169](https://github.com/Oscarsp15/nz-mcp/issues/169)). Propuesta por el rol DX, confirmada
+  por la auditoría.
+- **Estado**: aceptada. Sustituye a la redacción original de la condición 1; el resto del ADR no
+  cambia.
+
+**Redacción anterior**: *"Toda consola se construye contra `stderr`. Sin excepción, sin bandera
+que lo cambie, ni siquiera detrás de una comprobación de terminal."*
+
+**Redacción vigente**: **ninguna consola de `rich` escribe a stdout.** En la práctica eso deja
+dos formas admitidas de construirla, y solo dos:
+
+1. `Console(stderr=True)`, cuando lo que se pinta va a la pantalla en el momento.
+2. `Console(file=<buffer en memoria>)`, cuando lo que se quiere es **texto** y el canal lo decide
+   quien llama. Es lo que hace `cli_output.table()`, que devuelve una cadena en vez de escribir.
+
+Ambas siguen cubiertas por test, y la condición 2 —`rich` solo se importa desde
+`cli_output.py`— se mantiene intacta: fuera de la capa no se construye ninguna consola de
+ninguna de las dos formas.
+
+**Por qué la nueva redacción no relaja nada, sino que protege más.** Lo que la condición
+original perseguía era que ningún byte de `rich` pudiera acabar en el descriptor 1, que es por
+donde `serve` habla JSON-RPC. Medido sobre el comportamiento real:
+
+| | `Console(stderr=True)` | `Console(file=io.StringIO())` |
+|---|---|---|
+| ¿Mantiene viva una referencia a un descriptor del proceso? | **Sí**, al 2 | **No**, a ninguno |
+| ¿Puede escribir a stdout? | No | No |
+| ¿Puede escribir a stderr? | Sí, es su trabajo | **No** |
+| `isatty()` del destino | depende del entorno | siempre falso |
+
+Es decir: la consola contra un buffer es un **superconjunto estricto** de la protección. No
+puede escribir a stdout —lo que la condición exigía— y además no puede escribir a ningún otro
+sitio, porque no posee ningún descriptor. La redacción original la habría prohibido sin ganar
+nada de seguridad a cambio, y habría obligado a que la única forma de tener una tabla fuese
+pintarla directamente en pantalla, cerrando la puerta a que el mismo renderizador sirva para
+carga útil por stdout (que sale por `emit()`, protegido aparte por la reserva de descriptor) y
+para informe humano por stderr.
+
+**Consecuencia práctica**: el vocabulario de la capa gana funciones que *devuelven texto* además
+de las que *escriben*. `table()` es la primera; la regla para cualquier otra es la misma —si
+devuelve texto, su consola va contra un buffer; si escribe, va contra stderr.
 
 ## Referencias
 

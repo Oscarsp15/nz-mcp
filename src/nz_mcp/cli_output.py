@@ -31,6 +31,13 @@ write a control character, and it writes none at all when there is no terminal.
 prompt on **stderr** and read the answer from stdin. A question is not payload
 either.
 
+:func:`table` is the layer's own vocabulary for "aligned columns", per condition 3 of
+ADR 0027. It returns **text** rather than writing anywhere, so the caller decides the
+channel: today the profile list emits it as payload on stdout. Its ``rich`` console is
+built against an in-memory buffer and owns no file descriptor at all, which is the
+second of the two shapes condition 1 admits (ADR 0027, addendum 1: *no console writes
+to stdout*) — and the stricter one, since a buffer cannot reach stderr either.
+
 Colour and terminal detection
 -----------------------------
 :func:`color_enabled` is the only place that decides whether ANSI sequences may
@@ -62,10 +69,13 @@ import itertools
 import os
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import Final, Literal, Protocol, TextIO
 
 import typer
+from rich import box
+from rich.console import Console
+from rich.table import Table
 
 Style = Literal["plain", "heading", "success", "warning", "error"]
 
@@ -97,6 +107,11 @@ _SPINNER_GRACE_S: Final[float] = 0.25
 #: How long :func:`progress` waits for the animation thread to clear its line. Only
 #: relevant if the terminal blocks on write; the thread is a daemon either way.
 _SPINNER_JOIN_S: Final[float] = 1.0
+
+#: Line width the table renderer is allowed to use. Wide enough that nothing this CLI shows
+#: is ever wrapped by us: a narrow terminal wraps it, and a redirected file keeps the rows
+#: intact. Columns are still sized to their content, so a short table stays short.
+_TABLE_MAX_WIDTH: Final[int] = 200
 
 #: Standard descriptors. The guarantee is about these numbers, not about the
 #: ``sys.stdout`` object: that is the whole point of doing it down here.
@@ -323,6 +338,54 @@ def fail(message: str) -> None:
     status(message, style="error")
 
 
+def table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> str:
+    """Render ``rows`` as aligned columns and return the text, without writing it anywhere.
+
+    A table earns its place when there are two or more comparable rows and someone has to
+    pick one, or spot the odd one out column by column. With a single row there is nothing
+    to compare and a caller should print ``key: value`` instead; this function does not
+    second-guess that decision, it just aligns what it is given.
+
+    Three deliberate choices:
+
+    - **It returns text.** The caller owns the channel, so the same renderer serves payload
+      on stdout and a human report on stderr. It also means the one ``rich`` console this
+      project builds writes to a memory buffer and holds no file descriptor, which satisfies
+      condition 1 of ADR 0027 (addendum 1: *no console writes to stdout*) more strictly than
+      ``Console(stderr=True)`` does: this one cannot reach stderr either.
+    - **ASCII frame, no colour.** ``box.ASCII`` and ``no_color`` are not a fallback for
+      hostile terminals, they are the output: a Windows console on a legacy code page turns
+      the Unicode box characters ``rich`` would otherwise pick into ``?``, and colour that
+      carries meaning is unreadable for whoever does not see it or redirects it to a file.
+      What is left is a header rule and column separators, which is all a table needs.
+    - **No outer frame and no trailing blanks.** Padding a row out to the frame puts
+      invisible characters in a redirected file for no gain.
+
+    Args:
+        headers: Column titles, already localized.
+        rows: One sequence of already formatted cells per row, same length as ``headers``.
+
+    Returns:
+        The rendered table, newline separated and without a trailing newline.
+    """
+    grid = Table(box=box.ASCII, show_edge=False, pad_edge=False)
+    for header in headers:
+        grid.add_column(header)
+    for row in rows:
+        grid.add_row(*row)
+    buffer = io.StringIO()
+    Console(
+        file=buffer,
+        width=_TABLE_MAX_WIDTH,
+        no_color=True,
+        emoji=False,
+        highlight=False,
+        markup=False,
+        legacy_windows=False,
+    ).print(grid)
+    return "\n".join(line.rstrip() for line in buffer.getvalue().splitlines())
+
+
 def ask(prompt: str, *, default: str | None = None, show_default: bool = True) -> str:
     """Ask for a line of text: question on stderr, answer read from stdin."""
     return str(typer.prompt(prompt, default=default, show_default=show_default, err=True))
@@ -361,5 +424,6 @@ __all__: Final[tuple[str, ...]] = (
     "stdout_is_reserved",
     "stdout_reserved_for_protocol",
     "success",
+    "table",
     "warn",
 )
