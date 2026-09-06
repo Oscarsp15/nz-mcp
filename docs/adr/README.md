@@ -39,7 +39,7 @@ Ver [tech-lead.md](../roles/tech-lead.md#plantilla-adr-para-copiar-a-docsadrnnnn
 | 0002 | [# ADR 0002 — Usar nzpy como driver primario de Netezza](0002-driver-nzpy.md) | aceptado |  |
 | 0003 | [# ADR 0003 — Credenciales en `keyring` OS-native, metadata en TOML](0003-credenciales-keyring.md) | aceptado |  |
 | 0004 | [# ADR 0004 — Integration tests solo locales en v0.1](0004-integration-tests-locales.md) | aceptado |  |
-| 0005 | [# ADR 0005 — Sin frontend ni UI propia](0005-sin-frontend.md) | aceptado |  |
+| 0005 | [# ADR 0005 — Sin frontend ni UI propia](0005-sin-frontend.md) | aceptado, enmendado por el 0028 |  |
 | 0006 | [# ADR 0006 — Tools con responsabilidad única](0006-tools-responsabilidad-unica.md) | aceptado |  |
 | 0007 | [# ADR 0007 — Auditoría de PR con autor + auditor IA distintos](0007-auditoria-pr.md) | aceptado |  |
 | 0008 | [# ADR 0008 — `required_approving_review_count = 0` mientras solo haya un mantenedor humano](0008-required-reviews-cero-solo-dev.md) | aceptado |  |
@@ -63,5 +63,7 @@ Ver [tech-lead.md](../roles/tech-lead.md#plantilla-adr-para-copiar-a-docsadrnnnn
 | 0025 | [Eliminar `on_conflict="skip"` de `nz_insert`](0025-on-conflict-skip-eliminado.md) | aceptado | 2026-09-05 |
 | 0026 | [La password viaja como `Secret`, nunca como `str` desnuda](0026-secret-sin-password-en-trazas.md) | aceptado | 2026-09-05 |
 | 0027 | [Adoptar `rich` como dependencia directa acotada para la presentación del CLI](0027-adoptar-rich-para-la-presentacion-del-cli.md) | aceptado | 2026-09-05 |
+| 0028 | [El asistente de configuración es la única excepción al ADR 0005](0028-asistente-de-configuracion-interactivo.md) | aceptado (enmienda el 0005) | 2026-09-06 |
+| 0029 | [Adoptar `textual` acotado y confinado para el asistente de configuración](0029-adoptar-textual-para-el-asistente-de-configuracion.md) | aceptado | 2026-09-06 |
 
 > **Colisión de numeración**: dos ADR comparten el número `0014`. Las referencias en prosa a "ADR 0014" del CHANGELOG y de la ADR 0015 apuntan a [`0014-tool-execute-ddl.md`](0014-tool-execute-ddl.md). No se renumeran para no romper esos enlaces.
