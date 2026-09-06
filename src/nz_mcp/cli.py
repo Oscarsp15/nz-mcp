@@ -477,7 +477,9 @@ def _probe_verbose_table(run: ProbeRun, locale: Locale) -> str:
         ]
         for row in run.results
     ]
-    return out.table(headers, rows)
+    # This one is read on stderr, so it is fitted to that stream: the default is the
+    # payload channel, and getting it wrong would size a report to the wrong window.
+    return out.table(headers, rows, width=out.display_width(sys.stderr))
 
 
 def _report_probe_run(run: ProbeRun, locale: Locale, *, verbose: bool) -> None:
