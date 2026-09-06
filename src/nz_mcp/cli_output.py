@@ -191,6 +191,7 @@ InteractiveBlocker = Literal[
     "opted_out",
     "term_dumb",
     "no_terminal",
+    "background_process",
     "terminal_without_capabilities",
     "console_without_vt",
     "window_too_small",
@@ -239,12 +240,12 @@ def _terminfo_declares_full_screen(term: str) -> bool:
 def _terminal_type_is_capable() -> bool:
     """Whether ``TERM`` describes something a full-screen application can be drawn on.
 
-    The seventh trigger, and the one that was missing: ``TERM=dumb`` is not the only way
-    to end up without guarantees. An **empty or unset** ``TERM`` is routine inside
-    containers and in some multiplexed SSH sessions, and an unknown value is routine on a
-    host whose terminfo database does not carry the client's terminal type. In both cases
-    there is a real terminal on all three streams and a perfectly valid window size, so
-    none of the other six triggers fires - and the wizard would start with no guarantee
+    The fifth trigger, and one of the two the first round of this work missed: ``TERM=dumb``
+    is not the only way to end up without guarantees. An **empty or unset** ``TERM`` is
+    routine inside containers and in some multiplexed SSH sessions, and an unknown value is
+    routine on a host whose terminfo database does not carry the client's terminal type. In
+    both cases there is a real terminal on all three streams and a perfectly valid window
+    size, so none of the other triggers fires - and the wizard would start with no guarantee
     that a single escape sequence or key it sends means anything.
 
     Only asked on POSIX. On Windows ``TERM`` is normally unset and says nothing; there the
@@ -255,6 +256,54 @@ def _terminal_type_is_capable() -> bool:
         return True
     term = os.environ.get("TERM", "").strip()
     return bool(term) and _terminfo_declares_full_screen(term)
+
+
+def _owns_the_terminal() -> bool:
+    """Whether this process is in the **foreground** process group of its terminal.
+
+    The trigger the first seven cannot see, and the one with the worst failure. A process
+    started in the background - ``nz-mcp &``, or one that inherited the descriptors through
+    ``nohup`` or ``setsid`` - has three perfectly valid terminals on ``isatty``, a real
+    ``TERM`` and a good window size, so every other check says yes. Then the application
+    reads the keyboard, POSIX answers with ``SIGTTIN``, the process **stops** with the
+    alternate screen still open, and the terminal is left unusable for whoever was sitting
+    at it. Refusing to start is the whole fix: the help prints, the job finishes, nothing
+    is left behind.
+
+    ``os.tcgetpgrp`` asks the terminal which process group it is currently listening to;
+    if it is not ours, we are in the background. Anything that cannot be asked - a stream
+    with no descriptor because a wrapper replaced it, a descriptor that is not a terminal -
+    counts as "not ours", because degrading costs a help screen and guessing wrong costs
+    someone their terminal.
+
+    **On Windows this does not apply and the answer is always yes**, and that is said out
+    loud here rather than left implicit. There are no POSIX process groups, no controlling
+    terminal to own and no ``SIGTTIN``: a detached process there has no console at all,
+    which is the third trigger (``isatty`` is false), and one started with a shared console
+    is not stopped for reading it.
+
+    The platform is decided by **looking the two calls up** instead of by comparing
+    ``sys.platform``, and both halves of that are deliberate. The question this trigger
+    really asks is *"does this operating system have process groups?"*, and the honest way
+    to ask it is whether the functions that answer them exist. It also keeps the whole
+    function analysable and testable on both platforms, which a ``sys.platform`` branch
+    would not be: the type checker prunes one side of it, so half of this would go
+    unchecked on every build and untested on every runner.
+    """
+    ask_the_terminal: Callable[[int], int] | None = getattr(os, "tcgetpgrp", None)
+    our_own_group: Callable[[], int] | None = getattr(os, "getpgrp", None)
+    if ask_the_terminal is None or our_own_group is None:
+        return True
+    try:
+        descriptor = sys.stdin.fileno()
+    except (AttributeError, OSError, ValueError):
+        return False
+    try:
+        return ask_the_terminal(descriptor) == our_own_group()
+    except OSError:
+        # ``ENOTTY`` (the descriptor is not a terminal) and ``EBADF`` (it was closed under
+        # us) both land here. Neither is a terminal this process may paint on.
+        return False
 
 
 def _opted_out_of_the_tui() -> bool:
@@ -280,21 +329,26 @@ def interactive_ui_blocker(*, min_width: int, min_height: int) -> InteractiveBlo
     to read input rather than *whether* to start. A TUI library will try to paint wherever
     it is allowed to; declining is this project's job.
 
-    The six start-up triggers, in the order that costs least to check:
+    The seven start-up triggers, in the order that costs least to check:
 
     1. ``NZ_MCP_NO_TUI`` - an explicit request, honoured without argument.
     2. ``TERM=dumb`` - a terminal that has told us it understands nothing.
     3. No terminal at all on input, payload or status: redirected, piped, in CI, or
        driven by another process. Note that ``nz-mcp init > block.json``, which the
        install guide suggests, lands here on purpose.
-    4. On POSIX, a ``TERM`` that is empty, unset or unknown to terminfo, or that does not
+    4. A process running in the **background** of a terminal it does not own: ``nz-mcp &``,
+       or one that inherited the descriptors through ``nohup`` or ``setsid``. All three
+       streams are terminals here, so trigger 3 says nothing, and the failure is the worst
+       of the list: ``SIGTTIN`` stops the process with the alternate screen open and leaves
+       the terminal unusable. POSIX only; see :func:`_owns_the_terminal`.
+    5. On POSIX, a ``TERM`` that is empty, unset or unknown to terminfo, or that does not
        declare cursor addressing. Common inside containers and in some multiplexed SSH
        sessions, and invisible to every other trigger: the streams are terminals and the
        window is a good size.
-    5. A Windows console that does not speak VT sequences. Legacy code pages turn box
+    6. A Windows console that does not speak VT sequences. Legacy code pages turn box
        drawing into ``?``; the wizard is ASCII, but a console without VT cannot position
-       a cursor either. Triggers 4 and 5 are the same question asked per platform.
-    6. A window below the declared minimum. The seventh trigger - shrinking below it
+       a cursor either. Triggers 5 and 6 are the same question asked per platform.
+    7. A window below the declared minimum. The eighth trigger - shrinking below it
        *during* the session - cannot be seen from here and belongs to the application.
 
     Args:
@@ -310,6 +364,7 @@ def interactive_ui_blocker(*, min_width: int, min_height: int) -> InteractiveBlo
         ("opted_out", _opted_out_of_the_tui),
         ("term_dumb", _term_is_dumb),
         ("no_terminal", lambda: not _standard_streams_are_terminals()),
+        ("background_process", lambda: not _owns_the_terminal()),
         ("terminal_without_capabilities", lambda: not _terminal_type_is_capable()),
         ("console_without_vt", detect_legacy_windows),
         ("window_too_small", lambda: _window_is_smaller_than(min_width, min_height)),

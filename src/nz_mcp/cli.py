@@ -37,6 +37,11 @@ from typing import Any, Final, cast
 
 import typer
 
+# ``typer`` is the declared dependency and ``click`` is its own; these two are typer's
+# public classes for "the group of commands" and "a command", so the launcher can be typed
+# without this project importing click directly.
+from typer.core import TyperCommand, TyperGroup
+
 from nz_mcp import __version__
 from nz_mcp import cli_output as out
 from nz_mcp.auth import delete_password, get_password, store_password
@@ -76,6 +81,9 @@ from nz_mcp.errors import (
 from nz_mcp.i18n import MESSAGES, Locale, resolve_locale, t
 from nz_mcp.logging_config import configure_logging_for_stdio
 from nz_mcp.logging_utils import sanitize
+from nz_mcp.menu import MIN_HEIGHT as MENU_MIN_HEIGHT
+from nz_mcp.menu import MIN_WIDTH as MENU_MIN_WIDTH
+from nz_mcp.menu import MenuEntry, choose_command
 from nz_mcp.profile_check import (
     CHECK_LEVELS,
     CheckLevel,
@@ -113,7 +121,11 @@ def _help(key: str) -> str:
 app = typer.Typer(
     name="nz-mcp",
     help=_help("CLI.HELP.APP"),
-    no_args_is_help=True,
+    # Off, and handled in the callback instead: with it on, ``click`` prints the help and
+    # exits before any code of ours runs, so there would be no moment at which to offer the
+    # menu. The callback reproduces exactly what it used to do - same help, same stream,
+    # same exit code 2 - whenever the menu cannot open.
+    no_args_is_help=False,
     add_completion=False,
 )
 
@@ -121,6 +133,24 @@ app = typer.Typer(
 #: stays a single block: several panels would group the commands, and grouping eleven
 #: commands into boxes buys structure the ordering already provides.
 _COMMANDS_PANEL: Final[str] = _help("CLI.HELP.COMMANDS_PANEL")
+
+#: Exit code of ``nz-mcp`` with no arguments and no menu. It is what ``click`` returns for
+#: ``no_args_is_help`` - a usage error - and it is preserved to the number, because anyone
+#: scripting around this today is scripting around a 2.
+_NO_ARGUMENTS_EXIT_CODE: Final[int] = 2
+
+
+@app.callback(invoke_without_command=True)
+def entry_point(ctx: typer.Context) -> None:
+    """Open the menu when ``nz-mcp`` is run with nothing after it (issue #226, ADR 0030).
+
+    Runs before every command and gets out of the way immediately when there is one:
+    ``nz-mcp <command>`` and ``nz-mcp --help`` behave exactly as they did, which is what
+    whoever pipes the output or reads the documentation depends on.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    _no_arguments(ctx)
 
 
 @app.command("init", help=_help("CLI.HELP.INIT"), rich_help_panel=_COMMANDS_PANEL)
@@ -371,6 +401,110 @@ def serve_cmd() -> None:
     configure_logging_for_stdio()
     with out.stdout_reserved_for_protocol() as protocol_stdout:
         run_stdio_server(protocol_stdout=protocol_stdout)
+
+
+# --- nz-mcp with no arguments: the menu, or the help -------------------------
+
+
+def _no_arguments(ctx: typer.Context) -> None:
+    """Offer the menu, and fall back to the help screen whenever it cannot open.
+
+    The fallback is not a courtesy: **nobody may be left unable to use the CLI because an
+    interface would not start** (ADR 0028, condition 1, inherited by ADR 0030). Seven of the
+    eight triggers are decided by the gate before anything is built; the eighth - a window
+    shrunk below the minimum mid-session - can only be seen from inside the running
+    application, and comes back as ``degraded``.
+    """
+    if out.interactive_ui_enabled(min_width=MENU_MIN_WIDTH, min_height=MENU_MIN_HEIGHT):
+        choice = choose_command(entries=_menu_entries(ctx), locale=resolve_locale())
+        if choice.status == "chosen" and choice.command is not None:
+            _launch(ctx, choice.command)
+            return
+        if choice.status == "cancelled":
+            # Leaving on purpose is not a usage error, so it is not the exit code of one.
+            raise typer.Exit(code=0)
+    _print_help(ctx)
+    raise typer.Exit(code=_NO_ARGUMENTS_EXIT_CODE)
+
+
+def _print_help(ctx: typer.Context) -> None:
+    """Print the help screen exactly as ``no_args_is_help`` used to.
+
+    ``ctx.get_help()`` is what ``click`` itself calls in that path, so the screen is not
+    rebuilt here and cannot drift from it. With typer it renders through ``rich`` as a side
+    effect and hands back an empty string, hence the guard: emitting that empty string would
+    add a trailing blank line the old path did not print. If a future typer returns the text
+    instead of printing it, it is printed here, once.
+    """
+    rendered = ctx.get_help()
+    if rendered:
+        out.emit(rendered)
+
+
+def _menu_entries(ctx: typer.Context) -> tuple[MenuEntry, ...]:
+    """Build the menu from the commands typer actually registered.
+
+    Not from a list kept in the menu package: the order is the registration order, which is
+    the reading order the help screen already uses (install, prove it works, live with it,
+    diagnose, and last the two nobody types by hand), and each sentence is the ``help=`` of
+    the command, which comes from the i18n catalog. One source, so the menu cannot offer a
+    command the help does not, describe one differently, or list them in another order.
+    """
+    group = cast(TyperGroup, ctx.command)
+    entries = []
+    for name in group.list_commands(ctx):
+        command = group.get_command(ctx, name)
+        if command is None:  # pragma: no cover - the names come from this same group
+            continue
+        description = (command.help or "").strip().splitlines()
+        entries.append(MenuEntry(command=name, description=description[0] if description else ""))
+    return tuple(entries)
+
+
+def _launch(ctx: typer.Context, name: str) -> None:
+    """Run the chosen command on the ordinary terminal, as if it had been typed.
+
+    The screen is already gone by the time this runs, and that is the design: a command's
+    output belongs in the scroll of the terminal, where it can be read, copied and pasted
+    into an issue. Repainting a menu over it would be ADR 0028's risk 4 - an interface that
+    takes the diagnosis with it when it closes - committed on purpose.
+
+    Nothing is invoked by name from a list of our own: the command comes out of the same
+    group ``nz-mcp <command>`` goes through, and it is parsed by the same code, so it gets
+    the same defaults, the same type conversion and the same usage errors.
+    """
+    group = cast(TyperGroup, ctx.command)
+    registered = group.get_command(ctx, name)
+    if registered is None:  # pragma: no cover - the name came from this same group
+        raise typer.Exit(code=_NO_ARGUMENTS_EXIT_CODE)
+    command = cast(TyperCommand, registered)
+    with command.make_context(name, _required_arguments(command), parent=ctx) as sub_ctx:
+        command.invoke(sub_ctx)
+
+
+def _required_arguments(command: TyperCommand) -> list[str]:
+    """Ask, in plain text, for what the command line cannot leave out.
+
+    Four commands take the name of a profile and would fail with a usage error if launched
+    bare, so a menu that could not offer them would be a menu missing the very things one is
+    for. What this does **not** do is give any command a screen: the question is asked after
+    the menu has closed, by the same ``cli_output`` prompt the chained wizard uses, and the
+    text of the question is the parameter's own help - already written, already translated
+    (issue #217), not duplicated here.
+
+    Driven by what ``click`` knows about each parameter rather than by a table of command
+    names: a parameter that stops being required disappears from here on its own, and one
+    that becomes required is asked for without anybody remembering to come back.
+    """
+    answers: list[str] = []
+    for parameter in command.params:
+        if not parameter.required:
+            continue
+        question = str(getattr(parameter, "help", "") or parameter.name)
+        if parameter.param_type_name == "option":  # pragma: no cover - none exist today
+            answers.append(parameter.opts[0])
+        answers.append(out.ask(question))
+    return answers
 
 
 # --- list-profiles rendering --------------------------------------------------

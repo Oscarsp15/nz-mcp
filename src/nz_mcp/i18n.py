@@ -578,6 +578,20 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Tab campo | Enter continuar | Esc salir",
         "en": "Tab field | Enter continue | Esc quit",
     },
+    # The interactive menu (issue #226). Two keys, and only two: the name of each command and
+    # the sentence describing it come from the "CLI.HELP.*" entries the help screen already
+    # uses, so the menu cannot say something the help does not.
+    #
+    # Same rule as the help texts: no character a Windows console on a legacy code page
+    # cannot draw. Hence a colon and not an em dash, which renders there as "?".
+    "CLI.MENU_TITLE": {
+        "es": "nz-mcp: elige un comando",
+        "en": "nz-mcp: pick a command",
+    },
+    "CLI.MENU_KEYS": {
+        "es": "Flechas mover | Enter ejecutar | Esc salir",
+        "en": "Arrows move | Enter run | Esc quit",
+    },
     "CLI.WIZARD_UI_PASSWORD_SET": {
         "es": "definida (escribe aquí para cambiarla)",
         "en": "set (type here to change it)",

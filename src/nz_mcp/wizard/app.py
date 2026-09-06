@@ -33,8 +33,8 @@ routes it did not cover. Do not read it as one.
 
 Degradation (ADR 0028, condition 1)
 -----------------------------------
-The six start-up triggers are decided before this module is even imported, by
-``cli_output.interactive_ui_enabled()``. The seventh one lives here, because only a
+The seven start-up triggers are decided before this module is even imported, by
+``cli_output.interactive_ui_enabled()``. The eighth one lives here, because only a
 running application can see it: a window shrunk **below the minimum during the session**
 closes the screen with ``degraded`` and hands back everything typed so far, so the chained
 questions resume with those answers as their defaults instead of from nothing.
@@ -231,8 +231,8 @@ class ProfileWizardApp(App[WizardResult]):
     def on_resize(self, event: events.Resize) -> None:
         """Degrade when the window drops below the minimum, keeping what was typed.
 
-        The seventh trigger, and the one the audit of PR #222 asked for: shrinking a window
-        mid-session is routine over SSH, and the other five only look at start-up. Leaving
+        The eighth trigger, and the one the audit of PR #222 asked for: shrinking a window
+        mid-session is routine over SSH, and the other seven only look at start-up. Leaving
         with ``degraded`` rather than repainting a broken screen is what turns a bug into a
         documented fallback - and the draft goes back with it, because losing eight
         answers to a window resize is exactly what issue #168 forbids.
