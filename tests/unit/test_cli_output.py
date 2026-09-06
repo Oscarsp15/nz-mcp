@@ -108,7 +108,7 @@ def test_status_still_works_after_stdout_is_reserved(
     assert "stderr sigue disponible" in captured.err
 
 
-def _run_cli(args: list[str], home: Path) -> subprocess.CompletedProcess[str]:
+def _run_cli(args: list[str], home: Path, *, force_color: bool) -> subprocess.CompletedProcess[str]:
     """Run a CLI command with both streams piped — i.e. redirected, never a terminal."""
     root = Path(__file__).resolve().parents[2]
     env = os.environ.copy()
@@ -119,8 +119,11 @@ def _run_cli(args: list[str], home: Path) -> subprocess.CompletedProcess[str]:
     # Windows code page and the parent could not decode what it wrote.
     env["PYTHONIOENCODING"] = "utf-8"
     env["TERM"] = "xterm-256color"
-    env["FORCE_COLOR"] = "1"
     env.pop("NO_COLOR", None)
+    if force_color:
+        env["FORCE_COLOR"] = "1"
+    else:
+        env.pop("FORCE_COLOR", None)
     return subprocess.run(  # noqa: S603
         [sys.executable, "-m", "nz_mcp", *args],
         check=False,
@@ -133,9 +136,24 @@ def _run_cli(args: list[str], home: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-@pytest.mark.parametrize("args", [["version"], ["doctor"], ["list-profiles"], ["--help"]])
+@pytest.mark.parametrize("args", [["version"], ["doctor"], ["list-profiles"]])
 def test_redirected_output_never_contains_ansi(args: list[str], tmp_path: Path) -> None:
-    """Piped or redirected output is plain text, even with FORCE_COLOR and a colour TERM set."""
-    proc = _run_cli(args, tmp_path)
+    """Piped output is plain text even with FORCE_COLOR and a colour-capable TERM set.
+
+    The output layer decides colour from the terminal, ``NO_COLOR`` and ``TERM`` only: an
+    environment that begs for colour cannot put escape sequences in a redirected file.
+    """
+    proc = _run_cli(args, tmp_path, force_color=True)
     assert _ESC not in proc.stdout, f"ANSI on stdout of {args}"
     assert _ESC not in proc.stderr, f"ANSI on stderr of {args}"
+
+
+def test_redirected_help_is_plain_text(tmp_path: Path) -> None:
+    """``--help`` is rendered by typer, not by the output layer, but must stay plain too.
+
+    It is tested without ``FORCE_COLOR`` because that variable is an explicit request for
+    colour aimed at typer's own renderer; the plain redirect is the case that matters here.
+    """
+    proc = _run_cli(["--help"], tmp_path, force_color=False)
+    assert _ESC not in proc.stdout
+    assert _ESC not in proc.stderr
