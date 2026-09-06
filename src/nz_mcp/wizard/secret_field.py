@@ -27,21 +27,26 @@ and what is paid is measured, on ``textual`` 8.2.8:
   built by the terminal parser **before** any handler of ours runs. That copy is not ours
   to prevent.
 - The message object outlives the handler: weak-referenced, it survived the dispatch and
-  300 ms of idling. **So the handler drops the reference itself**: after consuming the
-  characters it sets ``text`` to the empty string, and the message the pump keeps no
-  longer carries the credential - nor does its ``__rich_repr__``, which is what a
-  devtools console or a log of messages would print.
-- What stays, and is outside this package: ``pasted_text``, a local of the parser's own
-  suspended generator frame, keeps a full copy until the next bracketed paste. Measured
-  through ``parser._gen.gi_frame.f_locals``. A traceback rendered with frame locals that
-  walked through that frame would show it, because that frame is not ours and carries no
-  ``Secret``.
+  300 ms of idling. **So the handler drops the reference itself**, in a ``finally``: once
+  the characters are consumed ``text`` is set to the empty string, and the message the
+  pump keeps no longer carries the credential - nor does its ``__rich_repr__``, which is
+  what a devtools console or a log of messages would print.
 
-That last line is the accepted risk, written down rather than hidden, and it is not a
-double standard: ``Secret`` does not protect memory either - it holds the real text and
-redacts how it renders. What stays guaranteed is what the threat model actually asks for:
-nothing on screen, nothing in a log, nothing in a screenshot, and nothing in an error
-message built by our own code. See adenda 2 of ADR 0029.
+Two copies are left open, and both are written down here because a list of accepted risks
+is worth nothing if it is not complete:
+
+1. ``event`` is an argument of :meth:`SecretField.on_paste`, so while that call is on the
+   stack the text is reachable by anything that renders frame arguments or locals. The
+   ``finally`` shrinks that window to the body of the loop; it does not close it.
+2. ``pasted_text``, a local of the parser's own suspended generator frame, keeps a full
+   copy until the next bracketed paste. Measured through ``parser._gen.gi_frame.f_locals``.
+   That frame is not ours and carries no ``Secret``.
+
+Accepted, written down rather than hidden, and not a double standard: ``Secret`` does not
+protect memory either - it holds the real text and redacts how it renders. What stays
+guaranteed is what the threat model actually asks for: nothing on screen, nothing in a
+log, nothing in a screenshot, and nothing in an error message built by our own code -
+including the one built when a paste fails half way through. See adenda 2 of ADR 0029.
 
 What is on screen
 -----------------
@@ -195,21 +200,27 @@ class SecretField(Widget, can_focus=True):
         key is: a credential does not contain them, and a trailing newline from a password
         manager would otherwise become part of it.
 
-        The last two lines are the mitigation, and the module docstring has the numbers:
-        the pasted string is not ours to prevent, but the reference the message keeps is
-        ours to release, so it is released the moment it has been consumed.
+        The ``finally`` is the mitigation, and it is a ``finally`` on purpose. The pasted
+        string is not ours to prevent, but the reference the message keeps **is** ours to
+        release - and releasing it only when the loop completes would be a protection that
+        works exactly when it is not needed. If anything raises in here, ``textual``
+        renders the failure with the locals of this frame, and ``event`` is one of them:
+        the traceback would print ``Paste(text='<the credential>')`` from a frame of ours,
+        which is one of the four channels this design does promise to keep clean.
         """
         event.stop()
         event.prevent_default()
-        self._discard_external()
-        self._delete_selection()
-        for character in event.text:
-            if not character.isprintable():
-                continue
-            self._credential.insert(self._cursor, character)
-            self._length += 1
-            self._cursor += 1
-        event.text = ""
+        try:
+            self._discard_external()
+            self._delete_selection()
+            for character in event.text:
+                if not character.isprintable():
+                    continue
+                self._credential.insert(self._cursor, character)
+                self._length += 1
+                self._cursor += 1
+        finally:
+            event.text = ""
         self.refresh()
         self.post_message(self.Changed(self.holds_credential()))
 

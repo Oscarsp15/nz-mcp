@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Final
 
 import pytest
+from _pytest._code import ExceptionInfo
 from textual import events
 from textual.widgets import Input, Static
 
@@ -324,6 +325,54 @@ async def test_the_pasted_string_is_released_as_soon_as_it_has_been_consumed() -
     assert sink.joined() == _CREDENTIAL, "the paste was not consumed, so this proves nothing"
     assert paste.text == "", "the message the pump may keep still carries the credential"
     assert _CREDENTIAL not in repr(list(paste.__rich_repr__()))
+
+
+class _ExplodingSink(_Sink):
+    """A sink that fails part-way through, the way a real one could."""
+
+    def __init__(self, *, fails_at: int) -> None:
+        super().__init__()
+        self.fails_at = fails_at
+
+    def insert(self, index: int, character: str) -> None:
+        if len(self.characters) == self.fails_at:
+            raise RuntimeError("the sink gave up")
+        super().insert(index, character)
+
+
+@pytest.mark.asyncio
+async def test_a_failure_half_way_through_a_paste_does_not_leak_it_into_the_traceback() -> None:
+    """The channel this design does promise to keep clean: our own error messages.
+
+    ``event`` is a local of the paste handler, so it is printed by any renderer that shows
+    frame locals - pytest by default, and the failure handler of ``textual``. Releasing the
+    pasted string only when the loop finishes would therefore be a protection that works
+    exactly when it is not needed. This drives a real event through the real handler and
+    makes it fail in the middle, then renders the failure the way pytest does and looks for
+    the credential in it.
+    """
+    sink = _ExplodingSink(fails_at=6)
+    app = _app(sink)
+    paste = events.Paste(_CREDENTIAL)
+
+    async with app.run_test(size=_ROOMY) as pilot:
+        field = _field(app)
+        field.focus()
+        await pilot.pause()
+        try:
+            field.on_paste(paste)
+        except RuntimeError:
+            info: ExceptionInfo[BaseException] = ExceptionInfo.from_current()
+        else:  # pragma: no cover - the sink is built to fail
+            raise AssertionError("the sink did not fail, so this test proved nothing")
+        await pilot.press("escape")
+
+    assert sink.characters == list(_CREDENTIAL[:6]), "the failure did not land mid-paste"
+    # The traceback first: it is the channel, and it is what fails without the ``finally``.
+    for style in ("long", "short", "line", "native", "value"):
+        rendered = str(info.getrepr(style=style, funcargs=True, showlocals=True, chain=True))
+        assert _CREDENTIAL not in rendered, f"the credential is in the --tb={style} traceback"
+    assert paste.text == "", "the event kept the credential after the handler blew up"
 
 
 @pytest.mark.asyncio

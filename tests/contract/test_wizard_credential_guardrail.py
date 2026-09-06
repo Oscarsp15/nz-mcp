@@ -39,6 +39,15 @@ be established by looking at the shape of source code, only by running it and ch
 3. That is now covered, and ``widget.update(x)`` still is not, because knowing that
    ``widget`` is a widget needs type inference this file does not do.
 
+**The known holes, kept in one list**, because a barrier whose gaps are written down is
+worth more than one that pretends to have none:
+
+- ``widget.update(x)`` - reaching a widget through a method call. Needs type inference.
+- Rule 7 sees the pasted string read as ``event.text`` and as ``getattr(event, "text")``,
+  and would not see it read through a name computed at run time
+  (``getattr(event, "te" + "xt")``). Cheap to spell, cheap to review, impossible to
+  enumerate.
+
 The pattern is the point. It is the same lesson as the stdout barrier, where what held was
 not the AST detector but the private descriptor the protocol moved to.
 
@@ -565,14 +574,26 @@ def _widget_content_violations(tree: ast.AST) -> Iterator[str]:
 # --- rule 7: the pasted string is used, never copied --------------------------
 
 
+def _reads_uncopyable(node: ast.AST) -> bool:
+    """Whether this single node reads an uncopyable attribute, by dot or by ``getattr``.
+
+    The dotted form is the obvious one. ``getattr(event, "text")`` is the same read spelled
+    so that an attribute-shaped rule does not see it, which is the family of evasion that
+    has walked past this file three times, so it is covered here from the start.
+    """
+    if isinstance(node, ast.Attribute):
+        return node.attr in _UNCOPYABLE_ATTRIBUTES
+    if isinstance(node, ast.Call) and _dotted(node.func) == "getattr" and len(node.args) >= 2:
+        name = node.args[1]
+        return isinstance(name, ast.Constant) and name.value in _UNCOPYABLE_ATTRIBUTES
+    return False
+
+
 def _mentions_uncopyable(node: ast.AST | None) -> bool:
     """Whether an expression reads one of :data:`_UNCOPYABLE_ATTRIBUTES` anywhere inside."""
     if node is None:
         return False
-    return any(
-        isinstance(inner, ast.Attribute) and inner.attr in _UNCOPYABLE_ATTRIBUTES
-        for inner in ast.walk(node)
-    )
+    return any(_reads_uncopyable(inner) for inner in ast.walk(node))
 
 
 def _paste_copy_violations(tree: ast.AST) -> Iterator[str]:
@@ -711,6 +732,15 @@ _INJECTED_VIOLATIONS: Final[tuple[tuple[str, str], ...]] = (
     (
         "slicing-the-pasted-string-into-a-name",
         "head = event.text[:4]\n",
+    ),
+    (
+        "copying-the-pasted-string-spelled-as-getattr",
+        "buffer = getattr(event, 'text')\n",
+    ),
+    (
+        "handing-the-pasted-string-to-a-call-spelled-as-getattr",
+        "def f(self, event: events.Paste) -> None:\n"
+        "    self._credential.insert(0, getattr(event, 'text'))\n",
     ),
     (
         "the-secure-field-built-with-something-else-as-its-sink",

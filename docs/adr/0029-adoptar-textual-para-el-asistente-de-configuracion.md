@@ -487,17 +487,30 @@ Consecuencias que hay que declarar sin adornos:
    dentro de objetos que no son nuestros. No podemos evitar que se cree: la construye el parser
    antes de que corra ninguna línea nuestra.
 
-   *Cuál es la exposición concreta*: `pasted_text`, un local del frame suspendido del generador del
-   parser de `textual`, conserva una copia completa hasta el siguiente pegado con corchetes. Un
-   fallo que se renderizara con los locales de los frames y pasara por ahí podría mostrarla, porque
-   ese frame no es nuestro y no lleva `Secret`. Es una ventana estrecha y una condición rara, pero
-   es real y aquí queda escrita en vez de escondida.
+   *Cuál es la exposición concreta*. Son **dos** copias, no una, y la lista tiene que estar
+   completa o no sirve de nada. La auditoría del PR #225 señaló que la primera redacción declaraba
+   solo la segunda:
+
+   1. **El propio `event`, en un frame nuestro.** `on_paste` recibe el evento como argumento, así
+      que mientras la llamada esté en la pila el texto es alcanzable por cualquier renderizado que
+      muestre argumentos o locales —pytest por defecto, y el manejador de fallos de `textual`—. La
+      auditoría lo **reprodujo ejecutando**: con un pegado real y el sumidero fallando en el sexto
+      carácter, la traza mostraba `event = Paste(text='<la credencial>')`. Estaba en el camino
+      feliz, que es el error que este proyecto ya ha cometido antes. Se corrige con un `finally`
+      que vacía la referencia pase lo que pase, y hay un test que provoca la excepción de verdad y
+      lee la traza en los cinco estilos de `--tb`. **La ventana se reduce a la duración del bucle;
+      no desaparece**: un fallo *dentro* del bucle sigue teniendo el evento vivo en ese instante,
+      solo que ya no queda nada después.
+   2. **`pasted_text`, en un frame que no es nuestro.** Un local del frame suspendido del generador
+      del parser de `textual` conserva una copia completa hasta el siguiente pegado con corchetes.
+      Una traza con locales que pasara por ahí la mostraría, porque ese frame no lo escribimos
+      nosotros y no lleva `Secret`. No hay forma de alcanzarlo desde este paquete.
 
    *Qué sí está en nuestra mano, y se hace*: soltar la referencia en cuanto se consume.
-   `Paste.text` es escribible, así que el manejador la vacía después de recorrerla, y el mensaje
-   que el bus conserva deja de llevar la credencial —igual que su `__rich_repr__`, que es lo que
-   imprimiría una consola de devtools o un log de mensajes—. Es todo lo que se puede estrechar el
-   instante; lo demás no depende de nosotros y así está dicho.
+   `Paste.text` es escribible, así que el manejador la vacía **en un `finally`** después de
+   recorrerla, y el mensaje que el bus conserva deja de llevar la credencial —igual que su
+   `__rich_repr__`, que es lo que imprimiría una consola de devtools o un log de mensajes—. Es
+   todo lo que se puede estrechar el instante; lo demás no depende de nosotros y así está dicho.
 
    *Por qué se acepta*: la molestia de no poder pegar es **diaria y segura** —un gestor de
    contraseñas es la forma normal de escribir una credencial— y el riesgo es **estrecho y raro**.
@@ -507,11 +520,14 @@ Consecuencias que hay que declarar sin adornos:
 
    *Qué sigue garantizado*, que es lo que el modelo de amenaza pide de verdad: no se muestra en
    pantalla, no entra en registros, no sale en una captura y no aparece en ningún mensaje de error
-   construido por **nuestro** código.
+   construido por **nuestro** código —incluidos los que se construyen cuando algo falla a mitad de
+   un pegado, que es justo lo que la auditoría encontró roto y ahora tiene test propio—.
 
    La regla estática que prohibía leer `.text` se **acota** en vez de retirarse: ahora prohíbe
-   *copiarlo* —ligarlo a un nombre, guardarlo en un atributo o pasarlo a una llamada— y permite las
-   dos formas que sí tienen sentido, recorrerlo en el sitio y vaciarlo.
+   *copiarlo* —ligarlo a un nombre, guardarlo en un atributo o pasarlo a una llamada, se escriba
+   con punto o con `getattr`— y permite las dos formas que sí tienen sentido, recorrerlo en el
+   sitio y vaciarlo. Sigue siendo análisis estático y sigue teniendo agujeros conocidos; están
+   enumerados en el propio archivo del guardarraíl, que es donde se leen.
 4. **La máscara enseña la longitud, y solo mientras el campo tiene el foco.** `cli-experience.md`
    §4 dice que ni enmascarada se muestra la password, y esa frase se refiere a la **recapitulación**
    —seguir sin mostrarla ahí—; un campo de entrada es otra cosa, es el editor. Aun así la longitud
