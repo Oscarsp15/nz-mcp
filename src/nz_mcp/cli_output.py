@@ -208,12 +208,18 @@ def _terminfo_declares_full_screen(term: str) -> bool:
     POSIX only; on Windows there is no terminfo and the question is answered by
     :func:`rich.console.detect_legacy_windows` instead.
 
-    ``curses.setupterm`` is the same lookup every curses program does, and it fails for a
-    terminal type the system has never heard of. On top of that the entry has to declare
-    absolute cursor addressing, which is the one capability a full-screen wizard cannot
-    work around. Anything that goes wrong here - no terminfo database, a broken entry, a
-    build of Python without ``curses`` - counts as "no guarantees", because that is what
-    it is.
+    ``curses.setupterm`` is the same lookup every curses program does, and the entry it
+    finds has to declare absolute cursor addressing - the one capability a full-screen
+    wizard cannot work around. Anything that goes wrong - no terminfo database at all, a
+    broken entry, a build of Python without ``curses`` - counts as "no guarantees",
+    because that is what it is.
+
+    One thing this deliberately does **not** promise: that an unknown terminal type is
+    rejected. Measured on the CI runners, ncurses answers a name it has never seen with a
+    usable fallback entry rather than an error, and that behaviour differs between builds.
+    So the portable part of the trigger is the one the caller applies - ``TERM`` has to be
+    set at all - and this lookup is what catches the systems where the database really is
+    missing or useless.
     """
     try:
         import curses  # noqa: PLC0415 - POSIX only, and only on this path

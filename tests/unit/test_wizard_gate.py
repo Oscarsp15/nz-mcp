@@ -141,11 +141,16 @@ def test_a_posix_terminal_without_guarantees_closes_it(
 
     ``TERM=dumb`` is not the only way to have no guarantees. An empty or unset ``TERM`` is
     routine inside containers and in some multiplexed SSH sessions, and a value the host's
-    terminfo database has never heard of is routine when the client's terminal type is not
+    terminfo database cannot use is routine when the client's terminal type is not
     installed on the server. In both cases the three streams *are* terminals and the window
     *is* a good size, so not one of the other six triggers fires - and a full-screen
     application would start with no guarantee that any escape sequence or key it uses means
     anything. Because the size is fine, the live-resize net would not catch it either.
+
+    The lookup is stubbed here, and whether a real ncurses rejects an invented name is not
+    something this asserts - see
+    :func:`test_the_terminfo_lookup_answers_about_the_real_database`. What is asserted is
+    the wiring: when the lookup says no, the gate closes with this reason.
     """
     open_the_gate(monkeypatch)
     monkeypatch.setattr(os, "name", "posix")
@@ -183,12 +188,32 @@ def test_windows_does_not_ask_terminfo_because_there_is_none(
 def test_the_terminfo_lookup_answers_about_the_real_database() -> None:
     """The stub above has to stand for something real, so here it is unstubbed.
 
-    ``xterm`` is present on any system that has a terminfo database at all; the other name
-    is not going to be. Without this test, the four above would prove only that a lambda
-    returns what it was told to.
+    Only the positive direction is asserted, and that is a finding rather than laziness:
+    the first version of this test also asserted that an invented terminal name comes back
+    unknown, and **ncurses on the CI runners answered it with a usable fallback entry
+    instead of an error**. Which way a given build goes is not portable, so asserting it
+    would be asserting the runner rather than the code.
+
+    What that leaves is honest and is what the docstring of the lookup now says: the
+    portable half of this trigger is ``TERM`` being set at all, tested just below against
+    the real function, and the lookup is what catches a system whose terminfo database is
+    missing or unusable.
     """
     assert out._terminfo_declares_full_screen("xterm")
-    assert not out._terminfo_declares_full_screen("nz-mcp-no-such-terminal-9137")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="terminfo is a POSIX database")
+def test_an_unset_term_closes_the_gate_without_consulting_any_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The container case, against the real function rather than a stub.
+
+    No ``TERM`` at all is the common way to end up here, and it is decided before terminfo
+    is asked anything - so this half of the trigger holds on every POSIX system, whatever
+    its ncurses does with names it does not recognise.
+    """
+    monkeypatch.delenv("TERM", raising=False)
+    assert not out._terminal_type_is_capable()
 
 
 def test_a_console_without_vt_sequences_closes_it(monkeypatch: pytest.MonkeyPatch) -> None:
