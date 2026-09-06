@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from nz_mcp import __version__
+from nz_mcp import __version__, cli_output
 from nz_mcp.auth import get_password, store_password
 from nz_mcp.cli import app
 from nz_mcp.config import get_profile, list_profile_names, load_profiles_file
@@ -63,16 +63,19 @@ def test_edit_profile_no_flags_noop(two_profiles: Path) -> None:
 
 
 def test_serve_runs_stdio_server(monkeypatch: pytest.MonkeyPatch) -> None:
-    called = False
+    """``serve`` hands the transport the private stdout, never ``sys.stdout``."""
+    received: dict[str, object] = {}
 
-    def _fake_run_stdio_server() -> None:
-        nonlocal called
-        called = True
+    def _fake_run_stdio_server(*, protocol_stdout: object = None) -> None:
+        received["protocol_stdout"] = protocol_stdout
+        received["reserved_while_running"] = cli_output.stdout_is_reserved()
 
     monkeypatch.setattr("nz_mcp.cli.run_stdio_server", _fake_run_stdio_server)
     result = runner.invoke(app, ["serve"])
     assert result.exit_code == 0
-    assert called is True
+    assert received["reserved_while_running"] is True
+    assert received["protocol_stdout"] is not None, "the transport got no private stream"
+    assert cli_output.stdout_is_reserved() is False, "the reservation was not released"
 
 
 def test_doctor_smoke_ok(two_profiles: Path) -> None:

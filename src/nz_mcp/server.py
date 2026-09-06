@@ -6,7 +6,7 @@ import inspect
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TextIO, cast
 
 import anyio
 from mcp import types
@@ -239,16 +239,34 @@ def build_mcp_server(*, config_path: Path | None = None) -> Server[Any, Any]:
     return server
 
 
-def run_stdio_server(*, config_path: Path | None = None) -> None:
-    """Run the MCP server on stdio using the official MCP SDK transport."""
+def run_stdio_server(
+    *,
+    config_path: Path | None = None,
+    protocol_stdout: TextIO | None = None,
+) -> None:
+    """Run the MCP server on stdio using the official MCP SDK transport.
+
+    Args:
+        config_path: Optional profiles file to use instead of the default one.
+        protocol_stdout: Stream the JSON-RPC answers are written to. The CLI passes the
+            private duplicate of descriptor 1 built by
+            ``nz_mcp.cli_output.stdout_reserved_for_protocol``, so the protocol does not
+            travel through ``sys.stdout`` and a stray write cannot reach it. When ``None``
+            the SDK falls back to ``sys.stdout``, which is the right default for a caller
+            that has not moved the descriptor.
+    """
     configure_logging_for_stdio()
-    anyio.run(_run_stdio_server_async, config_path)
+    anyio.run(_run_stdio_server_async, config_path, protocol_stdout)
 
 
-async def _run_stdio_server_async(config_path: Path | None) -> None:
+async def _run_stdio_server_async(
+    config_path: Path | None,
+    protocol_stdout: TextIO | None,
+) -> None:
     server = build_mcp_server(config_path=config_path)
     options = server.create_initialization_options()
-    async with stdio_server() as (read_stream, write_stream):
+    stdout = anyio.wrap_file(protocol_stdout) if protocol_stdout is not None else None
+    async with stdio_server(stdout=stdout) as (read_stream, write_stream):
         await server.run(read_stream, write_stream, options)
 
 

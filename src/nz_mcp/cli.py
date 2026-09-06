@@ -285,9 +285,11 @@ def test_connection_cmd(
 @app.command("serve")
 def serve_cmd() -> None:
     """Run the MCP server over stdio."""
+    # Logging is configured first so structlog binds the real stderr; only then is
+    # descriptor 1 handed over to the protocol.
     configure_logging_for_stdio()
-    out.reserve_stdout_for_protocol()
-    run_stdio_server()
+    with out.stdout_reserved_for_protocol() as protocol_stdout:
+        run_stdio_server(protocol_stdout=protocol_stdout)
 
 
 # --- helpers ------------------------------------------------------------------

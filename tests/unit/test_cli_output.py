@@ -85,24 +85,32 @@ def test_status_is_styled_when_color_is_on(
     assert _ESC in capsys.readouterr().err
 
 
-def test_reserving_stdout_turns_a_stray_payload_write_into_a_loud_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_reserving_stdout_turns_a_stray_payload_write_into_a_loud_error() -> None:
     """In serve mode a payload write is a corrupted protocol; it must raise, not print."""
-    monkeypatch.setitem(cli_output._STATE, "stdout_reserved", False)
     assert cli_output.stdout_is_reserved() is False
-    cli_output.reserve_stdout_for_protocol()
-    assert cli_output.stdout_is_reserved() is True
-    with pytest.raises(RuntimeError, match="reserved for MCP JSON-RPC"):
-        cli_output.emit("this would break Claude Desktop")
+    with cli_output.stdout_reserved_for_protocol():
+        assert cli_output.stdout_is_reserved() is True
+        with pytest.raises(RuntimeError, match="reserved for MCP JSON-RPC"):
+            cli_output.emit("this would break Claude Desktop")
+
+
+def test_the_reservation_gives_the_descriptors_back_on_exit() -> None:
+    """It is a context manager on purpose: a test suite must not lose its stdout."""
+    before = os.dup(1)
+    try:
+        with cli_output.stdout_reserved_for_protocol():
+            pass
+        assert cli_output.stdout_is_reserved() is False
+        assert os.fstat(1).st_ino == os.fstat(before).st_ino
+    finally:
+        os.close(before)
 
 
 def test_status_still_works_after_stdout_is_reserved(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setitem(cli_output._STATE, "stdout_reserved", False)
-    cli_output.reserve_stdout_for_protocol()
-    cli_output.warn("stderr sigue disponible")
+    with cli_output.stdout_reserved_for_protocol():
+        cli_output.warn("stderr sigue disponible")
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "stderr sigue disponible" in captured.err

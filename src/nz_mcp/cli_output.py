@@ -35,16 +35,28 @@ colour is off, so redirected or piped output stays plain text.
 
 Protocol reservation
 --------------------
-``serve`` calls :func:`reserve_stdout_for_protocol` before handing stdout to the
-MCP transport. From that point :func:`emit` raises instead of writing: a loud,
-attributable failure beats a silently corrupted JSON-RPC stream.
+``serve`` runs inside :func:`stdout_reserved_for_protocol`, which works at the
+**file descriptor** level and not by convention: descriptor 1 is duplicated to a
+private one, descriptor 1 itself is pointed at stderr, and the private duplicate is
+handed to the MCP transport as an explicit stream.
+
+The consequence is that the protocol has no name any more. ``sys.stdout`` still
+exists and still works — it just resolves to descriptor 1, which is now stderr — so
+``os.write(1, ...)``, a forgotten ``print``, a third-party library or a C extension
+all land on stderr and physically cannot corrupt the JSON-RPC stream. Nothing
+reaches the protocol except the object the transport was given. A name-based source
+check can only ever be an incomplete blacklist; this is the part that holds by
+construction.
 """
 
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import sys
-from typing import Final, Literal, Protocol
+from collections.abc import Iterator
+from typing import Final, Literal, Protocol, TextIO
 
 import typer
 
@@ -60,7 +72,12 @@ _STYLE_COLORS: Final[dict[Style, str | None]] = {
 
 _DUMB_TERM: Final[str] = "dumb"
 
-# One-way switch flipped by ``serve``. A dict keeps the state mutable without a
+#: Standard descriptors. The guarantee is about these numbers, not about the
+#: ``sys.stdout`` object: that is the whole point of doing it down here.
+_STDOUT_FD: Final[int] = 1
+_STDERR_FD: Final[int] = 2
+
+# Flipped while ``serve`` owns stdout. A dict keeps the state mutable without a
 # ``global`` statement and lets tests reset it explicitly.
 _STATE: Final[dict[str, bool]] = {"stdout_reserved": False}
 
@@ -88,13 +105,65 @@ def color_enabled(stream: SupportsIsatty | None = None) -> bool:
     return bool(target.isatty())
 
 
-def reserve_stdout_for_protocol() -> None:
-    """Declare stdout off-limits for human text; called before serving MCP over stdio.
+@contextlib.contextmanager
+def stdout_reserved_for_protocol() -> Iterator[TextIO | None]:
+    """Move the real stdout out of reach and yield it for the MCP transport.
 
-    Idempotent and deliberately one-way: a process that has started speaking
-    JSON-RPC never goes back to being a terminal UI.
+    Three things happen, in this order:
+
+    1. Descriptor 1 is duplicated. That private duplicate still points at the real
+       standard output of the process — the pipe the MCP client reads.
+    2. Descriptor 1 is overwritten with a duplicate of descriptor 2. Anything that
+       writes to "stdout" the naive way, at any level of the stack, now writes to
+       stderr: ``os.write(1, ...)``, ``print``, ``sys.stdout.write``, a C extension,
+       a dependency this project never reviewed.
+    3. The private duplicate is yielded as a text stream. The caller hands it to the
+       transport explicitly, so the protocol is reachable *only* through that object.
+
+    ``sys.stdout`` is deliberately **not** rebound to the protocol stream. Doing so
+    would put the protocol back under a well-known name and a stray ``print`` — the
+    single most likely mistake — would corrupt it again. Left alone, ``sys.stdout``
+    keeps writing to descriptor 1, which is now stderr: harmless.
+
+    It is a context manager, not a one-way switch, so a process that exercises
+    ``serve`` — a test suite, a wrapper — gets its descriptors back afterwards.
+
+    Yields:
+        The protocol stream, or ``None`` when descriptor 1 cannot be duplicated (no
+        usable stdout, as under ``pythonw``). ``None`` means "let the transport pick
+        its own stream": there is nothing to protect in that case. The reservation
+        flag is set either way, so :func:`emit` keeps refusing to write.
     """
+    try:
+        protocol_fd = os.dup(_STDOUT_FD)
+    except OSError:
+        _STATE["stdout_reserved"] = True
+        try:
+            yield None
+        finally:
+            _STATE["stdout_reserved"] = False
+        return
+
+    with contextlib.suppress(ValueError, OSError, AttributeError):
+        sys.stdout.flush()
+    os.dup2(_STDERR_FD, _STDOUT_FD)
+    # ``closefd=False``: this wrapper never owns ``protocol_fd``; the finally block
+    # below is the only place allowed to close it.
+    protocol_stream = io.TextIOWrapper(
+        os.fdopen(protocol_fd, "wb", closefd=False),
+        encoding="utf-8",
+        newline="\n",
+        line_buffering=True,
+    )
     _STATE["stdout_reserved"] = True
+    try:
+        yield protocol_stream
+    finally:
+        _STATE["stdout_reserved"] = False
+        with contextlib.suppress(ValueError, OSError):
+            protocol_stream.flush()
+        os.dup2(protocol_fd, _STDOUT_FD)
+        os.close(protocol_fd)
 
 
 def stdout_is_reserved() -> bool:
@@ -106,10 +175,10 @@ def emit(message: str = "") -> None:
     """Write command payload to stdout, unstyled.
 
     Raises:
-        RuntimeError: When stdout has been reserved for the MCP protocol. This
-            is the by-construction half of the guarantee that the contract test
-            ``tests/contract/test_serve_stdout_protocol_only.py`` checks at
-            runtime.
+        RuntimeError: While stdout belongs to the MCP protocol. The descriptor
+            swap in :func:`stdout_reserved_for_protocol` already makes such a
+            write harmless, but harmless is not the same as intended: failing
+            here names the line that should have used :func:`status`.
     """
     if _STATE["stdout_reserved"]:
         raise RuntimeError(
@@ -187,9 +256,9 @@ __all__: Final[tuple[str, ...]] = (
     "fail",
     "heading",
     "note",
-    "reserve_stdout_for_protocol",
     "status",
     "stdout_is_reserved",
+    "stdout_reserved_for_protocol",
     "success",
     "warn",
 )
