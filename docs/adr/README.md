@@ -65,5 +65,6 @@ Ver [tech-lead.md](../roles/tech-lead.md#plantilla-adr-para-copiar-a-docsadrnnnn
 | 0027 | [Adoptar `rich` como dependencia directa acotada para la presentación del CLI](0027-adoptar-rich-para-la-presentacion-del-cli.md) | aceptado | 2026-09-05 |
 | 0028 | [El asistente de configuración es la única excepción al ADR 0005](0028-asistente-de-configuracion-interactivo.md) | aceptado (enmienda el 0005) | 2026-09-06 |
 | 0029 | [Adoptar `textual` acotado y confinado para el asistente de configuración](0029-adoptar-textual-para-el-asistente-de-configuracion.md) | aceptado | 2026-09-06 |
+| 0030 | [El menú interactivo es la segunda excepción al ADR 0005](0030-menu-interactivo-como-punto-de-entrada.md) | aceptado (amplía el 0028) | 2026-09-06 |
 
 > **Colisión de numeración**: dos ADR comparten el número `0014`. Las referencias en prosa a "ADR 0014" del CHANGELOG y de la ADR 0015 apuntan a [`0014-tool-execute-ddl.md`](0014-tool-execute-ddl.md). No se renumeran para no romper esos enlaces.

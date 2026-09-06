@@ -85,17 +85,20 @@ _FORBIDDEN_DYNAMIC: Final[frozenset[tuple[str, str]]] = frozenset(
 #: - ``rich``: ``rich.console.Console`` writes to **stdout** by default — exactly the byte
 #:   that corrupts the JSON-RPC of ``serve`` — so condition 2 of ADR 0027 confines the whole
 #:   package to ``cli_output.py``, where the channel is decided once.
-#: - ``textual``: condition 2 of ADR 0029 confines it to the wizard package, and pointedly
-#:   **not** to the output layer, which would then be two things at once. It writes to
+#: - ``textual``: condition 2 of ADR 0029 confines it to the two full-screen surfaces this
+#:   project has - the wizard (ADR 0028) and the menu (ADR 0030) - and pointedly **not** to
+#:   the output layer, which would then be two things at once. It writes to
 #:   ``sys.__stdout__``, which a name-based protection would miss entirely; the descriptor
 #:   swap covers it, and this keeps it away from the ``serve`` import graph as well.
 #:
 #: The values are paths under ``src/nz_mcp`` and match as prefixes, so a whole directory
-#: can own a package. Everything outside its home is forbidden — including, for each of
-#: these two, the home of the other.
-_LAYER_ONLY_MODULES: Final[dict[str, str]] = {
-    "rich": "cli_output.py",
-    "textual": "wizard",
+#: can own a package. Everything outside the homes of a package is forbidden - including,
+#: for each of these two, the home of the other. A package may have more than one home:
+#: what this check is about is that the list is short, closed and written down, not that it
+#: has exactly one entry.
+_LAYER_ONLY_MODULES: Final[dict[str, tuple[str, ...]]] = {
+    "rich": ("cli_output.py",),
+    "textual": ("wizard", "menu"),
 }
 
 _ANSI: Final[re.Pattern[str]] = re.compile("\x1b\\[")
@@ -373,8 +376,8 @@ def _confined_elsewhere(relative: Path) -> frozenset[str]:
     """Which confined packages this module is not allowed to import."""
     return frozenset(
         package
-        for package, home in _LAYER_ONLY_MODULES.items()
-        if relative.parts[: len(Path(home).parts)] != Path(home).parts
+        for package, homes in _LAYER_ONLY_MODULES.items()
+        if not any(relative.parts[: len(Path(home).parts)] == Path(home).parts for home in homes)
     )
 
 
