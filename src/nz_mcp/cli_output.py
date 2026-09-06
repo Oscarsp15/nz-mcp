@@ -48,6 +48,12 @@ be produced: a real terminal (``isatty``), no ``NO_COLOR``, no ``TERM=dumb``.
 The result is passed explicitly to ``click``, which strips the sequences when
 colour is off, so redirected or piped output stays plain text.
 
+:func:`interactive_ui_blocker` is the same detection asked a harder question:
+may a **full-screen** application start here? It is the gate of ADR 0028,
+condition 1, and it lives in this module for the reason everything else about
+terminals does - one place decides. It returns a value and builds nothing; it
+does not import ``textual`` and never will. The wizard is the only caller.
+
 Protocol reservation
 --------------------
 ``serve`` runs inside :func:`stdout_reserved_for_protocol`, which works at the
@@ -70,6 +76,7 @@ import contextlib
 import io
 import itertools
 import os
+import shutil
 import sys
 import threading
 from collections.abc import Callable, Iterator, Sequence
@@ -77,7 +84,7 @@ from typing import Final, Literal, Protocol, TextIO
 
 import typer
 from rich import box
-from rich.console import Console
+from rich.console import Console, detect_legacy_windows
 from rich.table import Table
 
 Style = Literal["plain", "heading", "success", "warning", "error"]
@@ -171,6 +178,100 @@ def animation_enabled(stream: SupportsIsatty | None = None) -> bool:
         return False
     target = sys.stderr if stream is None else stream
     return bool(target.isatty())
+
+
+#: Escape hatch of ADR 0028, condition 1. Anyone whose terminal, multiplexer or remote
+#: session makes the full-screen wizard a bad deal sets this once in their shell profile
+#: and never thinks about it again.
+NO_TUI_ENV: Final[str] = "NZ_MCP_NO_TUI"
+
+#: Why the full-screen wizard did not start, when it did not. Names, not sentences: the
+#: caller decides whether any of this is worth showing, and tests assert on them.
+InteractiveBlocker = Literal[
+    "opted_out",
+    "term_dumb",
+    "no_terminal",
+    "console_without_vt",
+    "window_too_small",
+]
+
+
+def _opted_out_of_the_tui() -> bool:
+    """Whether ``NZ_MCP_NO_TUI`` asks for the chained questions.
+
+    Any value counts except the two that conventionally mean "no", so that
+    ``NZ_MCP_NO_TUI=1`` and ``NZ_MCP_NO_TUI=true`` do the same obvious thing and
+    ``NZ_MCP_NO_TUI=0`` does not silently disable a wizard someone wanted.
+    """
+    value = os.environ.get(NO_TUI_ENV, "").strip().lower()
+    return bool(value) and value not in ("0", "false")
+
+
+def interactive_ui_blocker(*, min_width: int, min_height: int) -> InteractiveBlocker | None:
+    """Report why a full-screen application must not start here, or ``None`` if it may.
+
+    This is the gate of ADR 0028, condition 1, and it lives here because every piece of
+    terminal detection this project owns lives here. It decides a value; it builds
+    nothing, imports no TUI library and has no opinion about what the caller does next.
+
+    The gate has to be ours. Measured on ``textual`` 8.2.8: the word ``dumb`` does not
+    appear anywhere in the package, and the single ``isatty`` in its drivers decides *how*
+    to read input rather than *whether* to start. A TUI library will try to paint wherever
+    it is allowed to; declining is this project's job.
+
+    The five start-up triggers, in the order that costs least to check:
+
+    1. ``NZ_MCP_NO_TUI`` - an explicit request, honoured without argument.
+    2. ``TERM=dumb`` - a terminal that has told us it understands nothing.
+    3. No terminal at all on input, payload or status: redirected, piped, in CI, or
+       driven by another process. Note that ``nz-mcp init > block.json``, which the
+       install guide suggests, lands here on purpose.
+    4. A Windows console that does not speak VT sequences. Legacy code pages turn box
+       drawing into ``?``; the wizard is ASCII, but a console without VT cannot position
+       a cursor either.
+    5. A window below the declared minimum. The sixth trigger - shrinking below it
+       *during* the session - cannot be seen from here and belongs to the application.
+
+    Args:
+        min_width: Narrowest window the caller can draw itself in, in cells.
+        min_height: Shortest window the caller can draw itself in, in cells.
+
+    Returns:
+        The name of the first trigger that fired, or ``None`` when none did.
+    """
+    if _opted_out_of_the_tui():
+        return "opted_out"
+    if os.environ.get("TERM", "").strip().lower() == _DUMB_TERM:
+        return "term_dumb"
+    if not all(_is_a_terminal(stream) for stream in (sys.stdin, sys.stdout, sys.stderr)):
+        return "no_terminal"
+    if detect_legacy_windows():
+        return "console_without_vt"
+    size = shutil.get_terminal_size()
+    if size.columns < min_width or size.lines < min_height:
+        return "window_too_small"
+    return None
+
+
+def interactive_ui_enabled(*, min_width: int, min_height: int) -> bool:
+    """Whether a full-screen application may start. See :func:`interactive_ui_blocker`."""
+    return interactive_ui_blocker(min_width=min_width, min_height=min_height) is None
+
+
+def _is_a_terminal(stream: object) -> bool:
+    """Whether ``stream`` is a real terminal, tolerating a stream that has been replaced.
+
+    Test runners and wrappers swap the standard streams for objects that do not implement
+    the whole protocol; anything that cannot answer the question is treated as not a
+    terminal, which degrades rather than crashes.
+    """
+    isatty = getattr(stream, "isatty", None)
+    if not callable(isatty):
+        return False
+    try:
+        return bool(isatty())
+    except (ValueError, OSError):  # pragma: no cover - stream closed underneath us
+        return False
 
 
 def _write_live(text: str) -> None:
@@ -470,6 +571,8 @@ def confirm(prompt: str, *, default: bool = False) -> bool:
 
 
 __all__: Final[tuple[str, ...]] = (
+    "NO_TUI_ENV",
+    "InteractiveBlocker",
     "Style",
     "SupportsIsatty",
     "animation_enabled",
@@ -481,6 +584,8 @@ __all__: Final[tuple[str, ...]] = (
     "emit",
     "fail",
     "heading",
+    "interactive_ui_blocker",
+    "interactive_ui_enabled",
     "note",
     "progress",
     "status",

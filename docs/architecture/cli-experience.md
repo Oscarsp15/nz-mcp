@@ -113,6 +113,8 @@ Media buena noticia verificada: `typer.secho` delega en `click.echo`, que **ya**
 
 Sin frontend, sin UI propia, sin TUI navegable. Esto es formato y progreso en comandos puntuales. Nada de este diseño captura el teclado, dibuja pantallas ni ofrece menús navegables. El menú de cuatro opciones del asistente, que ya existe, es un `prompt` de una letra, no una TUI.
 
+> **Enmienda posterior (2026-09-06).** El [ADR 0028](../adr/0028-asistente-de-configuracion-interactivo.md) permite un interfaz de pantalla completa **en el asistente de configuración y solo en él**, con la degradación al camino de texto como requisito. Todo lo que este documento decide sobre los otros diez comandos sigue igual, y el menú de cuatro opciones sigue existiendo: es el que corre cuando el asistente degrada, y el que se ejecuta tras la escalera de validación en los dos caminos.
+
 ### R4 — La librería no la decide este documento
 
 Ver sección 7.
@@ -231,7 +233,7 @@ Segunda persona y presente. Sin culpa ni dramatismo. Sin marketing y sin emoji d
 
 Un diseño que solo suma no es un diseño.
 
-1. **Ni TUI, ni menús navegables, ni captura de teclado.** ADR 0005. Y el CLI se usa por SSH, dentro de contenedores y desde otros procesos; una TUI se rompe en los tres.
+1. **Ni TUI, ni menús navegables, ni captura de teclado.** ADR 0005. Y el CLI se usa por SSH, dentro de contenedores y desde otros procesos; una TUI se rompe en los tres. **Acotado desde el 2026-09-06 por el [ADR 0028](../adr/0028-asistente-de-configuracion-interactivo.md)**, que abre la excepción para el asistente de configuración —y solo para él— con la degradación como requisito: los tres escenarios de arriba son precisamente los que la disparan. Las otras doce prohibiciones de esta lista se aplican también dentro del asistente.
 2. **Ni una barra de porcentaje donde no hay denominador.** Netezza no informa del avance de una consulta. Una barra que avanza sola miente, y una mentira animada es peor que una espera honesta. Indeterminado salvo en `probe-catalog`, donde el 14 es real.
 3. **Ni banner, ni logo ASCII, ni versión en cada arranque.** Es la forma más barata y peor de ser *llamativo*: cuesta líneas en **cada** invocación, ensucia todos los logs pegados en issues, y solo entretiene la primera vez. Lo llamativo se gana en los momentos de la sección 1, no en la cabecera.
 4. **Ni emoji como marcador de estado.** Roto en la consola de Windows por página de códigos (comprobado), ilegible por lectores de pantalla, y de ancho impredecible al alinear columnas. ASCII.

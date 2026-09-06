@@ -136,7 +136,13 @@ Each profile lives in `~/.nz-mcp/profiles.toml`; the password goes to the OS key
 
 ### The guided wizard step by step
 
-`nz-mcp init` and `nz-mcp add-profile <name>` explain every non-obvious concept in one line before asking for it:
+`nz-mcp init` and `nz-mcp add-profile <name>` open a **screen with all eight fields at once**: Tab moves between them, any one can be corrected without redoing the others, the screen says what is still missing and explains the field you are on. The password is asked for **outside** the screen, with the echo off, and never appears in it.
+
+If your terminal cannot host that screen — output redirected or piped, `TERM=dumb`, a Windows console without VT sequences, or a window smaller than 60x21 — the wizard **falls back on its own** to the same eight chained questions as always, with no warning and no error, and configures exactly the same profile. If you would rather always have the questions, set `NZ_MCP_NO_TUI=1` in your shell. And if you shrink the window halfway through, it switches to the questions **keeping everything you had already typed**.
+
+The other commands (`test-connection`, `list-profiles`, `switch-profile`, `edit-profile`, `remove-profile`, `doctor`, `probe-catalog`, `version` and `serve`) stay plain text: they run, print and finish.
+
+Both paths explain every non-obvious concept in one line before asking for it:
 
 - **Mode**: `read` queries only, `write` adds data writes, `admin` adds DDL. The mode **grants** no Netezza privilege: it only narrows the ones your user already has.
 - **Security level** (`security_level`, default `2`): whether the connection is encrypted and whether TLS is mandatory.

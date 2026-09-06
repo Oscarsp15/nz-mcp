@@ -30,6 +30,7 @@ import os
 import shutil
 import sys
 import sysconfig
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, cast
@@ -52,8 +53,6 @@ from nz_mcp.config import (
     DEFAULT_PORT,
     DEFAULT_SECURITY_LEVEL,
     DEFAULT_TIMEOUT_S,
-    MAX_SECURITY_LEVEL,
-    MIN_SECURITY_LEVEL,
     PermissionMode,
     Profile,
     ProfilesFile,
@@ -88,6 +87,17 @@ from nz_mcp.profile_check import (
 from nz_mcp.secret import Secret
 from nz_mcp.server import run_stdio_server
 from nz_mcp.tools.session import SwitchProfileInput, nz_switch_profile
+from nz_mcp.wizard import (
+    MIN_HEIGHT,
+    MIN_WIDTH,
+    DraftFields,
+    as_previous,
+    collect_profile_draft,
+    from_previous,
+    normalize_mode,
+    normalize_port,
+    normalize_security_level,
+)
 
 #: Language of ``--help``. Resolved once, at import time, because typer captures the ``help=``
 #: strings while the decorators run: by the time a command executes, the help screen has
@@ -596,7 +606,8 @@ class _ProfileDraft:
     ca_certs: str | None
 
 
-_MODES: Final[tuple[str, ...]] = ("read", "write", "admin")
+#: The eight things the wizard asks for, in the order it asks them. Also the menu of
+#: "fix one field" after a failed validation, which is why the credential is on the list.
 _DRAFT_FIELDS: Final[tuple[str, ...]] = (
     "host",
     "port",
@@ -616,7 +627,7 @@ def _add_profile_interactive(*, name: str, set_active: bool) -> None:
         _confirm_overwrite_or_exit(name, locale)
     previous = file.profiles.get(name, {})
     out.note(t("CLI.WIZARD_INTRO", locale, profile=name))
-    draft = _prompt_draft(locale, previous)
+    draft = _collect_draft(name, previous, locale)
 
     if not _validate_before_saving(name, draft, previous, locale):
         out.warn(t("CLI.WIZARD_CANCELLED", locale, path=profiles_path()))
@@ -631,17 +642,122 @@ def _add_profile_interactive(*, name: str, set_active: bool) -> None:
     out.note(t("CLI.PROBE_SUGGESTION", locale, profile=name))
 
 
+# --- collecting the draft: full screen when the terminal allows it -------------
+
+
+class _CredentialHolder:
+    """Where the drafted credential lives while the wizard is on screen.
+
+    Outside every widget tree, which is the whole point (ADR 0029, condition 5). The
+    full-screen wizard is handed a callable that fills this in and answers *"is there one
+    now?"* with a boolean; it has no reference to the object and no way to read it.
+
+    ``Secret`` and not ``str`` for the reason the ADR 0026 gives: this value is a frame
+    argument of half the wizard, and a traceback prints frame arguments.
+    """
+
+    __slots__ = ("value",)
+
+    def __init__(self) -> None:
+        self.value: Secret | None = None
+
+
+def _credential_collector(holder: _CredentialHolder, locale: Locale) -> Callable[[], bool]:
+    """Build the "ask for the credential" callable the full-screen wizard is given.
+
+    It goes through ``cli_output.ask_secret`` exactly like the chained questions do - echo
+    off, typed twice - because it runs on the real terminal, inside ``App.suspend()``.
+    Aborting the prompt (Ctrl+C, end of input) leaves whatever was already held instead of
+    tearing the session down: the escape hatch is Esc, not a broken pipe.
+    """
+
+    def collect() -> bool:
+        try:
+            holder.value = _prompt_password(locale)
+        except typer.Abort:
+            return holder.value is not None
+        return True
+
+    return collect
+
+
+def _collect_draft(name: str, previous: dict[str, object], locale: Locale) -> _ProfileDraft:
+    """Get the eight answers, full screen where that works and by questions where it does not.
+
+    Both paths end in the same place - a ``_ProfileDraft`` - and everything after this
+    function is shared: the three-level ladder, the four ways out of a failure and the
+    write to ``profiles.toml`` and the keyring (ADR 0028, condition 2).
+
+    Three exits from the full-screen path:
+
+    - ``completed``: the draft is built from what the form holds.
+    - ``cancelled``: nothing is written, and the message is the one the chained wizard
+      already uses for the same decision.
+    - ``degraded``: the window went below the minimum mid-session. What was typed becomes
+      the **defaults** of the chained questions, so the answers survive the fall (issue
+      #168), and the credential survives with them if it had already been given.
+    """
+    holder = _CredentialHolder()
+    if out.interactive_ui_enabled(min_width=MIN_WIDTH, min_height=MIN_HEIGHT):
+        result = collect_profile_draft(
+            profile=name,
+            initial=from_previous(previous),
+            password_set=False,
+            ask_password=_credential_collector(holder, locale),
+            locale=locale,
+        )
+        if result.status == "cancelled":
+            out.warn(t("CLI.WIZARD_CANCELLED", locale, path=profiles_path()))
+            raise typer.Exit(code=1)
+        if result.status == "completed":
+            return _draft_from_fields(result.fields, holder, locale)
+        out.warn(t("CLI.WIZARD_UI_DEGRADED", locale, width=MIN_WIDTH, height=MIN_HEIGHT))
+        previous = {**previous, **as_previous(result.fields)}
+    return _prompt_draft(locale, previous, password=holder.value)
+
+
+def _draft_from_fields(
+    fields: DraftFields, holder: _CredentialHolder, locale: Locale
+) -> _ProfileDraft:
+    """Turn the form's text into the typed draft the rest of the wizard already speaks.
+
+    The form only lets through values that parse, so the fallbacks here are for the type
+    checker rather than for a person; they land on the same defaults the questions use.
+    """
+    port = normalize_port(fields.port)
+    mode = normalize_mode(fields.mode)
+    level = normalize_security_level(fields.security_level)
+    return _ProfileDraft(
+        host=fields.host.strip(),
+        port=DEFAULT_PORT if port is None else port,
+        database=fields.database.strip(),
+        user=fields.user.strip(),
+        password=holder.value if holder.value is not None else _prompt_password(locale),
+        mode="read" if mode is None else mode,
+        security_level=DEFAULT_SECURITY_LEVEL if level is None else level,
+        ca_certs=fields.ca_certs.strip() or None,
+    )
+
+
 # --- wizard prompts (one explanation per non-obvious concept) ------------------
 
 
-def _prompt_draft(locale: Locale, previous: dict[str, object]) -> _ProfileDraft:
-    """Ask for every field, defaulting to the current value when overwriting a profile."""
+def _prompt_draft(
+    locale: Locale, previous: dict[str, object], *, password: Secret | None = None
+) -> _ProfileDraft:
+    """Ask for every field, defaulting to the current value when overwriting a profile.
+
+    ``password`` short-circuits the one question that cannot be defaulted: when the
+    full-screen wizard degraded after the credential had already been typed, asking for it
+    again would be the one thing this wizard promises never to do - make someone repeat
+    what they already answered.
+    """
     return _ProfileDraft(
         host=out.ask(t("CLI.WIZARD_HOST_PROMPT", locale), default=_text(previous, "host")),
         port=_prompt_port(locale, _number(previous, "port", DEFAULT_PORT)),
         database=_prompt_database(locale, _text(previous, "database")),
         user=out.ask(t("CLI.WIZARD_USER_PROMPT", locale), default=_text(previous, "user")),
-        password=_prompt_password(locale),
+        password=_prompt_password(locale) if password is None else password,
         mode=_prompt_mode(locale, str(previous.get("mode") or "read")),
         security_level=_prompt_security_level(
             locale, _number(previous, "security_level", DEFAULT_SECURITY_LEVEL)
@@ -678,9 +794,11 @@ def _prompt_mode(locale: Locale, default: str) -> PermissionMode:
     out.note(t("CLI.WIZARD_MODE_EXPLAIN", locale))
     while True:
         raw = out.ask(t("CLI.WIZARD_MODE_PROMPT", locale), default=default)
-        value = raw.strip().lower()
-        if value in _MODES:
-            return cast(PermissionMode, value)
+        # Same parser the full-screen wizard uses, so "what counts as a mode" is answered
+        # once for both paths instead of twice, slightly differently (ADR 0028, cond. 2).
+        mode = normalize_mode(raw)
+        if mode is not None:
+            return mode
         out.fail(t("CLI.WIZARD_MODE_INVALID", locale, value=raw))
 
 
@@ -688,9 +806,9 @@ def _prompt_security_level(locale: Locale, default: int) -> int:
     out.note(t("CLI.WIZARD_SECURITY_EXPLAIN", locale))
     while True:
         raw = out.ask(t("CLI.WIZARD_SECURITY_PROMPT", locale), default=str(default))
-        value = raw.strip()
-        if value.isdigit() and MIN_SECURITY_LEVEL <= int(value) <= MAX_SECURITY_LEVEL:
-            return int(value)
+        level = normalize_security_level(raw)
+        if level is not None:
+            return level
         out.fail(t("CLI.WIZARD_SECURITY_INVALID", locale, value=raw))
 
 
