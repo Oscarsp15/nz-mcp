@@ -2,6 +2,8 @@
 
 Notes:
 - ``isolated_keyring`` autouse: every test gets a fresh in-memory keyring backend.
+- ``unreserved_stdout`` autouse: ``serve`` reserves stdout for the MCP protocol process-wide,
+  so a test that exercises it must not leave the flag set for the next one.
 - Explicitly enabled integration tests are the single exception: they authenticate against
   a real Netezza with the credential of a real profile, so keyring reads go through to the
   OS backend. Writes stay blocked even there (see ``_readonly_real_keyring``).
@@ -17,7 +19,7 @@ from pathlib import Path
 import keyring as _keyring
 import pytest
 
-from nz_mcp import config
+from nz_mcp import cli_output, config
 
 #: Opt-in switch for the integration suite; see docs/standards/testing.md.
 RUN_INTEGRATION_ENV = "NZ_MCP_RUN_INTEGRATION"
@@ -95,6 +97,17 @@ def isolated_keyring(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(_keyring, "get_password", _get)
     monkeypatch.setattr(_keyring, "delete_password", _delete)
     monkeypatch.setattr(_keyring, "get_keyring", _get_keyring)
+
+
+@pytest.fixture(autouse=True)
+def unreserved_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Start every test with stdout available for command payload.
+
+    ``nz-mcp serve`` reserves stdout for JSON-RPC for the rest of the process; in a real
+    run that is exactly right, but inside a single pytest process it would leak into every
+    later test. ``monkeypatch.setitem`` restores whatever the test left behind.
+    """
+    monkeypatch.setitem(cli_output._STATE, "stdout_reserved", False)
 
 
 @pytest.fixture
