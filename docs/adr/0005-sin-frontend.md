@@ -1,8 +1,20 @@
 # ADR 0005 — Sin frontend ni UI propia
 
 - **Fecha**: 2026-04-16
-- **Estado**: aceptado
+- **Estado**: aceptado — **enmendado en un punto por el [ADR 0028](0028-asistente-de-configuracion-interactivo.md)** (2026-09-06)
 - **Decidido por**: Tech Lead (IA) + validación humana
+
+> **Enmienda vigente**: la línea *"CLI de configuración (`nz-mcp init`, etc.) — texto puro, sin
+> TUI"* y la alternativa 3 (*"TUI con `textual` para `nz-mcp init`"*, rechazada) quedan
+> **acotadas al asistente de configuración** por el
+> [ADR 0028](0028-asistente-de-configuracion-interactivo.md), que permite un interfaz navegable
+> **solo** en `nz-mcp init` y en la rama interactiva de `nz-mcp add-profile`, con degradación
+> obligatoria al asistente de texto. La librería la decide el
+> [ADR 0029](0029-adoptar-textual-para-el-asistente-de-configuracion.md).
+>
+> **Todo lo demás de este ADR sigue vigente sin cambios**: sin frontend, sin UI propia, sin assets
+> HTML/CSS/JS, sin MCP UI resources, sin dashboard, y el resto de comandos del CLI en texto puro.
+> El contenido que sigue se conserva tal como se escribió el 2026-04-16.
 
 ## Contexto
 
