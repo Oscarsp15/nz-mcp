@@ -51,6 +51,7 @@
 | `i18n`, `traducción`, `mensaje usuario`, `español`, `english`, `locale` | [standards/i18n.md](docs/standards/i18n.md) |
 | `README`, `docs`, `descripción tool`, `documentación` | [roles/technical-writer.md](docs/roles/technical-writer.md) · [standards/i18n.md](docs/standards/i18n.md) |
 | `tool description`, `prompt`, `cómo IA usa tool`, `UX IA` | [roles/dx-engineer.md](docs/roles/dx-engineer.md) |
+| `UX CLI`, `experiencia terminal`, `salida CLI`, `progreso`, `spinner`, `tabla CLI`, `tono mensajes` | [roles/dx-engineer.md](docs/roles/dx-engineer.md) · [standards/i18n.md](docs/standards/i18n.md) · [adr/0005-sin-frontend.md](docs/adr/0005-sin-frontend.md) |
 | `arquitectura`, `decisión`, `ADR`, `diseño` | [arch/overview.md](docs/architecture/overview.md) · nuevo ADR en `docs/adr/` |
 
 **Si tu acción NO aparece en la tabla → detente y pregunta al humano.**
@@ -85,7 +86,7 @@ Según la acción, asume uno de estos roles senior y lee su doc:
 | Tests, mocks, cobertura | QA Engineer | [roles/qa-engineer.md](docs/roles/qa-engineer.md) |
 | CI/CD, PyPI, SemVer, releases | Release Engineer / OSS | [roles/release-engineer.md](docs/roles/release-engineer.md) |
 | Documentación, README ES/EN | Technical Writer | [roles/technical-writer.md](docs/roles/technical-writer.md) |
-| Tool descriptions, UX para la IA | DX Engineer | [roles/dx-engineer.md](docs/roles/dx-engineer.md) |
+| Tool descriptions y UX para la IA; experiencia del CLI para la persona | DX Engineer | [roles/dx-engineer.md](docs/roles/dx-engineer.md) |
 
 Todos los roles se trabajan **a nivel senior**: si dudas entre dos enfoques, elige el más defensivo, el más testeable y el más explícito.
 
