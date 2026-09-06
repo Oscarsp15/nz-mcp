@@ -10,18 +10,20 @@ the ordinary terminal, through ``cli_output`` (ADR 0028, condition 2 and risk 4:
 full-screen interface clears the screen on exit, so the diagnosis has to be written where
 it survives).
 
-The credential (ADR 0029, condition 5)
---------------------------------------
+The credential (ADR 0029, condition 5, and its adenda 2)
+-------------------------------------------------------
 It never enters the widget tree. Two things make that so, and they are not equally strong:
 
-- **By construction**: the only door into this package is
-  ``ask_password: Callable[[], bool]``, and that signature cannot carry a string across.
-  The state model is :class:`nz_mcp.wizard.fields.DraftFields`, which has no password
-  field, plus one boolean; asking for the credential happens outside, inside
-  ``App.suspend()``, on the real terminal.
+- **By construction**: there are two doors, and neither can bring a credential *in*.
+  ``ask_password: Callable[[], bool]`` hands back a boolean, and
+  ``credential: CredentialSink`` is write-only by its own protocol - it takes a character
+  at an index and can never be asked what it holds. The state model is
+  :class:`nz_mcp.wizard.fields.DraftFields`, which has no password field, plus one
+  boolean, plus the counters of :class:`nz_mcp.wizard.secret_field.SecretField`.
 - **By test**: ``tests/contract/test_wizard_credential_guardrail.py`` runs the real
-  application through the real credential path and searches the finished widget tree for
-  the value. **That test is the guarantee** and must not be weakened.
+  application through both credential paths and searches the finished widget tree, the
+  application's own state and a framework screenshot for the value. **That test is the
+  guarantee** and must not be weakened.
 
 The same file also carries a set of allowlists over this package's source - imports,
 parameters, attributes, fields, constants, and what may reach a widget. That part is
@@ -55,6 +57,7 @@ from nz_mcp.wizard.fields import (
     FIELD_SPECS,
     MIN_HEIGHT,
     MIN_WIDTH,
+    CredentialSink,
     DraftFields,
     WizardResult,
     WizardStatus,
@@ -62,6 +65,7 @@ from nz_mcp.wizard.fields import (
     label_key,
     missing_slots,
 )
+from nz_mcp.wizard.secret_field import SecretField
 
 #: Prefix of the id of every editable row, so ``#field-host`` reads as what it is.
 _FIELD_ID_PREFIX: Final[str] = "field-"
@@ -104,7 +108,7 @@ class ProfileWizardApp(App[WizardResult]):
     }
     /* No padding: this row has to line up with the values of the fields above it, and
        a compact Input starts its text right at the edge. */
-    #credential-state {
+    SecretField {
         height: 1;
     }
     #explain {
@@ -131,6 +135,10 @@ class ProfileWizardApp(App[WizardResult]):
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
+        # Enter means the same thing in the credential row as in the other seven. The
+        # ``Input`` widgets consume it themselves and answer with ``Input.Submitted``, so
+        # this binding only ever fires for the one field that is not an ``Input``.
+        Binding("enter", "submit", "", show=False),
         Binding("ctrl+s", "submit", "", show=False),
         Binding("escape", "cancel", "", show=False),
         Binding("ctrl+p", "ask_credential", "", show=False),
@@ -147,6 +155,7 @@ class ProfileWizardApp(App[WizardResult]):
         initial: DraftFields,
         password_set: bool,
         ask_password: Callable[[], bool],
+        credential: CredentialSink,
         locale: Locale,
     ) -> None:
         """Build the screen.
@@ -160,6 +169,8 @@ class ProfileWizardApp(App[WizardResult]):
             ask_password: Asks for the credential outside this application and returns
                 whether one is now held. It returns a boolean by contract: this object has
                 no way to read what it collected.
+            credential: Where the secure field puts each keystroke. Write-only by its own
+                protocol, so nothing on this screen can read the credential back.
             locale: Language of every visible string.
         """
         super().__init__()
@@ -169,8 +180,10 @@ class ProfileWizardApp(App[WizardResult]):
         self._initial: DraftFields = initial
         self._password_set: bool = password_set
         self._ask_password: Callable[[], bool] = ask_password
+        self._credential: CredentialSink = credential
         self._locale: Locale = locale
         self._mounted: bool = False
+        self._paste_refused: bool = False
 
     # --- composition ---------------------------------------------------------
 
@@ -201,7 +214,9 @@ class ProfileWizardApp(App[WizardResult]):
                 yield Label(
                     t(label_key(CREDENTIAL_SLOT), self._locale), classes="label", markup=False
                 )
-                yield Static("", id="credential-state", markup=False)
+                # The eighth row is a field like the others now, except that what it holds
+                # is a counter. See ``secret_field`` for what that buys and what it costs.
+                yield SecretField(credential=self._credential, locale=self._locale)
             yield Static("", id="explain", markup=False)
             yield Static("", id="status", markup=False)
             yield Static(t("CLI.WIZARD_UI_KEYS", self._locale), id="keys", markup=False)
@@ -230,6 +245,19 @@ class ProfileWizardApp(App[WizardResult]):
 
     def on_input_changed(self, event: Input.Changed) -> None:
         del event  # the whole form is re-read; which field changed does not matter
+        self._paste_refused = False
+        self._update_state()
+
+    def on_secret_field_changed(self, event: SecretField.Changed) -> None:
+        """The credential row says *whether* there is one. That is all it ever says."""
+        self._password_set = event.held
+        self._paste_refused = False
+        self._update_state()
+
+    def on_secret_field_paste_rejected(self, event: SecretField.PasteRejected) -> None:
+        """A paste was dropped unread. Say so, and say what to do instead."""
+        del event  # it carries nothing, deliberately
+        self._paste_refused = True
         self._update_state()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -256,7 +284,11 @@ class ProfileWizardApp(App[WizardResult]):
             self._finish("completed")
             return
         if missing[0] == CREDENTIAL_SLOT:
-            self.action_ask_credential()
+            # It used to suspend the whole interface here. Now it moves the focus to the
+            # row that is missing, exactly like every other field: that seam is the one
+            # issue #224 exists to remove. Ctrl+P is still there for whoever wants it.
+            self.query_one(SecretField).focus()
+            self._update_state()
             return
         self._focus_slot(missing[0])
         self._update_state()
@@ -265,7 +297,13 @@ class ProfileWizardApp(App[WizardResult]):
         self._finish("cancelled")
 
     def action_ask_credential(self) -> None:
-        """Ask for the credential on the real terminal, never inside a widget.
+        """Ask for the credential on the real terminal. The net, kept on purpose.
+
+        Since issue #224 the credential can be typed on the screen, in a field that holds
+        a counter instead of the text. This path stays anyway, because it is the answer to
+        the two cases the field cannot serve: a paste from a password manager, which the
+        field refuses for a measured reason (see :mod:`nz_mcp.wizard.secret_field`), and
+        anyone who would simply rather not type a credential into a full-screen interface.
 
         ``App.suspend()`` hands the terminal back so ``cli_output.ask_secret()`` can turn
         the echo off and ask for the confirmation exactly as it does in the chained
@@ -281,6 +319,11 @@ class ProfileWizardApp(App[WizardResult]):
             captured = self._ask_password()
         if captured:
             self._password_set = True
+            # The field is told there is one, and not how long it is: it goes back to a
+            # counter of zero and says so, so nothing about a credential typed off screen
+            # ends up drawn on screen.
+            self.query_one(SecretField).mark_held_elsewhere()
+        self._paste_refused = False
         self.refresh()
         self._update_state()
 
@@ -313,11 +356,7 @@ class ProfileWizardApp(App[WizardResult]):
         )
 
     def _update_state(self) -> None:
-        """Recompute the two lines that change: the credential row and the status line."""
-        state_key = (
-            "CLI.WIZARD_UI_PASSWORD_SET" if self._password_set else "CLI.WIZARD_UI_PASSWORD_UNSET"
-        )
-        self.query_one("#credential-state", Static).update(t(state_key, self._locale))
+        """Recompute the status line. The credential row repaints itself, from its counter."""
         message, marker = self._status_line()
         status = self.query_one("#status", Static)
         status.set_classes(f"-{marker}")
@@ -329,6 +368,10 @@ class ProfileWizardApp(App[WizardResult]):
         Colour only underlines it. The sentence carries the whole meaning, so redirecting
         the terminal or not seeing colour costs nothing (``cli-experience.md`` §6.5).
         """
+        if self._paste_refused:
+            # The most recent thing the person did, so it goes first: they pressed a key
+            # combination and nothing appeared, and silence there reads as a broken field.
+            return t("CLI.WIZARD_UI_PASSWORD_NO_PASTE", self._locale), "invalid"
         draft = self._read_draft()
         shape = first_shape_error(draft)
         if shape is not None:
@@ -349,6 +392,13 @@ class ProfileWizardApp(App[WizardResult]):
         in sync.
         """
         focused = self.focused
+        if isinstance(focused, SecretField):
+            # The credential row gets the same treatment as the rest: the sentence the
+            # chained questions print before asking, shown while the answer is written.
+            self.query_one("#explain", Static).update(
+                t("CLI.WIZARD_PASSWORD_EXPLAIN", self._locale)
+            )
+            return
         widget_id = "" if focused is None else (focused.id or "")
         slot = widget_id.removeprefix(_FIELD_ID_PREFIX) if widget_id else ""
         spec = next((item for item in FIELD_SPECS if item.key == slot), None)

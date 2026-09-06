@@ -41,9 +41,11 @@ be established by looking at the shape of source code, only by running it and ch
 The pattern is the point. It is the same lesson as the stdout barrier, where what held was
 not the AST detector but the private descriptor the protocol moved to.
 
-The one thing that does hold by construction here is neither of these tests: the single
-door into this package is ``ask_password: Callable[[], bool]``, and that signature cannot
-carry a string across. These tests are what stops someone widening that door quietly.
+The one thing that does hold by construction here is neither of these tests: the two doors
+into this package are ``ask_password: Callable[[], bool]``, which hands back a boolean, and
+``credential: CredentialSink``, which is write-only by its own protocol - it takes one
+character at an index and cannot be asked what it holds. Neither can bring a credential
+*in*. These tests are what stops someone widening a door quietly.
 
 The allowlists, and why they are allowlists
 -------------------------------------------
@@ -56,6 +58,7 @@ Allowlist    What it pins
 ``FIELDS``   every field of ``DraftFields``, which is the only data object here
 ``MODULE``   every module-level name the package may define
 ``WIDGETS``  the expressions allowed to reach a widget, when built and via ``setattr``
+``PASTE``    the attribute reads that are forbidden outright, ``.text`` being the paste
 ============ =========================================================================
 
 Naming what is allowed is still much better than naming what is forbidden - a blacklist is
@@ -75,10 +78,12 @@ from pathlib import Path
 from typing import Any, Final
 
 import pytest
+from textual.widgets import Input
 
 from nz_mcp.i18n import Locale
 from nz_mcp.wizard.app import ProfileWizardApp
 from nz_mcp.wizard.fields import DraftFields
+from nz_mcp.wizard.secret_field import SecretField
 
 # --- the six allowlists -------------------------------------------------------
 #
@@ -120,16 +125,33 @@ _ALLOWED_PARAMETERS: Final[frozenset[tuple[str, str]]] = frozenset(
         ("draft", "DraftFields"),
         ("password_set", "bool"),
         ("previous", "dict[str, object]"),
+        # nz_mcp.wizard.fields - the write-only door of CredentialSink. ``character`` is
+        # the one parameter in this package that carries a piece of the credential, and it
+        # carries exactly one character, in the direction widget -> outside. The protocol
+        # it belongs to has no way to read anything back (issue #224).
+        ("index", "int"),
+        ("character", "str"),
+        ("start", "int"),
+        ("stop", "int"),
         # nz_mcp.wizard.app / __init__ - building and running the screen
         ("profile", "str"),
         ("initial", "DraftFields"),
         ("ask_password", "Callable[[], bool]"),
+        ("credential", "CredentialSink"),
         ("locale", "Locale"),
         ("event", "events.Resize"),
         ("event", "Input.Changed"),
         ("event", "Input.Submitted"),
         ("event", "events.DescendantFocus"),
+        ("event", "SecretField.Changed"),
+        ("event", "SecretField.PasteRejected"),
         ("status", "WizardStatus"),
+        # nz_mcp.wizard.secret_field - the counter, the key it reacts to, and the boolean
+        # it publishes. Not one of them is a place a credential could sit.
+        ("event", "events.Key"),
+        ("event", "events.Paste"),
+        ("key", "str"),
+        ("held", "bool"),
     }
 )
 
@@ -144,8 +166,17 @@ _ALLOWED_APP_STATE: Final[dict[str, tuple[str, bool]]] = {
     "_initial": ("DraftFields", True),
     "_password_set": ("bool", False),
     "_ask_password": ("Callable[[], bool]", False),
+    "_credential": ("CredentialSink", False),
     "_locale": ("Locale", True),
     "_mounted": ("bool", False),
+    "_paste_refused": ("bool", False),
+    # ``SecretField``: the whole of it. Three integers and a boolean, which is the claim
+    # issue #224 makes and the reason a screenshot of this field cannot leak anything.
+    "_length": ("int", False),
+    "_cursor": ("int", False),
+    "_anchor": ("int", False),
+    "_external": ("bool", False),
+    "held": ("bool", False),
 }
 
 #: Every field of :class:`DraftFields`, which is the only object in this package that
@@ -178,6 +209,12 @@ _ALLOWED_MODULE_NAMES: Final[frozenset[str]] = frozenset(
         "_SHAPE_ERROR_KEYS",
         # nz_mcp.wizard.app
         "_FIELD_ID_PREFIX",
+        # nz_mcp.wizard.secret_field - what the mask is drawn with, and which keys edit it
+        "_MASK",
+        "_SELECTED",
+        "_CARET",
+        "_NO_SELECTION",
+        "_EDIT_KEYS",
         # nz_mcp.wizard
         "__all__",
     }
@@ -205,6 +242,21 @@ _STRUCTURAL_WIDGET_KEYWORDS: Final[frozenset[str]] = frozenset(
 #: arguments choose a catalog entry and a language; its keyword arguments are interpolated
 #: into the text, so those are checked like any other content.
 _CATALOG_LOOKUP: Final[str] = "t"
+
+#: Widgets this package defines itself. Without them, ``SecretField(...)`` would not look
+#: like a widget to rule 6 and everything handed to it would go unchecked.
+_LOCAL_WIDGETS: Final[frozenset[str]] = frozenset({"SecretField"})
+
+#: The one keyword that may hand a widget the write-only credential sink, and the only
+#: expression allowed to fill it. Anything else under this name is a violation, so
+#: ``credential=`` cannot become a way to smuggle a value into a widget.
+_SINK_KEYWORD: Final[str] = "credential"
+_SINK_SOURCE: Final[str] = "self._credential"
+
+#: Attribute reads that are forbidden anywhere in the package. ``text`` is how
+#: ``events.Paste`` carries the whole pasted string; the field refuses the paste without
+#: reading it, and this is what keeps that true after somebody edits the file (issue #224).
+_FORBIDDEN_ATTRIBUTES: Final[frozenset[str]] = frozenset({"text"})
 
 #: Carved out of an allowed package. ``textual`` is on the import allowlist because the
 #: wizard is built with it, and a prefix match would let its developer tooling in with it;
@@ -385,9 +437,14 @@ def _module_name_violations(tree: ast.AST) -> Iterator[str]:
 
 
 def _is_widget_call(node: ast.Call, aliases: dict[str, str]) -> bool:
-    """Whether this call builds something that comes from ``textual``."""
+    """Whether this call builds a widget: one of ``textual``'s, or one of ours."""
     dotted = _dotted(node.func)
-    return dotted is not None and _resolved(dotted, aliases).split(".")[0] == "textual"
+    if dotted is None:
+        return False
+    resolved = _resolved(dotted, aliases)
+    if resolved.split(".")[0] == "textual":
+        return True
+    return resolved.rsplit(".", maxsplit=1)[-1] in _LOCAL_WIDGETS
 
 
 def _is_allowed_content(node: ast.expr, aliases: dict[str, str], drafts: frozenset[str]) -> bool:
@@ -490,11 +547,35 @@ def _widget_content_violations(tree: ast.AST) -> Iterator[str]:
                 shown = ast.unparse(argument)
                 yield f"line {node.lineno}: widget given {shown}, which is not an allowed source"
         for keyword in node.keywords:
+            if keyword.arg == _SINK_KEYWORD:
+                # The sink is the one non-content object a widget may be handed, and only
+                # from the one attribute that is declared to be one.
+                if _dotted(keyword.value) != _SINK_SOURCE:
+                    shown = ast.unparse(keyword.value)
+                    yield f"line {node.lineno}: widget given credential={shown}, not the sink"
+                continue
             if keyword.arg in _STRUCTURAL_WIDGET_KEYWORDS or keyword.value is None:
                 continue
             if not _is_allowed_content(keyword.value, aliases, drafts):
                 shown = f"{keyword.arg}={ast.unparse(keyword.value)}"
                 yield f"line {node.lineno}: widget given {shown}, which is not an allowed source"
+
+
+# --- rule 7: the pasted string is never read ----------------------------------
+
+
+def _forbidden_attribute_violations(tree: ast.AST) -> Iterator[str]:
+    """No expression in this package may read a forbidden attribute.
+
+    Only one is forbidden today: ``text``, which is where ``events.Paste`` keeps the whole
+    pasted string. Measured on ``textual`` 8.2.8, that string is built by the parser before
+    any handler of ours runs and outlives the handler inside the message pump, so the field
+    refuses the paste **without reading it**. A rule rather than a comment, because the
+    tempting one-liner - ``for c in event.text: ...`` - looks perfectly innocent.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr in _FORBIDDEN_ATTRIBUTES:
+            yield f"line {node.lineno}: reads .{node.attr}, which carries the whole paste"
 
 
 # --- extras -------------------------------------------------------------------
@@ -526,6 +607,7 @@ def collect_credential_violations(source: str) -> list[str]:
         *_draft_field_violations(tree),
         *_module_name_violations(tree),
         *_widget_content_violations(tree),
+        *_forbidden_attribute_violations(tree),
         *_dump_violations(tree),
     ]
 
@@ -592,6 +674,25 @@ _INJECTED_VIOLATIONS: Final[tuple[tuple[str, str], ...]] = (
         "setattr(field, 'value', cache['whatever'])\n",
     ),
     # The ways the old blacklist did catch, kept so the coverage never narrows.
+    # The ways issue #224 opened, each closed by a rule of its own.
+    (
+        "reading-the-pasted-string",
+        "def on_paste(self, event: events.Paste) -> None:\n"
+        "    for character in event.text:\n"
+        "        self._credential.insert(0, character)\n",
+    ),
+    (
+        "reading-the-pasted-string-under-another-name",
+        "buffer = pasted.text\n",
+    ),
+    (
+        "the-secure-field-built-with-something-else-as-its-sink",
+        "SecretField(credential=fetch_it(), locale=locale)\n",
+    ),
+    (
+        "the-secure-field-given-content-of-its-own",
+        "SecretField(credential=self._credential, locale=self._locale, value=cache['x'])\n",
+    ),
     ("secret-import", "from nz_mcp.secret import Secret\n"),
     ("auth-import", "from nz_mcp.auth import get_password\n"),
     ("keyring-import", "import keyring\n"),
@@ -660,6 +761,14 @@ def test_the_guardrail_rejects_an_injected_violation(source: str) -> None:
             "def read(draft: DraftFields) -> None:\n    setattr(draft, spec.key, widget.value)\n",
             id="reading-a-widget-back-into-the-draft",
         ),
+        pytest.param(
+            "SecretField(credential=self._credential, locale=self._locale)\n",
+            id="the-secure-field-with-its-sink",
+        ),
+        pytest.param(
+            "def insert(self, index: int, character: str) -> None:\n    pass\n",
+            id="the-write-only-sink",
+        ),
     ],
 )
 def test_the_guardrail_does_not_flag_the_shape_that_is_allowed(source: str) -> None:
@@ -672,13 +781,31 @@ def test_the_guardrail_does_not_flag_the_shape_that_is_allowed(source: str) -> N
 _LABORATORY_CREDENTIAL: Final[str] = "zzq-guardrail-Nunca-En-Un-Widget-9137"
 
 
+def _closure_contents(value: Any) -> list[Any]:
+    """What the cells of ``value``'s closure hold, skipping the ones not yet filled."""
+    held: list[Any] = []
+    for cell in getattr(value, "__closure__", None) or ():
+        try:
+            held.append(cell.cell_contents)
+        except ValueError:  # an empty cell, which holds nothing to find
+            continue
+    return held
+
+
 def _search(value: Any, needle: str, seen: set[int], depth: int = 0) -> bool:
     """Whether ``needle`` appears anywhere reachable from ``value``.
 
-    Deliberately blunt: strings, containers, dataclasses, ``__dict__`` and ``__slots__``.
+    Deliberately blunt: strings, containers, dataclasses, ``__dict__``, ``__slots__`` -
+    and, since issue #224, the three hiding places a callable gives you: the cells of a
+    closure, the instance a bound method is bound to, and the function behind it.
+
+    Those three were added because the design changed. The wizard now hands a widget an
+    object that can write into the credential store, so "is it reachable from a widget"
+    stopped being answerable without following callables; a search that did not would be
+    agreeing with the code instead of testing it.
     A widget tree is a graph, so visited objects are remembered and the depth is bounded.
     """
-    if depth > 6 or id(value) in seen:
+    if depth > 8 or id(value) in seen:
         return False
     seen.add(id(value))
     if isinstance(value, str | bytes):
@@ -688,28 +815,57 @@ def _search(value: Any, needle: str, seen: set[int], depth: int = 0) -> bool:
         return any(_search(item, needle, seen, depth + 1) for item in value.values())
     if isinstance(value, list | tuple | set | frozenset):
         return any(_search(item, needle, seen, depth + 1) for item in value)
+    return any(_search(item, needle, seen, depth + 1) for item in _reachable_from(value))
+
+
+def _reachable_from(value: Any) -> list[Any]:
+    """Everything an ordinary object can be holding, hiding places included."""
+    reachable: list[Any] = [
+        getattr(value, hidden) for hidden in ("__self__", "__func__") if hasattr(value, hidden)
+    ]
+    reachable.extend(_closure_contents(value))
     attributes = getattr(value, "__dict__", None)
-    if isinstance(attributes, dict) and _search(attributes, needle, seen, depth + 1):
-        return True
-    slots = getattr(type(value), "__slots__", ())
-    return any(
-        _search(getattr(value, slot, None), needle, seen, depth + 1)
-        for slot in slots
+    if isinstance(attributes, dict):
+        reachable.append(attributes)
+    reachable.extend(
+        getattr(value, slot, None)
+        for slot in getattr(type(value), "__slots__", ()) or ()
         if isinstance(slot, str)
     )
+    return reachable
+
+
+class _Sink:
+    """The real shape of ``cli._CredentialHolder``: characters, apart, outside the tree."""
+
+    def __init__(self) -> None:
+        self.characters: list[str] = []
+
+    def insert(self, index: int, character: str) -> None:
+        self.characters.insert(index, character)
+
+    def remove(self, start: int, stop: int) -> None:
+        del self.characters[start:stop]
+
+    def clear(self) -> None:
+        self.characters.clear()
+
+    def joined(self) -> str:
+        return "".join(self.characters)
 
 
 @pytest.mark.contract
 @pytest.mark.asyncio
 async def test_the_real_wizard_never_lets_the_credential_into_a_widget() -> None:
-    """**This is the guarantee.** The real path, a real value, and then a search for it.
+    """**This is the guarantee.** The real paths, a real value, and then a search for it.
 
-    It runs the application, presses the key that asks for the credential, lets the real
-    callable return a real value, and then goes looking for that value in every widget of
-    the finished tree, in the application's own attributes and in what it hands back. It
-    checks the fact rather than the shape of the source, which is why no way of writing
-    the code gets past it - and why it is the test the ``Secret`` regression of PR #193
-    did not have.
+    It runs the application and drives **both** ways a credential can arrive since issue
+    #224: typed key by key into the secure field, and asked for on the terminal with
+    Ctrl+P. Then it goes looking for the value in every widget of the finished tree, in
+    the application's own attributes, in a screenshot taken by the framework itself and in
+    what the wizard hands back. It checks the fact rather than the shape of the source,
+    which is why no way of writing the code gets past it - and why it is the test the
+    ``Secret`` regression of PR #193 did not have.
 
     If a future change makes this awkward, **do not weaken it**: the static allowlists in
     this file are defence in depth and do not substitute for it. Three separate audits
@@ -718,11 +874,14 @@ async def test_the_real_wizard_never_lets_the_credential_into_a_widget() -> None
     It also checks the shape of the result: what leaves the wizard is a **boolean**.
     """
     captured: list[str] = []
+    sink = _Sink()
 
     def ask_password() -> bool:
-        # Stands in for cli_output.ask_secret(): the value is collected out here, where
-        # the CLI keeps it in a Secret, and only a boolean crosses into the application.
-        captured.append(_LABORATORY_CREDENTIAL)
+        # Stands in for cli._credential_collector: the value is collected out here, taken
+        # apart into characters exactly as ``_CredentialHolder.accept`` does, and only a
+        # boolean crosses into the application. Recording it whole here would put it in
+        # this closure, which the search follows - and it would be right to fail.
+        captured.extend(_LABORATORY_CREDENTIAL)
         return True
 
     application = ProfileWizardApp(
@@ -730,9 +889,25 @@ async def test_the_real_wizard_never_lets_the_credential_into_a_widget() -> None
         initial=DraftFields(host="nz.example.com", database="DB", user="svc"),
         password_set=False,
         ask_password=ask_password,
+        credential=sink,
         locale="es",
     )
     async with application.run_test(size=(80, 24)) as pilot:
+        # Path 1: the secure field. Every character goes through the widget's key handler.
+        application.query_one(SecretField).focus()
+        await pilot.press(*_LABORATORY_CREDENTIAL)
+        await pilot.pause()
+        typed = sink.joined()
+        widgets_while_typing = list(application.screen.walk_children())
+        typed_leaks = [
+            type(widget).__name__
+            for widget in widgets_while_typing
+            if _search(widget, _LABORATORY_CREDENTIAL, set())
+        ]
+        # A screenshot of the framework, taken while the field holds the credential. The
+        # ADR forbids this call in production, which is exactly why the test makes it.
+        screenshot = application.export_screenshot()
+        # Path 2: the terminal, still there as the net.
         await pilot.press("ctrl+p")
         await pilot.pause()
         await pilot.press("enter")
@@ -744,9 +919,13 @@ async def test_the_real_wizard_never_lets_the_credential_into_a_widget() -> None
             if _search(widget, _LABORATORY_CREDENTIAL, set())
         ]
 
-    assert captured == [_LABORATORY_CREDENTIAL], "the credential path did not run"
+    assert typed == _LABORATORY_CREDENTIAL, "the secure field did not deliver what was typed"
+    assert "".join(captured) == _LABORATORY_CREDENTIAL, "the credential path did not run"
     assert widgets, "the widget tree was empty, so this test proved nothing"
+    assert typed_leaks == [], f"what was typed reached these widgets: {typed_leaks}"
     assert leaks == [], f"the credential reached these widgets: {leaks}"
+    assert _LABORATORY_CREDENTIAL not in screenshot, "the credential is in a framework screenshot"
+    assert "*" in screenshot, "the mask was not drawn, so the screenshot proved nothing"
     assert not _search(application.__dict__, _LABORATORY_CREDENTIAL, set()), (
         "the credential is in the application's own state"
     )
@@ -771,6 +950,7 @@ async def test_the_leak_search_would_find_a_credential_that_did_reach_a_widget()
         initial=DraftFields(),
         password_set=False,
         ask_password=lambda: True,
+        credential=_Sink(),
         locale="es",
     )
     async with application.run_test(size=(80, 24)) as pilot:
@@ -779,9 +959,33 @@ async def test_the_leak_search_would_find_a_credential_that_did_reach_a_widget()
         field.value = _LABORATORY_CREDENTIAL  # type: ignore[attr-defined]
         await pilot.pause()
         found = _search(field, _LABORATORY_CREDENTIAL, set())
+        screenshot = application.export_screenshot()
         await pilot.press("escape")
 
     assert found, "the search cannot see a value sitting in a widget; it proves nothing"
+    assert _LABORATORY_CREDENTIAL in screenshot, (
+        "a screenshot cannot see a value that is on screen; the clean one proves nothing"
+    )
+
+
+@pytest.mark.contract
+@pytest.mark.asyncio
+async def test_the_leak_search_follows_a_credential_hidden_behind_a_callable() -> None:
+    """The three hiding places issue #224 added to the search, exercised.
+
+    The wizard hands a widget an object that writes into the credential store, so "not in
+    a widget" is only meaningful if the search follows callables. A closure, a bound method
+    and the store behind them are the routes that matters; if the search could not see
+    through them it would be agreeing with the code rather than testing it.
+    """
+    leaky = _Sink()
+    leaky.characters = [_LABORATORY_CREDENTIAL]
+
+    def through_a_closure() -> object:
+        return leaky
+
+    assert _search(through_a_closure, _LABORATORY_CREDENTIAL, set()), "closures are not followed"
+    assert _search(leaky.insert, _LABORATORY_CREDENTIAL, set()), "bound methods are not followed"
 
 
 def _locales() -> tuple[Locale, ...]:
@@ -794,28 +998,35 @@ def _locales() -> tuple[Locale, ...]:
 async def test_the_credential_row_says_whether_there_is_one_and_nothing_else(
     locale: Locale,
 ) -> None:
-    """The screen shows a state, in both languages, and never a masked value.
+    """Unfocused, the row shows a state in both languages, and never a mask.
 
-    ``cli-experience.md`` §4 is explicit that not even a masked credential belongs on
-    screen: a mask is still an invitation to check over someone's shoulder.
+    ``cli-experience.md`` §4 is explicit that not even a masked credential belongs on the
+    screen someone leaves behind: a mask is still an invitation to check over a shoulder,
+    and its length is information. So the mask exists only while the field has the focus -
+    which is the moment the person is looking at their own keyboard anyway - and a
+    credential given on the terminal is never drawn at all, not even as a length.
     """
-    from textual.widgets import Static
-
     application = ProfileWizardApp(
         profile="dev",
         initial=DraftFields(),
         password_set=False,
         ask_password=lambda: True,
+        credential=_Sink(),
         locale=locale,
     )
     async with application.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
-        before = str(application.query_one("#credential-state", Static).content)
+        field = application.query_one(SecretField)
+        before = field.render()
         await pilot.press("ctrl+p")
         await pilot.pause()
-        after = str(application.query_one("#credential-state", Static).content)
+        after = field.render()
+        application.query_one("#field-host", Input).focus()
+        await pilot.pause()
+        unfocused = field.render()
         await pilot.press("escape")
 
     assert before != after
-    assert "*" not in after, "a masked value is still a value on screen"
+    assert "*" not in after, "a credential given on the terminal must not be drawn at all"
+    assert "*" not in unfocused, "an unattended screen must not carry even the length"
     assert after.strip(), "the row has to say something once the credential is set"

@@ -14,14 +14,15 @@ Two properties are deliberate and load-bearing:
 - **No credential.** :class:`DraftFields` holds the seven fields that are safe to keep in
   a widget and stops there; the password is never one of them (ADR 0029, condition 5,
   clause 1). What travels next to these fields is a boolean, "set" or "not set", and the
-  value itself lives in a ``Secret`` outside every widget tree.
+  value itself lives outside every widget tree - reached only through
+  :class:`CredentialSink`, which is declared here and is write-only on purpose.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from dataclasses import fields as dataclass_fields
-from typing import Final, Literal, cast
+from typing import Final, Literal, Protocol, cast
 
 from nz_mcp.config import (
     DEFAULT_PORT,
@@ -56,6 +57,33 @@ MIN_HEIGHT: Final[int] = 21
 #:   whatever was typed comes back so the chained questions can resume from it.
 #: - ``cancelled``: the person asked to leave. Nothing is written.
 WizardStatus = Literal["completed", "degraded", "cancelled"]
+
+
+class CredentialSink(Protocol):
+    """Where the credential goes while the screen is up: somewhere that is not a widget.
+
+    This is the second door into the package, and it is deliberately **write-only**. It
+    can be told to put a character at a position, to drop a range and to forget
+    everything; it cannot be asked what it holds. So a widget that owns one can edit the
+    credential without ever being able to read it back, and neither can anything that
+    reaches the widget - which is the property ADR 0029 condition 5 is really about.
+
+    One character at a time is the other half of the design. The implementation
+    (``cli._CredentialHolder``) keeps those characters in a list and joins them exactly
+    once, when the wizard is over: at no point during the session does any live object
+    hold the credential as a contiguous string. A ``str`` buffer would instead build a
+    complete copy of it on every keystroke, which is the very failure ADR 0029 measured
+    inside ``textual``'s own ``Input``.
+    """
+
+    def insert(self, index: int, character: str) -> None:
+        """Put ``character`` at ``index``."""
+
+    def remove(self, start: int, stop: int) -> None:
+        """Drop the characters in ``[start, stop)``."""
+
+    def clear(self) -> None:
+        """Forget everything held so far."""
 
 
 @dataclass(slots=True)
