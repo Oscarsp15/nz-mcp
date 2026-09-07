@@ -41,6 +41,45 @@ built against an in-memory buffer and owns no file descriptor at all, which is t
 second of the two shapes condition 1 admits (ADR 0027, addendum 1: *no console writes
 to stdout*) — and the stricter one, since a buffer cannot reach stderr either.
 
+What a table gives up when it does not fit
+------------------------------------------
+Written here because "it gets cut off somewhere" is not a design (issue #220). The order
+is fixed and every step of it has a test:
+
+1. **Nothing disappears.** No column is hidden and no row is dropped. A hidden column
+   takes with it the fact that it existed, which is the one mistake a person cannot
+   notice and cannot undo.
+2. **A column never narrows below its own header.** Headers stay whole, so the table
+   keeps being readable *as* a table however hard it is squeezed.
+3. **The widest column pays first**, one cell at a time, until the row fits. It is the
+   host today and the query id in the probe report; what it is never is ``Modo`` or
+   ``Activo``, which are short because their values are short and should not be shaved so
+   that a long hostname can stay whole.
+4. **A cell that has to lose characters loses them from the middle.** ``10.51.10.242``
+   and ``10.51.10.243`` differ at the end and ``nz-prod-01.corp`` and
+   ``nz-prod-02.corp`` in the middle-front: cutting the tail off either turns the answer
+   the table exists to give — *which one is this?* — into a guess. Head and tail are kept
+   and ``...`` says what happened.
+5. **When not even the headers fit, it stops being a table.** Each row comes out as a
+   ``key: value`` block, which is the shape ``list-profiles`` already uses for a single
+   profile. Below that width there is nothing to align and forcing columns would be
+   choosing decoration over the data.
+
+Without a terminal there is no window to measure, and none is guessed: the width is the
+fixed :data:`_WIDTH_WITHOUT_TERMINAL`. Columns are still sized to their content, so a
+redirect or a pipe gets exactly the same bytes it got before any of this existed — a file
+is kept and read later, and truncating one to fit a window nobody is looking at would be
+losing data to no one's benefit.
+
+**As long as the content fits in that fixed width**, and the exact promise is worth
+writing down rather than rounding up. A cell wider than 200 cells — a hostname near the
+DNS limit is the realistic way to get one — did not survive before this either: ``rich``
+cut it at the column and marked the cut with a real ellipsis character, so the **end of
+the value was lost** and the marker itself renders as ``?`` on a Windows console with a
+legacy code page. Now the same cell loses its middle instead, keeps both ends and says so
+in ASCII. Neither version keeps it whole; they are not the same bytes; this one is the
+better of the two and that is all it claims.
+
 Colour and terminal detection
 -----------------------------
 :func:`color_enabled` is the only place that decides whether ANSI sequences may
@@ -127,10 +166,20 @@ _BAR_WIDTH: Final[int] = 20
 _BAR_DONE: Final[str] = "#"
 _BAR_TODO: Final[str] = "-"
 
-#: Line width the table renderer is allowed to use. Wide enough that nothing this CLI shows
-#: is ever wrapped by us: a narrow terminal wraps it, and a redirected file keeps the rows
-#: intact. Columns are still sized to their content, so a short table stays short.
-_TABLE_MAX_WIDTH: Final[int] = 200
+#: Line width used when the text is not going to a terminal at all: redirected, piped, in
+#: CI, read by another process. Fixed on purpose - there is no window to measure and the
+#: environment is not asked to invent one. Columns are still sized to their content, so
+#: what lands in a file is exactly as wide as the data; this is a ceiling against a
+#: pathological value, not a layout target.
+_WIDTH_WITHOUT_TERMINAL: Final[int] = 200
+
+#: What ``rich`` puts between two columns of an ASCII table: space, bar, space. Needed to
+#: know, before rendering, how much width the separators are going to take.
+_COLUMN_SEPARATOR_WIDTH: Final[int] = 3
+
+#: Stands in for the characters a cell had to give up. ASCII, like every other marker this
+#: layer draws: a Windows console on a legacy code page renders a real ellipsis as ``?``.
+_ELLIPSIS: Final[str] = "..."
 
 #: Standard descriptors. The guarantee is about these numbers, not about the
 #: ``sys.stdout`` object: that is the whole point of doing it down here.
@@ -579,13 +628,110 @@ def fail(message: str) -> None:
     status(message, style="error")
 
 
-def table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> str:
+def display_width(stream: SupportsIsatty | None = None) -> int:
+    """Columns available for aligned output on ``stream`` (default: stdout).
+
+    Defaults to stdout because that is the channel the only payload table travels on; the
+    probe report, which a person reads on stderr, passes that stream explicitly. Asking
+    per stream rather than once for the process is the difference between shrinking a
+    table to the window someone is looking at and shrinking a redirected file to a window
+    that has nothing to do with it.
+
+    ``shutil.get_terminal_size`` reads ``COLUMNS`` before asking the operating system, so
+    the documented way to override a terminal's width also overrides this - which is what
+    the report of issue #220 used, and what makes the behaviour reproducible by hand.
+    """
+    target = sys.stdout if stream is None else stream
+    if not _is_a_terminal(target):
+        return _WIDTH_WITHOUT_TERMINAL
+    return shutil.get_terminal_size().columns
+
+
+def _natural_widths(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> list[int]:
+    """Width each column would take if nothing were squeezed: its widest cell, header included."""
+    return [
+        max(len(header), *(len(row[index]) for row in rows)) if rows else len(header)
+        for index, header in enumerate(headers)
+    ]
+
+
+def _fitted_widths(
+    natural: Sequence[int], floors: Sequence[int], available: int
+) -> list[int] | None:
+    """Widths that fit in ``available``, or ``None`` when not even the floors do.
+
+    Steps 2 and 3 of the sacrifice order in the module docstring: the widest column gives
+    up one cell at a time until the row fits, and no column ever goes below its floor. One
+    cell at a time rather than a proportional formula because it is the same thing for
+    tables this size and it is obviously right at a glance, which a ratio is not.
+    """
+    separators = _COLUMN_SEPARATOR_WIDTH * (len(natural) - 1)
+    if sum(floors) + separators > available:
+        return None
+    widths = list(natural)
+    excess = sum(widths) + separators - available
+    while excess > 0:
+        # Ties go to the leftmost column, which only matters for determinism: two columns
+        # of the same width are equally good candidates and a test needs one answer.
+        widest = max(
+            (index for index, width in enumerate(widths) if width > floors[index]),
+            key=lambda index: (widths[index], -index),
+        )
+        widths[widest] -= 1
+        excess -= 1
+    return widths
+
+
+def _truncate_middle(value: str, width: int) -> str:
+    """Fit ``value`` in ``width`` cells by dropping characters from the **middle**.
+
+    Head and tail are what tell two hosts, two databases or two query ids apart; a tail cut
+    turns ``nz-prod-01.corp.example.com`` and ``nz-prod-02.corp.example.com`` into the same
+    string. When the column is narrower than the marker itself there is nothing left to
+    preserve and the value is simply cut - a degenerate case that needs the whole table to
+    be at its floors to happen at all.
+    """
+    if len(value) <= width:
+        return value
+    if width <= len(_ELLIPSIS):
+        return value[:width]
+    kept = width - len(_ELLIPSIS)
+    head = kept - kept // 2
+    tail = kept // 2
+    return value[:head] + _ELLIPSIS + (value[len(value) - tail :] if tail else "")
+
+
+def _as_records(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> str:
+    """Render each row as a ``key: value`` block, for a window too narrow to hold columns.
+
+    Nothing is truncated here: there is no alignment left to protect, so a long value wraps
+    the way any other line of prose does and the data survives whole. Empty cells are left
+    out - without a column above it, a label with nothing after it reads as missing data
+    rather than as the blank it is.
+    """
+    blocks = [
+        "\n".join(
+            f"{header}: {cell}" for header, cell in zip(headers, row, strict=True) if cell.strip()
+        )
+        for row in rows
+    ]
+    return "\n\n".join(block for block in blocks if block)
+
+
+def table(
+    headers: Sequence[str], rows: Sequence[Sequence[str]], *, width: int | None = None
+) -> str:
     """Render ``rows`` as aligned columns and return the text, without writing it anywhere.
 
     A table earns its place when there are two or more comparable rows and someone has to
     pick one, or spot the odd one out column by column. With a single row there is nothing
     to compare and a caller should print ``key: value`` instead; this function does not
     second-guess that decision, it just aligns what it is given.
+
+    It does decide **how to give up width**, and what it gives up first is written in the
+    module docstring: nothing is hidden, headers stay whole, the widest column pays, cells
+    lose their middle, and below the width of the headers themselves the rows come out as
+    ``key: value`` blocks instead of as columns.
 
     Three deliberate choices:
 
@@ -605,19 +751,33 @@ def table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> str:
     Args:
         headers: Column titles, already localized.
         rows: One sequence of already formatted cells per row, same length as ``headers``.
+        width: Cells to fit into. Defaults to :func:`display_width` of stdout; passed
+            explicitly by the callers that write elsewhere, and by tests, which is how the
+            behaviour at every width is pinned without opening a terminal.
 
     Returns:
-        The rendered table, newline separated and without a trailing newline.
+        The rendered table, newline separated and without a trailing newline. Or, when the
+        window cannot hold even the headers, the same data as ``key: value`` blocks.
     """
+    available = display_width() if width is None else width
+    natural = _natural_widths(headers, rows)
+    fitted = _fitted_widths(natural, [len(header) for header in headers], available)
+    if fitted is None:
+        return _as_records(headers, rows)
     grid = Table(box=box.ASCII, show_edge=False, pad_edge=False)
     for header in headers:
         grid.add_column(header)
     for row in rows:
-        grid.add_row(*row)
+        grid.add_row(
+            *(_truncate_middle(cell, cells) for cell, cells in zip(row, fitted, strict=True))
+        )
     buffer = io.StringIO()
     Console(
+        # Every cell already fits its column, so this width only has to be big enough not
+        # to wrap what was measured: ``rich`` is left with the alignment and the frame, and
+        # none of the decisions above are taken twice, differently.
         file=buffer,
-        width=_TABLE_MAX_WIDTH,
+        width=max(available, 1),
         no_color=True,
         emoji=False,
         highlight=False,
@@ -658,6 +818,7 @@ __all__: Final[tuple[str, ...]] = (
     "ask_secret",
     "color_enabled",
     "confirm",
+    "display_width",
     "emit",
     "fail",
     "heading",
