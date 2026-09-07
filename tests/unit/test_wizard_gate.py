@@ -1,12 +1,12 @@
 """The gate that decides whether a full-screen wizard may start (ADR 0028, condition 1).
 
 Degradation is the condition that can sink the whole feature: **nobody may end up unable
-to configure nz-mcp because an interface would not start.** So each of the six start-up
+to configure nz-mcp because an interface would not start.** So each of the seven start-up
 triggers gets a test of its own, starting from a helper that opens the gate completely -
 otherwise a test would pass because a *different* trigger fired, which is how a broken
 gate stays green.
 
-The seventh - shrinking the window below the minimum mid-session - cannot be seen from
+The eighth - shrinking the window below the minimum mid-session - cannot be seen from
 this side and lives in ``tests/unit/test_wizard_app.py``.
 """
 
@@ -50,7 +50,10 @@ def open_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:
 
     The terminfo lookup is stubbed so these tests answer the same on every platform: the
     real one is exercised separately, against the real database, in
-    :func:`test_the_terminfo_lookup_answers_about_the_real_database`.
+    :func:`test_the_terminfo_lookup_answers_about_the_real_database`. So is the foreground
+    check, for the same reason and one more: the streams here are stand-ins with no file
+    descriptor, and asking a terminal that does not exist which process group it is
+    listening to would close the gate in every single test.
     """
     monkeypatch.delenv(out.NO_TUI_ENV, raising=False)
     monkeypatch.setenv("TERM", "xterm-256color")
@@ -58,6 +61,7 @@ def open_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(f"sys.{stream}", _FakeStream(terminal=True))
     monkeypatch.setattr(out, "_terminfo_declares_full_screen", lambda _term: True)
     monkeypatch.setattr(out, "detect_legacy_windows", lambda: False)
+    monkeypatch.setattr(out, "_owns_the_terminal", lambda: True)
     _set_size(monkeypatch, *_ROOMY)
 
 
@@ -137,13 +141,13 @@ def test_a_stream_that_cannot_answer_closes_it(monkeypatch: pytest.MonkeyPatch) 
 def test_a_posix_terminal_without_guarantees_closes_it(
     monkeypatch: pytest.MonkeyPatch, term: str
 ) -> None:
-    """Trigger 4, the one the first round of this work missed.
+    """Trigger 5, one of the two the first round of this work missed.
 
     ``TERM=dumb`` is not the only way to have no guarantees. An empty or unset ``TERM`` is
     routine inside containers and in some multiplexed SSH sessions, and a value the host's
     terminfo database cannot use is routine when the client's terminal type is not
     installed on the server. In both cases the three streams *are* terminals and the window
-    *is* a good size, so not one of the other six triggers fires - and a full-screen
+    *is* a good size, so not one of the other seven triggers fires - and a full-screen
     application would start with no guarantee that any escape sequence or key it uses means
     anything. Because the size is fine, the live-resize net would not catch it either.
 
@@ -217,7 +221,7 @@ def test_an_unset_term_closes_the_gate_without_consulting_any_database(
 
 
 def test_a_console_without_vt_sequences_closes_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Trigger 4: the legacy Windows console, which is the destination of this product.
+    """Trigger 6: the legacy Windows console, which is the destination of this product.
 
     A console on a legacy code page renders anything outside ASCII as ``?``, and one
     without VT cannot position a cursor at all. The detection is the one the output layer
@@ -239,7 +243,7 @@ def test_a_console_without_vt_sequences_closes_it(monkeypatch: pytest.MonkeyPatc
 def test_a_window_below_the_minimum_closes_it(
     monkeypatch: pytest.MonkeyPatch, columns: int, lines: int
 ) -> None:
-    """Trigger 5, on both axes. Small remote windows are the routine case, not the edge."""
+    """Trigger 7, on both axes. Small remote windows are the routine case, not the edge."""
     open_the_gate(monkeypatch)
     _set_size(monkeypatch, columns, lines)
     assert _blocker() == "window_too_small"
@@ -277,3 +281,105 @@ def test_the_gate_does_not_import_textual() -> None:
         for alias in node.names
     ] + [node.module or "" for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
     assert [name for name in imported if name.split(".")[0] == "textual"] == []
+
+
+# --- trigger 4: the process does not own the terminal it would paint on -------
+
+
+class _DescriptorStream:
+    """A terminal stand-in that also has a file descriptor, like a real stdin."""
+
+    def __init__(self, descriptor: int) -> None:
+        self._descriptor = descriptor
+
+    def isatty(self) -> bool:
+        return True
+
+    def fileno(self) -> int:
+        return self._descriptor
+
+
+def test_a_background_process_closes_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Trigger 4, and the one with the worst failure of the eight.
+
+    ``nz-mcp &``, or a process that inherited the descriptors through ``nohup`` or
+    ``setsid``, has three valid terminals, a real ``TERM`` and a good window, so **not one
+    of the other seven fires**. Start a full-screen application there and reading the
+    keyboard raises ``SIGTTIN``: the process stops with the alternate screen open and
+    whoever was sitting at that terminal is left with an unusable one.
+    """
+    open_the_gate(monkeypatch)
+    monkeypatch.setattr(out, "_owns_the_terminal", lambda: False)
+    assert _blocker() == "background_process"
+
+
+def _with_process_groups(monkeypatch: pytest.MonkeyPatch, listening_to: int) -> None:
+    """Give ``os`` the two POSIX calls, with the terminal listening to ``listening_to``.
+
+    ``raising=False`` because neither exists on a Windows build - which is exactly what the
+    implementation looks for. Setting them here means these tests exercise the real logic on
+    every runner instead of being skipped on half of them.
+    """
+    monkeypatch.setattr(os, "getpgrp", lambda: 4321, raising=False)
+    monkeypatch.setattr(os, "tcgetpgrp", lambda _fd: listening_to, raising=False)
+
+
+def test_the_foreground_check_compares_the_two_process_groups(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The terminal's listener has to be our own group, or we are in the background."""
+    monkeypatch.setattr("sys.stdin", _DescriptorStream(7))
+
+    _with_process_groups(monkeypatch, listening_to=4321)
+    assert out._owns_the_terminal()
+
+    _with_process_groups(monkeypatch, listening_to=999)
+    assert not out._owns_the_terminal()
+
+
+def test_a_terminal_that_cannot_be_asked_counts_as_not_ours(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Degrading costs a help screen; guessing wrong costs someone their terminal.
+
+    Two ways of not being able to ask, both real: a stream a wrapper replaced with an
+    object that has no descriptor, and a descriptor the terminal refuses to answer about
+    (``ENOTTY``, ``EBADF``).
+    """
+    _with_process_groups(monkeypatch, listening_to=4321)
+
+    monkeypatch.setattr("sys.stdin", _FakeStream(terminal=True))
+    assert not out._owns_the_terminal()
+
+    def refuse(_fd: int) -> int:
+        raise OSError(25, "Inappropriate ioctl for device")
+
+    monkeypatch.setattr("sys.stdin", _DescriptorStream(7))
+    monkeypatch.setattr(os, "tcgetpgrp", refuse, raising=False)
+    assert not out._owns_the_terminal()
+
+
+@pytest.mark.parametrize("missing", ["tcgetpgrp", "getpgrp"])
+def test_an_operating_system_without_process_groups_owns_nothing_to_check(
+    monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    """Said out loud rather than left implicit: on Windows this trigger does not apply.
+
+    There are no POSIX process groups, no controlling terminal to own and no ``SIGTTIN``. A
+    detached process there has no console at all, which is trigger 3, and one started with a
+    shared console is not stopped for reading it. So the answer is yes.
+
+    And it is decided by whether the two calls **exist**, not by comparing ``sys.platform``:
+    the question is *"does this operating system have process groups?"*, the honest way to
+    ask it is to look them up, and doing it that way keeps this testable on both platforms.
+    The stub that is left blows up if it is ever consulted.
+    """
+
+    def explode(*_args: object) -> int:
+        raise AssertionError("nothing may be asked when there are no process groups")
+
+    _with_process_groups(monkeypatch, listening_to=4321)
+    monkeypatch.delattr(os, missing, raising=False)
+    monkeypatch.setattr(os, "tcgetpgrp" if missing == "getpgrp" else "getpgrp", explode)
+    monkeypatch.setattr("sys.stdin", _DescriptorStream(7))
+    assert out._owns_the_terminal()
