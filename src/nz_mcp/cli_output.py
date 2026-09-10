@@ -1051,11 +1051,12 @@ def _as_records(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> str:
     return "\n\n".join(block for block in blocks if block)
 
 
-#: Extra cells :func:`table` reserves for the outer frame at level 1: one border character on
-#: each side. Level 0 draws no outer frame (``show_edge=False``) and reserves nothing; level 1
-#: does, and the width budget has to know about it before ``rich`` ever sees a column, or a
-#: table that just fit the window would overflow it by exactly this much.
-_LEVEL_1_EDGE_WIDTH: Final[int] = 2
+#: Extra cells :func:`table` reserves for the outer frame at level 1: one border character
+#: and one padding space on each side, so text never touches the frame. Level 0 draws no
+#: outer frame (``show_edge=False``) and reserves nothing; level 1 does, and the width budget
+#: has to know about it before ``rich`` ever sees a column, or a table that just fit the
+#: window would overflow it by exactly this much.
+_LEVEL_1_EDGE_WIDTH: Final[int] = 4
 
 
 def table(
@@ -1121,7 +1122,7 @@ def table(
     grid = Table(
         box=box.ROUNDED if level == 1 else box.ASCII,
         show_edge=level == 1,
-        pad_edge=False,
+        pad_edge=level == 1,
         header_style=f"bold {_ACCENT_HEX}" if level == 1 else None,
         border_style=_ACCENT_HEX if level == 1 else None,
     )
