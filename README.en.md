@@ -128,6 +128,17 @@ Installing with `pip` into the system Python (no pipx, no venv) works but is **d
 | `nz-mcp serve` | run the MCP server over stdio; **the client launches it**, not you |
 | `nz-mcp version` | print the installed version |
 
+### Recommended terminal
+
+Recommended: Windows Terminal, with the Cascadia Code font — the terminal installs it, not `nz-mcp`. On macOS and Linux there is nothing to install: any terminal with a UTF-8 locale gives the same result.
+
+- **Level 0** (the floor, with none of this): ASCII frames, text markers (`OK`, `Warning`, `Error`), no color.
+- **Level 1** (modern terminal): semantic color, rounded borders, glyphs next to their word (`● OK`, `▲ Warning`, `✕ Error`) and a fluid activity indicator.
+
+Without Windows Terminal or any modern terminal, the CLI works the same, at level 0: no functionality depends on the terminal, only the drawing changes.
+
+`NZ_MCP_UI_LEVEL` forces the level both ways when automatic detection is not enough: `0` to force the ASCII floor (for example, when pasting output into an issue) and `1` to force level 1 on a modern terminal that detection does not recognize. Any other value is ignored and automatic detection wins. Details on the signals and their order in [docs/adr/0031-mejora-progresiva-por-capacidad-del-terminal.md](docs/adr/0031-mejora-progresiva-por-capacidad-del-terminal.md) and in [docs/architecture/cli-experience.md](docs/architecture/cli-experience.md).
+
 ## Profile management
 
 Each profile lives in `~/.nz-mcp/profiles.toml`; the password goes to the OS keyring, never to the file. Fields the wizard asks for and you can also edit by hand: `security_level` (0-3, default `2` = negotiate SSL with cleartext fallback; `3` = SSL required) and `ca_certs` (path to a PEM CA bundle used to **verify** the server certificate; when omitted, the SSL connection is established without certificate verification). Details in [docs/architecture/security-model.md](docs/architecture/security-model.md).
