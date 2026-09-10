@@ -1,0 +1,552 @@
+/* REFERENCE ONLY - this file is NOT product code and is NOT loaded at run time.
+ *
+ * It is the stylesheet of the mock-up that produced the SVG captures next to it,
+ * kept with ADR 0032 so the decision can be read against something that was
+ * actually drawn instead of against adjectives.
+ *
+ * How to read it:
+ *   - The normative palette, the emphasis scale and the text rules are the ones
+ *     written in `docs/adr/0032-rediseno-del-nivel-2-del-cli-interactivo.md`.
+ *     Where this sheet and the ADR disagree, the ADR wins.
+ *   - Selectors, widget ids and class names here belong to the mock-up, not to
+ *     `src/nz_mcp/`. The production sheet is built in issue #238 and may share
+ *     none of them.
+ *   - Some derived surfaces differ from the ADR table by a shade (the mock-up
+ *     draws the dark background as #0E1416; the ADR fixes #10171A). Both clear
+ *     the same contrast floor; the ADR value is the one to implement.
+ */
+
+/* nz-mcp - visual layer stylesheet for the level 2 (full screen) CLI.
+ *
+ * House rules
+ * -----------
+ * 1. This sheet targets a MODERN terminal (level 2). Unicode is allowed here:
+ *    rounded borders, thin rules and the markers used by the widgets. Level 0
+ *    (ASCII, no colour) is a different rendering path and never reads this file.
+ * 2. Colour underlines, text informs. Every state also carries a word.
+ * 3. One accent only (teal). success/warning/error are the semantic trio and
+ *    the accent never competes with them.
+ * 4. No colour literal lives in this sheet: the two themes ship the few surfaces
+ *    a percentage cannot express (borders, focus bands, invalid field) as theme
+ *    variables, so light is designed, not the dark one inverted.
+ *
+ * Typographic scale - three levels, never a fourth
+ * ------------------------------------------------
+ *   L1  bold          screen title (.section) and the focused element only.
+ *   L2  normal        values, task titles, help text, border titles.
+ *   L3  $text-muted   labels, metadata, hints, footer, pending steps.
+ *   Semantic colour (ok / warning / error / accent) rides on top of the scale;
+ *   it is not a fourth level and never replaces the word next to it.
+ *   Italic: never (many terminals fake it or drop it).
+ *   Underline: shortcut keys in the footer, nothing else.
+ *   Spaced capitals: only the short section titles ("T A R E A S").
+ *   Rhythm: one blank line between groups, none inside a group. Every panel
+ *   opens its content two columns in (border 1 + padding 1, or padding 0 2).
+ *
+ * Palette, use and measured contrast (WCAG 2.1, computed)
+ * -------------------------------------------------------
+ *                          value        / background  / surface  / panel
+ *   DARK   background      #0E1416        -             1.09 lift  1.31 lift
+ *          surface (card)  #141D20
+ *          panel (field)   #1C272B
+ *          foreground      #D6E0E2       13.82         12.74      11.36
+ *          muted (auto 60) -              7.14          6.82       6.37
+ *          accent teal     #5EEAD4       12.56         11.58      10.33
+ *          success         #4ADE80       10.66          9.83       8.77
+ *          warning         #FBBF24       11.13         10.26       9.15
+ *          error           #F87171        6.72          6.19       5.52
+ *          band-idle       #16262A   accent on it 10.56, lift 1.19
+ *          band-focus      #204045   accent on it  7.55, lift 1.66
+ *          border-card     #2B4245   1.74 on background (seen, not read)
+ *          hairline        #33565A   2.32 on background
+ *
+ *   LIGHT  background      #E9EFED        -             1.15 lift  1.18 drop
+ *          surface (card)  #FCFEFD   cards sit ABOVE the background
+ *          panel (field)   #D5DEDB   fields sink BELOW it
+ *          foreground      #111A18       15.22         17.50      12.91
+ *          muted (auto 60) -              5.53          5.77       5.24
+ *          accent teal     #0B6B63        5.47          6.29       4.64
+ *          success         #166534        6.12          7.04       5.20
+ *          warning         #92400E        6.09          7.00       5.17
+ *          error           #B91C1C        5.56          6.39       4.71
+ *          band-idle       #DCE9E6   accent on it  5.11, lift 1.07
+ *          band-focus      #C9DFDA   accent on it  4.56, lift 1.20
+ *          border-card     #A3BFBB   1.68 on background
+ *          hairline        #8FB3AE   1.95 on background
+ *
+ * Everything that carries meaning clears 4.5:1 on every surface it can land on.
+ * Borders and bands are below that on purpose: they are seen, not read, and
+ * nothing is written on a band without clearing 4.5:1 against that band.
+ */
+
+/* ------------------------------------------------------------------ base --- */
+
+Screen {
+    background: $background;
+    color: $foreground;
+    layout: vertical;
+}
+
+/* --------------------------------------------------------------- app bar --- */
+
+#appbar {
+    height: 1;
+    padding: 0 2;
+    background: $background;
+}
+
+/* The wordmark is identity, not emphasis: colour carries it, weight does not. */
+#brand {
+    width: auto;
+    color: $accent;
+}
+
+#tagline {
+    width: auto;
+    color: $text-muted;
+    padding-left: 2;
+}
+
+#spacer {
+    width: 1fr;
+}
+
+#context {
+    width: auto;
+    color: $text-muted;
+}
+
+/* Thin hairline instead of a heavy band: it separates without shouting. */
+#rule {
+    height: 1;
+    color: $hairline;
+    padding: 0 2;
+}
+
+/* --------------------------------------------------------------- layout --- */
+
+#body {
+    height: 1fr;
+    padding: 1 2 0 2;
+}
+
+/* The wizard is shorter than the screen: let it grow from the top and push the
+ * leftover space below the buttons instead of into the middle of the form. */
+#body.-auto,
+#body.-auto > #main,
+#body.-auto > #side {
+    height: auto;
+}
+
+#filler {
+    height: 1fr;
+}
+
+#main {
+    width: 1fr;
+    height: 1fr;
+    padding-right: 2;
+}
+
+#side {
+    width: 36;
+    height: 1fr;
+}
+
+/* L1: the only bold on screen besides the focused row. Spaced capitals are the
+ * terminal substitute for small caps, and only these titles get them. */
+.section {
+    height: 1;
+    color: $foreground;
+    text-style: bold;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+/* ------------------------------------------------------------- task list --- */
+
+TaskList {
+    height: auto;
+    background: transparent;
+}
+
+/* One line per task. The two column gutter (marker + space) keeps every title
+ * on the same column whether it is selected or not. */
+.task {
+    height: 1;
+    padding: 0 1;
+    color: $foreground;
+}
+
+/* Two carriers at once: the band (colour) and the marker + bold (shape). */
+.task.-current {
+    background: $band-idle;
+    color: $accent;
+}
+
+TaskList:focus .task.-current {
+    background: $band-focus;
+    text-style: bold;
+}
+
+/* ----------------------------------------------------------------- cards --- */
+
+.card {
+    height: auto;
+    border: round $border-card;
+    border-title-color: $accent;
+    background: $surface;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+.kv {
+    height: 1;
+}
+
+/* Fixed label column, value column right after it: values line up down the card
+ * and the eye travels once. */
+.kv-key {
+    width: 9;
+    color: $text-muted;
+}
+
+.kv-key.-wide {
+    width: 15;
+}
+
+.kv-value {
+    width: 1fr;
+    color: $foreground;
+}
+
+/* Versions and counts are tabular: flush right, so the digits stack. */
+.kv-value.-num {
+    text-align: right;
+}
+
+/* Status value: marker + word + colour, tinted so the row reads as a state and
+ * not as one more fact. No blank line above it: it belongs to the card. */
+.pill {
+    height: 1;
+    width: auto;
+    padding: 0 1 0 0;
+}
+
+.pill.-ok {
+    background: $success 18%;
+    color: $success;
+}
+
+.pill.-warn {
+    background: $warning 18%;
+    color: $warning;
+}
+
+.pill.-bad {
+    background: $error 18%;
+    color: $error;
+}
+
+.note {
+    height: auto;
+    color: $foreground;
+}
+
+/* --------------------------------------------------------------- modals --- */
+
+ModalScreen {
+    align: center middle;
+    background: $background 60%;
+}
+
+#card-modal {
+    width: 74;
+    height: auto;
+    max-height: 24;
+    border: round $accent;
+    border-title-color: $accent;
+    background: $surface;
+    padding: 1 2;
+}
+
+#card-modal.-narrow {
+    width: 54;
+}
+
+.help-row {
+    height: 1;
+}
+
+.help-task {
+    width: 34;
+    color: $foreground;
+}
+
+.help-cmd {
+    width: 1fr;
+    color: $accent;
+}
+
+.modal-note {
+    height: auto;
+    color: $text-muted;
+}
+
+.modal-note.-foot {
+    margin-top: 1;
+}
+
+/* -------------------------------------------------------------- profiles --- */
+
+DataTable {
+    height: auto;
+    max-height: 12;
+    background: $surface;
+    border: round $border-card;
+    border-title-color: $accent;
+    scrollbar-size: 0 0;
+}
+
+/* A column header is a label: L3, never bold. */
+DataTable > .datatable--header {
+    background: $surface;
+    color: $text-muted;
+}
+
+DataTable > .datatable--cursor {
+    background: $band-idle;
+    color: $foreground;
+}
+
+DataTable:focus > .datatable--cursor {
+    background: $band-focus;
+    text-style: bold;
+}
+
+.legend {
+    height: 1;
+    color: $text-muted;
+    margin: 1 0;
+    padding: 0 1;
+}
+
+/* --------------------------------------------------------------- stepper --- */
+
+#stepper {
+    height: 1;
+    padding: 0 2;
+    margin-bottom: 1;
+}
+
+.step {
+    width: auto;
+    color: $text-muted;
+    padding-right: 1;
+}
+
+.step.-current {
+    color: $accent;
+}
+
+.step.-done {
+    color: $success;
+}
+
+.step-sep {
+    width: auto;
+    color: $text-muted;
+    padding-right: 1;
+}
+
+/* ------------------------------------------------------------------ form --- */
+
+/* Rows of the same group touch; the blank line only appears between groups,
+ * and it is the .gap widget that draws it. */
+.row {
+    height: 1;
+}
+
+.gap {
+    height: 1;
+}
+
+.label {
+    width: 10;
+    height: 1;
+    color: $text-muted;
+}
+
+.row:focus-within .label {
+    color: $accent;
+    text-style: bold;
+}
+
+Input {
+    height: 1;
+    width: 1fr;
+    background: $panel;
+    border: none;
+    padding: 0 1;
+}
+
+Input:focus {
+    background: $band-focus;
+    color: $foreground;
+}
+
+Input.-invalid {
+    background: $field-bad;
+}
+
+Input.-invalid:focus {
+    background: $field-bad-focus;
+}
+
+SecretField {
+    height: 1;
+    width: 1fr;
+    background: $panel;
+    padding: 0 1;
+}
+
+SecretField:focus {
+    background: $band-focus;
+    color: $foreground;
+}
+
+.state {
+    width: 3;
+    height: 1;
+    content-align: right middle;
+    color: $text-muted;
+}
+
+.state.-ok {
+    color: $success;
+}
+
+.state.-bad {
+    color: $error;
+}
+
+#help-text {
+    height: auto;
+    color: $foreground;
+}
+
+#help-hint {
+    height: auto;
+    color: $text-muted;
+}
+
+#dsn-label {
+    height: 1;
+    color: $text-muted;
+    margin-top: 1;
+}
+
+#dsn {
+    height: auto;
+    color: $accent;
+}
+
+#dsn-who {
+    height: auto;
+    color: $foreground;
+}
+
+#status {
+    height: 1;
+    padding: 0 2;
+    color: $text-muted;
+}
+
+#status.-ok {
+    color: $success;
+}
+
+#status.-bad {
+    color: $error;
+}
+
+#actions {
+    height: 1;
+    padding: 0 2;
+    margin-top: 1;
+}
+
+/* Textual gives a button a 16 column minimum that centres the label and breaks
+ * the left edge of the row: the label has to start where the form starts. */
+Button {
+    height: 1;
+    width: auto;
+    min-width: 0;
+    border: none;
+    padding: 0 2;
+    margin-right: 2;
+    background: $panel;
+    color: $foreground;
+    text-style: none;
+}
+
+Button:focus {
+    text-style: bold reverse;
+}
+
+Button.-primary {
+    background: $accent;
+    color: $background;
+}
+
+/* ------------------------------------------------------------------- pie --- */
+
+#footer {
+    height: 1;
+    padding: 0 2;
+    background: $background;
+}
+
+/* Underline is reserved for keys, and keys are the only underlined thing. */
+.fkey {
+    width: auto;
+    color: $text-muted;
+    text-style: underline;
+}
+
+.flabel {
+    width: auto;
+    color: $text-muted;
+    padding-left: 1;
+}
+
+.fsep {
+    width: auto;
+    color: $text-muted;
+    padding: 0 2;
+}
+
+/* ----------------------------------------------------------------- toast --- */
+
+ToastRack {
+    align: right bottom;
+    padding: 0 2 4 0;
+}
+
+Toast {
+    width: 44;
+    max-width: 44;
+    background: $surface;
+    color: $foreground;
+    border: round $success;
+    padding: 0 1;
+}
+
+Toast.-error {
+    border: round $error;
+}
+
+Toast > .toast--title {
+    color: $success;
+    text-style: none;
+}

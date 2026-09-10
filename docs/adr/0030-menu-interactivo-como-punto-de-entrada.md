@@ -6,6 +6,8 @@
 - **Issue**: [#226](https://github.com/Oscarsp15/nz-mcp/issues/226)
 - **Alcance**: **qué** se permite ahora que hay una segunda pantalla, y con qué límites. La librería sigue siendo la del [ADR 0029](0029-adoptar-textual-para-el-asistente-de-configuracion.md); este ADR no vuelve a elegirla.
 
+> **Ampliado por el [ADR 0032](0032-rediseno-del-nivel-2-del-cli-interactivo.md) (2026-09-09).** El menú pasa a listar **seis tareas** con verbo —Configurar una conexión, Ver perfiles, Probar la conexión, Iniciar el servidor MCP, Diagnosticar la instalación, Ver herramientas— en vez de los once nombres de comando, y ningún comando ni bandera se muestra en pantallas de trabajo: viven en el modal de `?` y en el subcomando `nz-mcp help`. Eso **cambia el punto 4** de este ADR: las entradas dejan de derivarse de los comandos que `typer` tiene registrados y pasan a ser una lista propia con sus claves i18n; lo que sí se sigue derivando de los comandos registrados es la ayuda de `?`. El punto 1 —*el menú elige, no hospeda*— y la degradación **no cambian**. Todo lo demás sigue vigente sin cambios; el contenido que sigue se conserva tal como se escribió el 2026-09-06.
+
 ## Contexto
 
 Decisión de producto del owner, del 2026-09-06, literal: *"no me cuadra que al poner `nz-mcp` aparezca una lista, luego el comando, y luego en el comando está lo interactivo. Debería ser todo interactivo"*.

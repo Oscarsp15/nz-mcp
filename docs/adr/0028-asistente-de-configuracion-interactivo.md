@@ -7,6 +7,17 @@
 - **Alcance**: **qué** se permite y bajo qué condiciones. Con **qué librería** lo decide el
   [ADR 0029](0029-adoptar-textual-para-el-asistente-de-configuracion.md).
 
+> **Ampliado por el [ADR 0032](0032-rediseno-del-nivel-2-del-cli-interactivo.md) (2026-09-09).**
+> Tres puntos, y solo tres: (1) la **tercera excepción** al ADR 0005 es la pantalla "Ver perfiles",
+> con sus propios argumentos, y este ADR sigue sin hacer jurisprudencia; (2) la contención del
+> riesgo 1 —*"marcadores y bordes en ASCII dentro del asistente"*— queda **acotada**: dentro de la
+> ruta de pantalla completa se permite Unicode, porque llegar a ella ya exige un terminal moderno,
+> y el ASCII pasa a ser el piso del producto en otra ruta de dibujo (ADR 0031); (3) el asistente
+> gana stepper, errores de campo en formato de registro y un toast de una línea, sin tocar su
+> flujo. **La condición 1 no cambia**: los disparadores de degradación siguen intactos y se aplican
+> también a la pantalla nueva. Todo lo demás de este ADR sigue vigente sin cambios; el contenido
+> que sigue se conserva tal como se escribió el 2026-09-06.
+
 ## Contexto
 
 Decisión de producto del owner, del 2026-09-06, literal: *"queria que fuera interactiva la
