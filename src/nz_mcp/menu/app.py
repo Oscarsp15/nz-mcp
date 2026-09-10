@@ -1,4 +1,4 @@
-"""The interactive menu: one of the two modules in the project that import ``textual``.
+"""The interactive menu: one of the three packages in the project that import ``textual``.
 
 Scope, and why it is this small
 -------------------------------
@@ -14,6 +14,10 @@ A title, the list of command names, one line describing the highlighted one, and
 Nothing else. No banner, no logo, no emoji, no borders and no panels grouping the commands:
 every one of them is ruled out by ``cli-experience.md`` §6, and the last one buys structure
 the ordering already provides.
+
+How it looks is not decided here. Colour and theme come from the sheet and the two themes of
+:mod:`nz_mcp.tui` (ADR 0032, decision 5), inherited through :class:`~nz_mcp.tui.ThemedApp`
+with the key that swaps them; this module owns the layout and nothing more.
 
 The description sits **under** the list rather than next to each name, and that is a
 measurement rather than a taste. At the minimum width the list column would leave about
@@ -37,7 +41,7 @@ from collections.abc import Sequence
 from typing import ClassVar, Final
 
 from textual import events
-from textual.app import App, ComposeResult
+from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Vertical
 from textual.widgets import OptionList, Static
@@ -45,43 +49,14 @@ from textual.widgets.option_list import Option
 
 from nz_mcp.i18n import Locale, t
 from nz_mcp.menu.entries import MIN_HEIGHT, MIN_WIDTH, MenuChoice, MenuEntry, MenuStatus
+from nz_mcp.tui import ThemedApp
 
 #: Id of the list widget, so ``#commands`` reads as what it is.
 _COMMANDS_ID: Final[str] = "commands"
 
 
-class CommandMenuApp(App[MenuChoice]):
+class CommandMenuApp(ThemedApp[MenuChoice]):
     """One screen: the commands, what the highlighted one does, and how to leave."""
-
-    CSS: ClassVar[str] = """
-    Screen {
-        background: $surface;
-    }
-    #frame {
-        padding: 1 2;
-    }
-    #title {
-        text-style: bold;
-        margin-bottom: 1;
-    }
-    /* 1fr and not auto: if this list ever outgrows the window it scrolls, instead of
-       pushing the description and the keys off the bottom. */
-    OptionList {
-        height: 1fr;
-        background: $surface;
-        border: none;
-        padding: 0;
-    }
-    #describe {
-        height: 3;
-        margin-top: 1;
-        color: $text-muted;
-    }
-    #keys {
-        height: 1;
-        color: $text-muted;
-    }
-    """
 
     BINDINGS: ClassVar[list[BindingType]] = [
         # Enter is the list's own binding and arrives as OptionSelected; only the way out

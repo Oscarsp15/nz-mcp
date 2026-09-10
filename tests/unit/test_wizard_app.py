@@ -21,10 +21,12 @@ from collections.abc import Callable, Iterator
 from typing import Final
 
 import pytest
+from textual.color import Color
 from textual.widget import Widget
 from textual.widgets import Input, Static
 
 from nz_mcp.i18n import Locale, t
+from nz_mcp.tui import NZ_LIGHT
 from nz_mcp.wizard import MIN_HEIGHT, MIN_WIDTH, DraftFields, WizardResult
 from nz_mcp.wizard.app import ProfileWizardApp
 from nz_mcp.wizard.secret_field import SecretField
@@ -377,6 +379,30 @@ async def test_the_screen_speaks_one_language_at_a_time(locale: Locale) -> None:
     assert title == t("CLI.WIZARD_UI_TITLE", locale, profile="dev")
     assert keys == t("CLI.WIZARD_UI_KEYS", locale)
     assert t("CLI.WIZARD_FIELD_HOST", locale) in status
+
+
+@pytest.mark.asyncio
+async def test_f2_swaps_the_theme_without_touching_the_answers() -> None:
+    """ADR 0032, decision 5: the key that swaps the theme is a key like any other.
+
+    The field with the focus keeps its focus and its value: a theme is how the screen
+    looks, and changing it must not cost a keystroke of what was typed.
+    """
+    app = _app(initial=DraftFields(database="PROD", user="svc"))
+    async with app.run_test(size=_ROOMY) as pilot:
+        await pilot.press(*"nz.example")
+        await pilot.press("f2")
+        await pilot.pause()
+        swapped = (app.theme, app.screen.styles.background)
+        await pilot.press(*".com")
+        await pilot.pause()
+        assert app.query_one("#field-host", Input).value == "nz.example.com"
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert swapped == (NZ_LIGHT.name, Color.parse(NZ_LIGHT.background or ""))
+    assert _result(app).status == "completed"
+    assert _result(app).fields.host == "nz.example.com"
 
 
 @pytest.mark.asyncio

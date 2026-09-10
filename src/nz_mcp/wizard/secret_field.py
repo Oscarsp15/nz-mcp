@@ -61,7 +61,7 @@ never carries even the length.
 
 from __future__ import annotations
 
-from typing import ClassVar, Final
+from typing import Final
 
 from textual import events
 from textual.message import Message
@@ -117,15 +117,8 @@ class SecretField(Widget, can_focus=True):
             super().__init__()
             self.held: bool = held
 
-    DEFAULT_CSS: ClassVar[str] = """
-    SecretField {
-        height: 1;
-        background: $panel;
-    }
-    SecretField:focus {
-        background: $primary 40%;
-    }
-    """
+    # No ``DEFAULT_CSS``: the field's height, its panel and its focus band are rules of
+    # the shared sheet (ADR 0032, decision 5), where the contrast of both is measured.
 
     def __init__(self, credential: CredentialSink, locale: Locale) -> None:
         """Build the field.

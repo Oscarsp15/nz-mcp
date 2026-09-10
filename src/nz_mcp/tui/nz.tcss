@@ -1,0 +1,129 @@
+/* nz-mcp - the one stylesheet of the level 2 (full screen) surfaces. ADR 0032, decision 5.
+ *
+ * House rules
+ * -----------
+ * 1. No colour value lives in this sheet. Every colour is a $variable, and every variable
+ *    is defined by both themes in `nz_mcp/tui/theme.py`, where its contrast is measured.
+ *    A screen that needs a colour asks for a role here; it never writes one in its code.
+ * 2. Colour underlines, text informs: every state a screen draws also carries a word.
+ * 3. One accent (teal). ok / warning / error are the semantic trio and the accent never
+ *    competes with them.
+ * 4. Three levels of emphasis and never a fourth: bold for the title and the element with
+ *    the focus, normal for values, $text-muted for labels, hints and the footer. No italic.
+ * 5. Layout stays with the screen that owns it. This sheet moves colour out of the
+ *    screens; it does not redraw them (issues #239 and #241 do that).
+ *
+ * The bands are the one place the sheet neutralises a framework default: Textual tints a
+ * focused list or field with 5% of the foreground, which would put a colour on screen that
+ * no theme declared and no test measured.
+ */
+
+/* ------------------------------------------------------------- every screen --- */
+
+Screen {
+    background: $background;
+    color: $foreground;
+}
+
+#frame {
+    padding: 1 2;
+}
+
+#title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#keys {
+    height: 1;
+    color: $text-muted;
+}
+
+/* ---------------------------------------------------------------------- menu --- */
+
+/* 1fr and not auto: if this list ever outgrows the window it scrolls, instead of
+   pushing the description and the keys off the bottom. */
+OptionList {
+    height: 1fr;
+    background: $background;
+    border: none;
+    padding: 0;
+}
+
+/* The row under the cursor: the band says which, the bold says it has the focus. */
+OptionList > .option-list--option-highlighted {
+    background: $band-idle;
+    color: $accent;
+    text-style: none;
+}
+
+OptionList:focus {
+    background-tint: transparent;
+}
+
+OptionList:focus > .option-list--option-highlighted {
+    background: $band-focus;
+    color: $accent;
+    text-style: bold;
+}
+
+#describe {
+    height: 3;
+    margin-top: 1;
+    color: $text-muted;
+}
+
+/* -------------------------------------------------------------------- wizard --- */
+
+.row {
+    height: 1;
+}
+
+.label {
+    width: 15;
+    height: 1;
+    color: $text-muted;
+}
+
+/* A field sinks into the panel; the one with the focus rises onto the band. */
+Input {
+    background: $panel;
+}
+
+Input:focus {
+    background: $band-focus;
+    background-tint: transparent;
+}
+
+/* No padding: this row has to line up with the values of the fields above it, and a
+   compact Input starts its text right at the edge. */
+SecretField {
+    height: 1;
+    background: $panel;
+}
+
+SecretField:focus {
+    background: $band-focus;
+}
+
+#explain {
+    height: 6;
+    margin-top: 1;
+    color: $text-muted;
+}
+
+#status {
+    height: 1;
+}
+
+#status.-blocked {
+    color: $warning;
+}
+
+#status.-invalid {
+    color: $error;
+}
+
+#status.-ready {
+    color: $success;
+}

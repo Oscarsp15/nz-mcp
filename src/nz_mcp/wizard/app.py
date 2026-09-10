@@ -1,4 +1,4 @@
-"""The full-screen configuration wizard: the only module in the project that imports ``textual``.
+"""The full-screen configuration wizard: one of the three packages that import ``textual``.
 
 Scope, and why it is this small
 -------------------------------
@@ -46,12 +46,13 @@ from collections.abc import Callable
 from typing import ClassVar, Final
 
 from textual import events
-from textual.app import App, ComposeResult, SuspendNotSupported
+from textual.app import ComposeResult, SuspendNotSupported
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Input, Label, Static
 
 from nz_mcp.i18n import Locale, t
+from nz_mcp.tui import ThemedApp
 from nz_mcp.wizard.fields import (
     CREDENTIAL_SLOT,
     FIELD_SPECS,
@@ -71,7 +72,7 @@ from nz_mcp.wizard.secret_field import SecretField
 _FIELD_ID_PREFIX: Final[str] = "field-"
 
 
-class ProfileWizardApp(App[WizardResult]):
+class ProfileWizardApp(ThemedApp[WizardResult]):
     """One screen: the eight answers, what is still missing, and how to leave.
 
     Deliberately plain. No borders, no panels, no header, no command palette and no
@@ -79,59 +80,9 @@ class ProfileWizardApp(App[WizardResult]):
     maintain, and the design of the CLI rules both out (``cli-experience.md`` §6.4 and the
     contention of risk 1 in ADR 0028 - ASCII only, because a Windows console on a legacy
     code page turns anything else into ``?``).
-    """
 
-    CSS: ClassVar[str] = """
-    Screen {
-        background: $surface;
-    }
-    #frame {
-        padding: 1 2;
-    }
-    #title {
-        text-style: bold;
-        margin-bottom: 1;
-    }
-    .row {
-        height: 1;
-    }
-    .label {
-        width: 15;
-        height: 1;
-        color: $text-muted;
-    }
-    Input {
-        background: $panel;
-    }
-    Input:focus {
-        background: $primary 40%;
-    }
-    /* No padding: this row has to line up with the values of the fields above it, and
-       a compact Input starts its text right at the edge. */
-    SecretField {
-        height: 1;
-    }
-    #explain {
-        height: 6;
-        margin-top: 1;
-        color: $text-muted;
-    }
-    #status {
-        height: 1;
-    }
-    #status.-blocked {
-        color: $warning;
-    }
-    #status.-invalid {
-        color: $error;
-    }
-    #status.-ready {
-        color: $success;
-    }
-    #keys {
-        height: 1;
-        color: $text-muted;
-    }
+    How it looks is not decided here either: colour and theme come from the sheet of
+    :mod:`nz_mcp.tui` (ADR 0032, decision 5), inherited with the key that swaps them.
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [

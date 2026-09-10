@@ -106,9 +106,11 @@ from nz_mcp.wizard.secret_field import SecretField
 #:
 #: None of these can produce a credential. ``nz_mcp.config`` reads ``profiles.toml``,
 #: which by design never contains the password - it lives in the OS keyring - and
-#: ``nz_mcp.i18n`` is a dictionary of static text. ``nz_mcp.auth``, ``nz_mcp.secret``,
-#: ``keyring`` and ``os`` are not on the list, so they cannot be imported, and no
-#: renaming gets round that.
+#: ``nz_mcp.i18n`` is a dictionary of static text. ``nz_mcp.tui`` is the stylesheet, the
+#: two themes and the base application that loads them (ADR 0032): hexadecimals and a
+#: key binding, nothing that reads input. ``nz_mcp.auth``, ``nz_mcp.secret``, ``keyring``
+#: and ``os`` are not on the list, so they cannot be imported, and no renaming gets round
+#: that.
 _ALLOWED_IMPORTS: Final[frozenset[str]] = frozenset(
     {
         "__future__",
@@ -118,6 +120,7 @@ _ALLOWED_IMPORTS: Final[frozenset[str]] = frozenset(
         "textual",
         "nz_mcp.config",
         "nz_mcp.i18n",
+        "nz_mcp.tui",
         "nz_mcp.wizard",
     }
 )
