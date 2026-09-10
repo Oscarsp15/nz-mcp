@@ -74,7 +74,7 @@ Su equivalente no interactivo es el subcomando **`nz-mcp help`**, que imprime la
 
 Se autoriza **una tercera superficie de pantalla completa**, y se nombra: la lista de perfiles.
 
-El argumento del ADR 0028 para negarle interfaz a nueve de los once comandos sigue en pie palabra por palabra —*"se invocan con todo lo que necesitan, imprimen y terminan; no hay nada que navegar: sería una ventana alrededor de un `print`"*—, y por eso hay que explicar por qué lo que se autoriza **no es `list-profiles`**:
+El argumento del ADR 0028 para negarle interfaz a los demás comandos de Typer sigue en pie palabra por palabra —*"se invocan con todo lo que necesitan, imprimen y terminan; no hay nada que navegar: sería una ventana alrededor de un `print`"*—, y por eso hay que explicar por qué lo que se autoriza **no es `list-profiles`**:
 
 | | `nz-mcp list-profiles` | Pantalla "Ver perfiles" |
 |---|---|---|
@@ -87,9 +87,16 @@ Hoy, cambiar de perfil desde el menú del ADR 0030 obliga a que la pantalla se c
 
 Forma concreta: un `DataTable` con **perfil, host, base, modo y estado**, un `▸` delante del activo, y `Enter` sobre una fila abre las cuatro acciones —**usar, probar, editar, borrar**—. El estado de cada fila sigue la regla de la decisión 7: forma, palabra y color.
 
+**"Ver perfiles" elige, no hospeda.** Elegir una de las cuatro acciones **cierra la pantalla** y ejecuta el comando equivalente en la terminal de siempre —usar → `switch-profile <nombre>`, probar → `test-connection --profile <nombre>`, editar → `edit-profile <nombre>`, borrar → `remove-profile <nombre>`—, y **el proceso termina con el código de ese comando**, exactamente igual que cuando se elige desde el menú. **No se vuelve a la tabla.** Es la decisión 1 del ADR 0030 aplicada palabra por palabra: la salida se queda en el desplazamiento, donde se lee y se pega en un issue; no hay reentrada; no hay sesión larga que mantener viva; y no se repinta una pantalla completa encima del diagnóstico que la persona acaba de pedir, que es el riesgo 4 del ADR 0028.
+
+Esto **enmienda por escrito dos puntos más del ADR 0030**, además del punto 4 que ya enmienda la decisión 1 de este ADR:
+
+- **Punto 1** —*el menú elige, no hospeda*— se **extiende a una elección en dos pasos**: el menú elige tarea, "Ver perfiles" elige perfil y acción, y solo entonces se cierra la pantalla y corre el comando. Lo que hacía valiosa la regla no cambia: una elección, un comando, la pantalla fuera **antes** de ejecutar y el código de salida del comando como código del proceso. Elegir en dos pasos no es hospedar; hospedar sería volver.
+- **Punto 5** —preguntar en texto plano el nombre del perfil que `switch-profile` lleva como argumento obligatorio— deja de aplicarse **cuando se llega desde el menú**: ahí la elección del perfil la hace "Ver perfiles" y el comando recibe el nombre ya elegido, que es justo lo que aquella pregunta suplía por falta de esta pantalla. El prompt **no se toca** para quien teclea `nz-mcp switch-profile` en seco: sigue siendo el mismo `cli_output.ask()`, con el mismo texto ya traducido.
+
 **Y sigue sin haber jurisprudencia.** Esta es la tercera excepción y **la última que este ADR abre**. Ni el 0028, ni el 0030, ni este documento autorizan una cuarta pantalla: cada superficie nueva exige **su propio ADR con sus propios argumentos**, y "ya hay tres" no es uno.
 
-Los ocho disparadores de degradación del ADR 0028 y del 0030 se aplican a esta pantalla **igual que a las otras dos**, con la misma puerta (`cli_output.interactive_ui_blocker`) y sin una segunda implementación de nada. Sin terminal, ver los perfiles es `nz-mcp list-profiles`, que no cambia.
+Los disparadores de degradación del ADR 0028 y del 0030 —siete en la función y uno en la app, más el octavo que añade el ADR 0031— se aplican a esta pantalla **igual que a las otras dos**, con la misma puerta (`cli_output.interactive_ui_blocker`) y sin una segunda implementación de nada. Sin terminal, ver los perfiles es `nz-mcp list-profiles`, que no cambia.
 
 ### 4. El asistente adopta el lenguaje común, sin tocar su flujo
 
@@ -141,7 +148,9 @@ Los números de arriba están calculados sobre estos valores exactos, no estimad
 
 ### 7. Estados, énfasis, ritmo y texto
 
-**Estados — siempre forma + palabra + color, y solo estos tres**: `● OK`, `▲ Aviso`, `✕ Error`. Quien no distingue colores lee la palabra; quien mira de reojo ve la forma; el color solo confirma. Es la prohibición nº 5 de `cli-experience.md` §6 aplicada dentro del nivel 2.
+**Estados — siempre forma + palabra + color, y solo estos tres**: `● OK`, `▲ Aviso`, `✕ Error` (en inglés: `OK` / `Warning` / `Error`). Quien no distingue colores lee la palabra; quien mira de reojo ve la forma; el color solo confirma. Es la prohibición nº 5 de `cli-experience.md` §6 aplicada dentro del nivel 2. **Son los mismos tres estados del nivel 1**, unificados con el **ADR 0031**: misma forma, misma palabra y mismo significado en las dos rutas de dibujo, para que nadie tenga que aprender dos vocabularios según dónde esté mirando.
+
+**Lo que no se unifica es la paleta, y hay una razón medida.** El nivel 1 pinta **sobre el fondo del terminal**, que es de quien lo configuró y este proyecto no conoce: puede ser negro, blanco o el gris de un tema cualquiera. Contra un fondo desconocido no se puede prometer 4.5:1, así que el ADR 0031 elige tonos que aguantan en los dos extremos —acento `#00A3A3`, `#1F9D55` para OK, `#B26B00` para aviso, `#C62828` para error— y pone el listón en **3:1**, que es el que se puede sostener sin mentir. El nivel 2 está en el caso contrario: **pinta su propio fondo** (`#10171A` en `nz-dark`, `#E9EFED` en `nz-light`), sabe exactamente contra qué mide y por eso **exige 4.5:1**, con los valores de la decisión 6. Dos paletas, un solo vocabulario: se comparten la forma, la palabra y el significado; el valor hexadecimal depende de si se conoce o no la superficie de debajo.
 
 **Tres niveles de énfasis, nunca un cuarto**:
 
@@ -159,7 +168,11 @@ El color semántico va **encima** de esa escala; no es un cuarto nivel y nunca s
 
 ### 8. El Unicode del nivel 2 no se hereda
 
-Dentro del nivel 2 **se permite Unicode**: bordes redondeados, `▸`, `●`, `▲`, `✕`. Se puede porque llegar al nivel 2 ya exige un terminal moderno: la puerta de entrada sigue siendo exactamente la del ADR 0028 y el 0030 —`isatty` sobre los tres descriptores, `NO_COLOR`, `TERM=dumb`, segundo plano, terminfo, consola heredada de Windows, tamaño mínimo al arrancar y a mitad de sesión—, y ninguna de las tres pantallas se construye antes de que esa puerta diga que sí.
+Dentro del nivel 2 **se permite Unicode**: bordes redondeados, `▸`, `●`, `▲`, `✕`. Se puede porque llegar al nivel 2 ya exige un terminal moderno, y quién lo decide está escrito en una sola función, `cli_output.interactive_ui_blocker()`, la misma puerta del ADR 0028 y del 0030. Sus **siete disparadores**, en el orden en que la función los comprueba: (1) **`NZ_MCP_NO_TUI`**, el opt-out explícito; (2) `TERM=dumb`; (3) que alguno de los tres descriptores estándar no sea una terminal (`isatty` sobre entrada, salida y error); (4) un proceso en **segundo plano** de una terminal que no es suya —`nz-mcp &`, `nohup`, `setsid`—, solo POSIX; (5) un `TERM` vacío, sin definir, desconocido para terminfo o que no declare direccionamiento de cursor; (6) una **consola de Windows** sin secuencias VT; y (7) una ventana por debajo del mínimo **al arrancar**. El octavo —achicarla por debajo del mínimo **a mitad de sesión**— no se puede ver desde ahí y vive en la aplicación, en `on_resize`. Ninguna de las tres pantallas se construye antes de que la puerta diga que sí.
+
+**`NO_COLOR` no está en esa lista**, y conviene decirlo porque es fácil suponer lo contrario: `interactive_ui_blocker()` no la consulta. El opt-out explícito de la pantalla completa se llama **`NZ_MCP_NO_TUI`**, y su alcance es exactamente ese: **cierra solo el nivel 2**. Con ella puesta el CLI sigue funcionando entero, con color y con la salida de siempre; no es un interruptor de estética, es un interruptor de superficie.
+
+Y una decisión del **ADR 0031** que este ADR asume y no discute: **el nivel 2 exige nivel 1**. Una pantalla que pinta su propio fondo no puede dibujarse donde el color no está permitido, así que la función gana un **octavo disparador**: `terminal_level() == 0` cierra la pantalla completa. Ese nivel 0 lo disparan `NO_COLOR`, `TERM=dumb`, `CI`, que alguno de los descriptores no sea una terminal, una consola de Windows heredada y `NZ_MCP_UI_LEVEL=0` —por ahí, y solo por ahí, entra `NO_COLOR` en la puerta del nivel 2—, y cuando salta se activa la **degradación del ADR 0028**: la ruta de texto de siempre, con el mismo resultado. Lo implementa el issue [#236](https://github.com/Oscarsp15/nz-mcp/issues/236).
 
 Esto **acota**, y no deroga, la contención del riesgo 1 del ADR 0028 (*"marcadores y bordes en ASCII dentro del asistente"*): el ASCII deja de ser el techo del nivel 2 y pasa a ser el **piso** del producto, en otra ruta de dibujo. El nivel 0 —ASCII sin color— es esa ruta, la gobierna el **ADR 0031, *mejora progresiva por capacidad del terminal*** (issue #234, que enmienda el 0027), y **no lee esta hoja**. Que aquí haya un borde redondeado no autoriza uno en la salida de `doctor`.
 
@@ -190,8 +203,8 @@ Las maquetas que el owner aprobó el 2026-09-09, guardadas para que esta decisi�
 
 ## Riesgos
 
-1. **Las seis tareas se separan de los once comandos.** Es el coste directo de abandonar el punto 4 del ADR 0030. Un comando nuevo no aparece en el menú solo, y una tarea puede quedar apuntando a un comando renombrado. **Contención**: `?` sí se construye desde los comandos registrados, así que la rotura se ve en pantalla en vez de esconderse; y son seis entradas, no cincuenta.
-2. **Una tercera superficie viva que mantener y degradar.** Eventos, foco, redibujo y ocho disparadores, ahora por triplicado. Se asume: la decisión 3 lo dice y la contención es que sea **la última** que este ADR abre.
+1. **Las seis tareas se separan de los comandos de Typer.** Es el coste directo de abandonar el punto 4 del ADR 0030. Un comando nuevo no aparece en el menú solo, y una tarea puede quedar apuntando a un comando renombrado. **Contención**: `?` sí se construye desde los comandos registrados, así que la rotura se ve en pantalla en vez de esconderse; y son seis entradas, no cincuenta.
+2. **Una tercera superficie viva que mantener y degradar.** Eventos, foco, redibujo y la degradación entera —siete disparadores en la función y uno en la app, más el octavo que añade el ADR 0031—, ahora por triplicado. Se asume: la decisión 3 lo dice y la contención es que sea **la última** que este ADR abre.
 3. **El Unicode se filtra al nivel 0.** Es el riesgo más probable de todos: alguien copia un marcador de una pantalla a un mensaje de `doctor`. **Contención**: la decisión 8, el ADR 0031 como dueño de esa ruta, y que el nivel 0 no lea esta hoja.
 4. **Que el color vuelva a los widgets.** Una hoja compartida dura hasta el primer PR con prisa. **Contención**: la regla dura de la decisión 5, y una comprobación automática que busque literales de color en el código de las pantallas — eso es implementación (#238), pero el ADR lo pide.
 5. **La hoja `.tcss` tiene que viajar en el wheel.** Un fichero que no es `.py` se olvida en el empaquetado y falla en casa del usuario, no en CI. **Contención**: queda escrito como requisito de #238, con test de que se puede leer desde el paquete instalado.
@@ -220,7 +233,7 @@ Tres direcciones dibujadas como maqueta antes de decidir. Se eligió la **A**, q
 
 ### Negativas y costes
 
-- **Una superficie Textual más** que mantener, probar y degradar, con sus ocho disparadores.
+- **Una superficie Textual más** que mantener, probar y degradar, con sus disparadores: siete en la función y uno en la app, más el octavo que añade el ADR 0031.
 - **Una hoja `.tcss` que hay que empaquetar en el wheel** y que falla, si falla, en casa del usuario.
 - **El compromiso de que ninguna pantalla nueva escape del tema**, que hay que sostener PR a PR.
 - **Seis textos de menú que ya no se derivan de los comandos** y que hay que mantener en ES y EN.
@@ -248,7 +261,7 @@ Tres direcciones dibujadas como maqueta antes de decidir. Se eligió la **A**, q
 - **No elige librería.** Es `textual`, con el tope y el confinamiento del ADR 0029.
 - **No toca los niveles 0 y 1.** Son del ADR 0031 (issue #234).
 - **No autoriza una cuarta pantalla.** Ni por uniformidad, ni por parecido, ni por "ya hay tres".
-- **No cambia la degradación.** Los disparadores del ADR 0028 y del 0030 siguen intactos y ahora aplican también a "Ver perfiles".
+- **No cambia la degradación.** Los disparadores del ADR 0028 y del 0030 siguen intactos y ahora aplican también a "Ver perfiles". El octavo de la función, `terminal_level() == 0`, lo añade el ADR 0031 y es suyo: este ADR solo lo acata.
 - **No cambia el modelo de seguridad.** Ni `sql_guard`, ni permisos de perfil, ni el manejo de la credencial: la password sigue sin entrar en el árbol de widgets (ADR 0029, condición 5 y su adenda 2).
 - **No implementa nada.** Esta fase es decisión: ni una línea de `src/`, ni dependencias nuevas.
 

@@ -15,7 +15,8 @@
 > y el ASCII pasa a ser el piso del producto en otra ruta de dibujo (ADR 0031); (3) el asistente
 > gana stepper, errores de campo en formato de registro y un toast de una línea, sin tocar su
 > flujo. **La condición 1 no cambia**: los disparadores de degradación siguen intactos y se aplican
-> también a la pantalla nueva. Todo lo demás de este ADR sigue vigente sin cambios; el contenido
+> también a la pantalla nueva —siete en `interactive_ui_blocker()` y uno en la aplicación; el octavo
+> de la función, `terminal_level() == 0`, lo añade el ADR 0031 y no este ADR—. Todo lo demás de este ADR sigue vigente sin cambios; el contenido
 > que sigue se conserva tal como se escribió el 2026-09-06.
 
 ## Contexto
