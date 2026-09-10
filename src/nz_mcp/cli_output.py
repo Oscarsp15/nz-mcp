@@ -87,6 +87,14 @@ be produced: a real terminal (``isatty``), no ``NO_COLOR``, no ``TERM=dumb``.
 The result is passed explicitly to ``click``, which strips the sequences when
 colour is off, so redirected or piped output stays plain text.
 
+:func:`terminal_level` is the question ADR 0031 asks on top of those two: *how much of
+what we draw arrives whole?* It answers 0 (ASCII, no escape sequence: the floor the
+whole CLI is measured against) or 1 (a modern terminal), from the environment and
+``isatty`` alone, and ``NZ_MCP_UI_LEVEL`` forces it either way. It decides nothing
+about what is drawn yet — the level-0 output is pinned character by character in
+``tests/unit/test_cli_output.py``, and that pin is the contract every later level
+has to keep.
+
 :func:`interactive_ui_blocker` is the same detection asked a harder question:
 may a **full-screen** application start here? It is the gate of ADR 0028,
 condition 1, and it lives in this module for the reason everything else about
@@ -229,6 +237,115 @@ def animation_enabled(stream: SupportsIsatty | None = None) -> bool:
     return bool(target.isatty())
 
 
+#: Escape hatch of ADR 0031, point 3. Forces the level in both directions: ``1`` where the
+#: detection would have said 0 — a terminal the heuristics do not know but its owner does —
+#: and ``0`` where it would have said 1, for whoever wants yesterday's bytes, byte for byte.
+#: It names this program, so it wins over ``NO_COLOR``, which is a global convention.
+UI_LEVEL_ENV: Final[str] = "NZ_MCP_UI_LEVEL"
+
+#: What :func:`terminal_level` can answer. Level 2 — full screen — exists, but it is not
+#: this function's to grant (ADR 0031, point 9): the type makes that impossible to do by
+#: accident, which is why it is a ``Literal`` and not ``int``.
+TerminalLevel = Literal[0, 1]
+
+#: The only spellings the escape hatch accepts, after stripping. Anything else — ``2``
+#: included, on purpose — is treated as absent and the detection runs (ADR 0031, point 3).
+_LEVEL_SPELLINGS: Final[dict[str, TerminalLevel]] = {"0": 0, "1": 1}
+
+#: The code page in which a Windows console renders every character we draw. Any other —
+#: 850 measured in Git Bash on Windows 11, 437 on a fresh console — turns a glyph outside
+#: ASCII into ``?``, which is the finding behind ADR 0027.
+_UTF8_CODE_PAGE: Final[int] = 65001
+
+
+def _forced_level() -> TerminalLevel | None:
+    return _LEVEL_SPELLINGS.get(os.environ.get(UI_LEVEL_ENV, "").strip())
+
+
+def _console_output_code_page() -> int | None:
+    """The code page of the Windows console, or ``None`` where there is no console API.
+
+    The API is looked up rather than imported: ``ctypes.windll`` does not exist on POSIX,
+    and a module that touched it on import — or on the common path — would not load there.
+    Only asked once the caller has established the platform is Windows; the lookup is what
+    keeps the function itself runnable, and testable, on every platform.
+    """
+    import ctypes  # noqa: PLC0415 - only on the Windows path
+
+    console_api: Callable[[], int] | None = getattr(
+        getattr(getattr(ctypes, "windll", None), "kernel32", None), "GetConsoleOutputCP", None
+    )
+    if console_api is None:
+        return None
+    try:
+        return int(console_api())
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _windows_console_renders_unicode() -> bool:
+    """Whether a Windows console will draw a character outside ASCII as itself, not as ``?``.
+
+    Signal 7 of ADR 0031, and the case that cannot be reduced to "is it Windows". Measured
+    on the owner's machine: Git Bash on Windows 11 reports ``TERM=xterm-256color`` and a
+    console code page of **850**, so a detector that trusted ``TERM`` would draw ``●`` into
+    a console that prints ``?``. Either of two facts is enough to know Unicode arrives whole:
+    Windows Terminal is hosting us (``WT_SESSION``), or the console is already on UTF-8.
+
+    Not asked on POSIX, where there is no console code page and the equivalent question is
+    terminfo's, one signal earlier.
+    """
+    if os.name != "nt":
+        return True
+    if os.environ.get("WT_SESSION") is not None:
+        return True
+    return _console_output_code_page() == _UTF8_CODE_PAGE
+
+
+def terminal_level(stream: SupportsIsatty | None = None) -> TerminalLevel:
+    """How much of what this CLI draws arrives whole on ``stream`` (default: stderr).
+
+    The single capability question of ADR 0031. Level **0** is ASCII without a single
+    escape sequence — the floor, and the output that is pinned character by character in
+    the tests; level **1** is a modern terminal that keeps colour and Unicode intact. Pure:
+    it reads the environment and asks ``isatty()``; it opens nothing, writes nothing and
+    keeps no state, so the whole matrix of environments is testable with ``monkeypatch``.
+
+    Signals, in order; the first that answers wins, and every doubt falls to 0:
+
+    1. ``NZ_MCP_UI_LEVEL`` set to ``0`` or ``1`` — the only explicit signal and the only one
+       that can raise the level. It wins over ``NO_COLOR`` because it names this program.
+       Any other value counts as absent, without a warning: this is read on every command.
+    2. ``NO_COLOR`` present, with any value including empty.
+    3. ``TERM=dumb``.
+    4. ``CI`` present. A build log is a file someone reads a month later, and some runners
+       attach a pseudo-terminal, where ``isatty`` says yes and is wrong.
+    5. ``stream`` is not a terminal: redirected, piped, replaced by a wrapper.
+    6. On POSIX, a ``TERM`` that is empty, unset or unusable to terminfo — the same lookup
+       the full-screen gate already trusts.
+    7. On Windows, a console outside Windows Terminal that is not on code page 65001.
+
+    Level 2 — full screen — is not this function's to decide; see
+    :func:`interactive_ui_blocker`, which asks harder questions and, as its eighth trigger,
+    also requires this one to answer 1.
+    """
+    forced = _forced_level()
+    if forced is not None:
+        return forced
+    target = sys.stderr if stream is None else stream
+    # Same shape as the gate below: the list of reasons to stay on the floor is the
+    # interesting part, and ``any`` stops at the first one, in this order.
+    floor_signals: tuple[Callable[[], bool], ...] = (
+        lambda: os.environ.get("NO_COLOR") is not None,
+        _term_is_dumb,
+        lambda: os.environ.get("CI") is not None,
+        lambda: not _is_a_terminal(target),
+        lambda: not _terminal_type_is_capable(),
+        lambda: not _windows_console_renders_unicode(),
+    )
+    return 0 if any(fired() for fired in floor_signals) else 1
+
+
 #: Escape hatch of ADR 0028, condition 1. Anyone whose terminal, multiplexer or remote
 #: session makes the full-screen wizard a bad deal sets this once in their shell profile
 #: and never thinks about it again.
@@ -244,6 +361,7 @@ InteractiveBlocker = Literal[
     "terminal_without_capabilities",
     "console_without_vt",
     "window_too_small",
+    "terminal_level_0",
 ]
 
 #: The terminfo capability a full-screen application cannot do without: absolute cursor
@@ -378,7 +496,7 @@ def interactive_ui_blocker(*, min_width: int, min_height: int) -> InteractiveBlo
     to read input rather than *whether* to start. A TUI library will try to paint wherever
     it is allowed to; declining is this project's job.
 
-    The seven start-up triggers, in the order that costs least to check:
+    The eight start-up triggers, in the order that costs least to check:
 
     1. ``NZ_MCP_NO_TUI`` - an explicit request, honoured without argument.
     2. ``TERM=dumb`` - a terminal that has told us it understands nothing.
@@ -397,8 +515,17 @@ def interactive_ui_blocker(*, min_width: int, min_height: int) -> InteractiveBlo
     6. A Windows console that does not speak VT sequences. Legacy code pages turn box
        drawing into ``?``; the wizard is ASCII, but a console without VT cannot position
        a cursor either. Triggers 5 and 6 are the same question asked per platform.
-    7. A window below the declared minimum. The eighth trigger - shrinking below it
-       *during* the session - cannot be seen from here and belongs to the application.
+    7. A window below the declared minimum.
+    8. A terminal that does not reach level 1 of ADR 0031 (:func:`terminal_level`). Full
+       screen is drawn with colour and Unicode - they are its raw material, not a garnish -
+       so whoever asked for none (``NO_COLOR``, ``NZ_MCP_UI_LEVEL=0``) or is on a console
+       that cannot show them gets the chained questions instead. Deliberately the
+       **result** of the detection and not the override: any of its signals closes this.
+       The converse does not hold - ``NZ_MCP_UI_LEVEL=1`` silences this trigger and no
+       other, and the other seven are the ones that decide.
+
+    One more trigger - shrinking below the minimum *during* the session - cannot be seen
+    from here and belongs to the application.
 
     Args:
         min_width: Narrowest window the caller can draw itself in, in cells.
@@ -417,6 +544,7 @@ def interactive_ui_blocker(*, min_width: int, min_height: int) -> InteractiveBlo
         ("terminal_without_capabilities", lambda: not _terminal_type_is_capable()),
         ("console_without_vt", detect_legacy_windows),
         ("window_too_small", lambda: _window_is_smaller_than(min_width, min_height)),
+        ("terminal_level_0", lambda: terminal_level() == 0),
     )
     return next((name for name, fired in triggers if fired()), None)
 
@@ -864,9 +992,11 @@ def confirm(prompt: str, *, default: bool = False) -> bool:
 
 __all__: Final[tuple[str, ...]] = (
     "NO_TUI_ENV",
+    "UI_LEVEL_ENV",
     "InteractiveBlocker",
     "Style",
     "SupportsIsatty",
+    "TerminalLevel",
     "animation_enabled",
     "ask",
     "ask_int",
@@ -887,5 +1017,6 @@ __all__: Final[tuple[str, ...]] = (
     "steps",
     "success",
     "table",
+    "terminal_level",
     "warn",
 )

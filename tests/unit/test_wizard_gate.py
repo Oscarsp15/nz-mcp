@@ -1,12 +1,12 @@
 """The gate that decides whether a full-screen wizard may start (ADR 0028, condition 1).
 
 Degradation is the condition that can sink the whole feature: **nobody may end up unable
-to configure nz-mcp because an interface would not start.** So each of the seven start-up
+to configure nz-mcp because an interface would not start.** So each of the eight start-up
 triggers gets a test of its own, starting from a helper that opens the gate completely -
 otherwise a test would pass because a *different* trigger fired, which is how a broken
 gate stays green.
 
-The eighth - shrinking the window below the minimum mid-session - cannot be seen from
+One more - shrinking the window below the minimum mid-session - cannot be seen from
 this side and lives in ``tests/unit/test_wizard_app.py``.
 """
 
@@ -63,6 +63,13 @@ def open_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(out, "detect_legacy_windows", lambda: False)
     monkeypatch.setattr(out, "_owns_the_terminal", lambda: True)
     _set_size(monkeypatch, *_ROOMY)
+    # Trigger 8 asks ``terminal_level()``, which reads three more things than the seven
+    # above: the override, ``NO_COLOR`` and ``CI`` - the last one set on every runner - and,
+    # on Windows, whether Windows Terminal is hosting us.
+    monkeypatch.delenv(out.UI_LEVEL_ENV, raising=False)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setenv("WT_SESSION", "1")
 
 
 def _blocker(**overrides: int) -> out.InteractiveBlocker | None:
@@ -383,3 +390,53 @@ def test_an_operating_system_without_process_groups_owns_nothing_to_check(
     monkeypatch.setattr(os, "tcgetpgrp" if missing == "getpgrp" else "getpgrp", explode)
     monkeypatch.setattr("sys.stdin", _DescriptorStream(7))
     assert out._owns_the_terminal()
+
+
+# --- trigger 8: full screen requires level 1 (ADR 0031, point 9) -------------
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        pytest.param("NO_COLOR", "1", id="no-color"),
+        pytest.param(out.UI_LEVEL_ENV, "0", id="level-forced-to-0"),
+    ],
+)
+def test_a_terminal_below_level_1_closes_it(
+    monkeypatch: pytest.MonkeyPatch, variable: str, value: str
+) -> None:
+    """Trigger 8, and a deliberate change of behaviour: ``NO_COLOR`` used to open the wizard.
+
+    Full screen is drawn with colour and Unicode. Whoever asked for none of that gets the
+    chained questions, which are designed for exactly that case, rather than a full-screen
+    application with the paint scraped off.
+    """
+    open_the_gate(monkeypatch)
+    monkeypatch.setenv(variable, value)
+    assert _blocker() == "terminal_level_0"
+
+
+def test_a_dumb_terminal_is_below_level_1_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``TERM=dumb`` is a level-0 signal as well; trigger 2 simply gets there first."""
+    open_the_gate(monkeypatch)
+    monkeypatch.setenv("TERM", "dumb")
+    assert out.terminal_level() == 0
+    assert _blocker() is not None
+
+
+def test_forcing_level_1_silences_only_the_eighth_trigger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``NZ_MCP_UI_LEVEL=1`` overrides the detection; it does not override the terminal.
+
+    Where the detection alone would have closed the gate, the override reopens it. Where any
+    of the other seven fires, it changes nothing: a level cannot be forced against a
+    terminal that cannot hold it, because there the cost of being wrong is ``SIGTTIN``.
+    """
+    open_the_gate(monkeypatch)
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setenv(out.UI_LEVEL_ENV, "1")
+    assert _blocker() is None
+
+    monkeypatch.setattr("sys.stdout", _FakeStream(terminal=False))
+    assert _blocker() == "no_terminal"
