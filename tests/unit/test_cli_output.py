@@ -95,7 +95,13 @@ def test_dumb_terminal_disables_color(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_status_is_plain_text_when_color_is_off(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(cli_output, "color_enabled", lambda *_args: False)
+    """``status`` is gated by :func:`terminal_level` now (ADR 0031, point 8, trap 2), which is
+    the strict superset of what :func:`color_enabled` checks - see
+    ``test_a_ci_terminal_with_a_pty_still_draws_the_floor`` for the case that made the switch
+    necessary. Forcing the level to 0 is what this test now has to do to keep meaning what its
+    name says.
+    """
+    monkeypatch.setattr(cli_output, "terminal_level", lambda *_args: 0)
     cli_output.fail("algo ha fallado")
     assert _ESC not in capsys.readouterr().err
 
@@ -103,7 +109,7 @@ def test_status_is_plain_text_when_color_is_off(
 def test_status_is_styled_when_color_is_on(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(cli_output, "color_enabled", lambda *_args: True)
+    monkeypatch.setattr(cli_output, "terminal_level", lambda *_args: 1)
     cli_output.fail("algo ha fallado")
     assert _ESC in capsys.readouterr().err
 
@@ -579,3 +585,118 @@ def test_level_0_spinner_frames_are_ascii() -> None:
     """The one surface whose timing a unit test cannot pin: its frames, then, are."""
     for frame in cli_output._SPINNER_FRAMES:
         _assert_is_floor_output(frame)
+
+
+# --- level 1 draws colour, a rounded frame and a fluid indicator (issue #237) --------
+#
+# The level-0 contract above is never touched by any of this: every test here either passes
+# ``level=1`` explicitly or forces ``terminal_level`` to 1, so none of it can pass for the
+# wrong reason - the same discipline ``a_modern_terminal`` uses above for the detector itself.
+
+
+def test_table_level_1_uses_a_rounded_frame_and_an_accented_header() -> None:
+    """ADR 0031, point 5: rounded border, accent on the header and the frame."""
+    rendered = cli_output.table(["Perfil", "Modo"], [["prod", "read"]], width=40, level=1)
+    assert _ESC in rendered, "level 1 must colour the header and the frame"
+    assert "\N{BOX DRAWINGS LIGHT ARC DOWN AND RIGHT}" in rendered  # "╭"
+    assert "prod" in rendered
+    assert "read" in rendered
+
+
+def test_table_level_0_is_unaffected_by_the_new_parameter() -> None:
+    """The default is 0, and passing it explicitly draws exactly what omitting it always drew."""
+    without_level = cli_output.table(["Perfil"], [["prod"]], width=20)
+    with_level_0 = cli_output.table(["Perfil"], [["prod"]], width=20, level=0)
+    assert without_level == with_level_0
+    assert _ESC not in with_level_0
+
+
+#: Every box-drawing character either box style can produce, ASCII and rounded alike - stripped
+#: out so the two renders can be compared on data alone.
+_FRAME_CHARS: Final[str] = (
+    "|+-"
+    "\N{BOX DRAWINGS LIGHT HORIZONTAL}"
+    "\N{BOX DRAWINGS LIGHT VERTICAL}"
+    "\N{BOX DRAWINGS LIGHT ARC DOWN AND RIGHT}"
+    "\N{BOX DRAWINGS LIGHT ARC DOWN AND LEFT}"
+    "\N{BOX DRAWINGS LIGHT ARC UP AND RIGHT}"
+    "\N{BOX DRAWINGS LIGHT ARC UP AND LEFT}"
+    "\N{BOX DRAWINGS LIGHT VERTICAL AND RIGHT}"
+    "\N{BOX DRAWINGS LIGHT VERTICAL AND LEFT}"
+    "\N{BOX DRAWINGS LIGHT DOWN AND HORIZONTAL}"
+    "\N{BOX DRAWINGS LIGHT UP AND HORIZONTAL}"
+    "\N{BOX DRAWINGS LIGHT VERTICAL AND HORIZONTAL}"
+)
+
+
+def _data_tokens(rendered: str) -> set[str]:
+    """Every word left once ANSI and every box-drawing character are gone."""
+    plain = cli_output._ANSI_SGR_RE.sub("", rendered)
+    plain = plain.translate({ord(char): " " for char in _FRAME_CHARS})
+    return set(plain.split())
+
+
+def test_table_level_1_carries_the_same_data_as_level_0() -> None:
+    """ADR 0031, point 5: level 1 adds style, never information - same rows, same columns."""
+    headers = ["Perfil", "Host", "Modo"]
+    rows = [["prod", "nz-prod-01", "read"], ["lab", "nz-lab-07", "write"]]
+    level_0 = cli_output.table(headers, rows, width=60, level=0)
+    level_1 = cli_output.table(headers, rows, width=60, level=1)
+    assert _data_tokens(level_0) == _data_tokens(level_1)
+
+
+def test_a_ci_terminal_with_a_real_pty_still_draws_the_floor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR 0031, point 8, trap 2. ``color_enabled`` alone would miss this: it never asks about
+    ``CI``, so a runner with a real pty attached can pass it while ``terminal_level`` - which
+    does ask - still answers 0. What gates every escape sequence, bold included, has to be the
+    level, not the narrower check.
+    """
+    stream = _FakeTerminal(tty=True)
+    monkeypatch.setattr(sys, "stderr", stream)
+    monkeypatch.delenv(cli_output.UI_LEVEL_ENV, raising=False)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("CI", "true")
+    assert cli_output.color_enabled(stream) is True, "the gap this trap closes"
+    assert cli_output.terminal_level(stream) == 0
+    cli_output.heading("Perfiles")
+    cli_output.success("bien")
+    _assert_is_floor_output(stream.getvalue())
+
+
+@pytest.mark.parametrize(
+    ("writer", "glyph"),
+    [
+        (cli_output.success, "\N{BLACK CIRCLE}"),
+        (cli_output.warn, "\N{BLACK UP-POINTING TRIANGLE}"),
+        (cli_output.fail, "\N{MULTIPLICATION X}"),
+    ],
+)
+def test_states_carry_shape_word_and_colour_at_level_1(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    writer: Callable[[str], None],
+    glyph: str,
+) -> None:
+    """ADR 0031, point 7, rule 1: colour never carries the meaning alone."""
+    monkeypatch.setattr(cli_output, "terminal_level", lambda *_args: 1)
+    writer("mensaje")
+    err = capsys.readouterr().err
+    assert glyph in err
+    assert "mensaje" in err
+    assert _ESC in err
+
+
+def test_heading_is_accented_and_bold_at_level_1_with_no_state_glyph(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A heading is a title, not a state: it gets the accent, not one of the three glyphs."""
+    monkeypatch.setattr(cli_output, "terminal_level", lambda *_args: 1)
+    cli_output.heading("Perfiles")
+    err = capsys.readouterr().err
+    assert "Perfiles" in err
+    assert _ESC in err
+    for glyph in ("\N{BLACK CIRCLE}", "\N{BLACK UP-POINTING TRIANGLE}", "\N{MULTIPLICATION X}"):
+        assert glyph not in err

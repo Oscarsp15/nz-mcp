@@ -514,9 +514,17 @@ def _required_arguments(command: TyperCommand) -> list[str]:
 #: would let someone notice it.
 _PROFILE_FIELD_UNSET: Final[str] = "-"
 
-#: Marks the active row. Text, not colour, and ASCII: it has to survive a redirect to a file,
-#: a terminal without colour, and a Windows console on a legacy code page.
+#: Marks the active row at level 0. Text, not colour, and ASCII: it has to survive a redirect
+#: to a file, a terminal without colour, and a Windows console on a legacy code page.
 _ACTIVE_MARK: Final[str] = "*"
+
+#: The same marker at level 1 (ADR 0031, point 5: "marcador ● en el perfil activo"). Left
+#: uncoloured on purpose: colouring one cell would mean baking a raw escape sequence into a
+#: plain string that ``out.table``'s own width math measures with ``len()``, which counts the
+#: invisible bytes as visible ones and would blow the "Activo" column out to the width of an
+#: escape sequence for a one-character cell. The border and the header already carry the accent
+#: (``out.table``'s own level-1 styling); the marker changes shape, not colour.
+_ACTIVE_MARK_LEVEL_1: Final[str] = "\N{BLACK CIRCLE}"  # "●"
 
 #: The four fields that answer "where does this point", in reading order.
 _PROFILE_COLUMNS: Final[tuple[tuple[str, str], ...]] = (
@@ -541,6 +549,10 @@ def _render_profiles(file: ProfilesFile, active: str | None, locale: Locale) -> 
     A table earns its borders when there are rows to compare and one to choose. With a
     single profile there is nothing to compare it against and the active column is noise:
     that profile is the active one by definition.
+
+    The table travels to stdout as payload (``list_profiles_cmd`` hands this to ``out.emit``),
+    so its level is asked of *that* channel, the same way ``out.table``'s own default width
+    already is (ADR 0031, point 1: a caller asks about its own channel).
     """
     names = sorted(file.profiles)
     labels = [t(key, locale) for key, _ in _PROFILE_COLUMNS]
@@ -548,14 +560,16 @@ def _render_profiles(file: ProfilesFile, active: str | None, locale: Locale) -> 
         section = file.profiles[names[0]]
         cells = [_profile_field(section, field, names[0]) for _, field in _PROFILE_COLUMNS]
         return "\n".join(f"{label}: {cell}" for label, cell in zip(labels, cells, strict=True))
+    level = out.stdout_terminal_level()
+    active_mark = _ACTIVE_MARK_LEVEL_1 if level == 1 else _ACTIVE_MARK
     rows = [
         [
             *(_profile_field(file.profiles[name], field, name) for _, field in _PROFILE_COLUMNS),
-            _ACTIVE_MARK if name == active else "",
+            active_mark if name == active else "",
         ]
         for name in names
     ]
-    return out.table([*labels, t("CLI.PROFILES_COLUMN_ACTIVE", locale)], rows)
+    return out.table([*labels, t("CLI.PROFILES_COLUMN_ACTIVE", locale)], rows, level=level)
 
 
 # --- probe-catalog: progress while it runs, one report when it ends -----------
@@ -612,8 +626,15 @@ def _probe_verbose_table(run: ProbeRun, locale: Locale) -> str:
         for row in run.results
     ]
     # This one is read on stderr, so it is fitted to that stream: the default is the
-    # payload channel, and getting it wrong would size a report to the wrong window.
-    return out.table(headers, rows, width=out.display_width(sys.stderr))
+    # payload channel, and getting it wrong would size a report to the wrong window. Same
+    # stream for the level: a table drawn for stderr asks stderr, not stdout, how much of it
+    # arrives whole.
+    return out.table(
+        headers,
+        rows,
+        width=out.display_width(sys.stderr),
+        level=out.terminal_level(sys.stderr),
+    )
 
 
 def _report_probe_run(run: ProbeRun, locale: Locale, *, verbose: bool) -> None:

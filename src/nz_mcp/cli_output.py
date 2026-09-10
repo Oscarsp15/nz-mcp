@@ -123,6 +123,7 @@ import contextlib
 import io
 import itertools
 import os
+import re
 import shutil
 import sys
 import threading
@@ -136,6 +137,9 @@ from rich.table import Table
 
 Style = Literal["plain", "heading", "success", "warning", "error"]
 
+#: The basic 8-colour palette level 0 has always used. Kept as-is: level 0 is a contract
+#: (ADR 0031, point 4) and this dict is what it has always drawn from - a plain name, no
+#: escape sequence unless ``color_enabled`` and (now) :func:`terminal_level` both allow one.
 _STYLE_COLORS: Final[dict[Style, str | None]] = {
     "plain": None,
     "heading": None,
@@ -144,6 +148,69 @@ _STYLE_COLORS: Final[dict[Style, str | None]] = {
     "error": typer.colors.RED,
 }
 
+#: ADR 0031, point 7: the level-1 palette, measured at >= 3:1 on both a white and a black
+#: background - the only thing a fixed byte can guarantee without knowing the terminal's own
+#: colour. Five hexes, each with one job; nothing here is a level-2 colour, which is ADR 0032's
+#: and answers a different question (its own fixed background, so its own 4.5:1 listón).
+_ACCENT_HEX: Final[str] = "#00A3A3"
+_OK_HEX: Final[str] = "#1F9D55"
+_WARNING_HEX: Final[str] = "#B26B00"
+_ERROR_HEX: Final[str] = "#C62828"
+
+#: What :func:`table` colours identifiers is *nothing* (ADR 0031, point 7, rule 2): headers and
+#: borders get the accent, cell content keeps the terminal's own foreground. There is no
+#: "muted" constant here because nothing in this module paints with it yet.
+
+
+def _rgb(hex_color: str) -> tuple[int, int, int]:
+    """Split ``#rrggbb`` into the three ints ``click``'s truecolour ``fg`` wants."""
+    return (int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16))
+
+
+#: Level-1 replacement for :data:`_STYLE_COLORS`: the same five keys, the ADR 0031 palette
+#: instead of the basic eight. Selected only once :func:`terminal_level` has said 1, never a
+#: fallback for a terminal that cannot show truecolour - that terminal is level 0 already
+#: (ADR 0031, point 2, signal 7 on Windows; a POSIX terminal too old for ``cup`` fails signal 6
+#: first).
+_LEVEL_1_STYLE_COLORS: Final[dict[Style, tuple[int, int, int] | None]] = {
+    "plain": None,
+    "heading": _rgb(_ACCENT_HEX),
+    "success": _rgb(_OK_HEX),
+    "warning": _rgb(_WARNING_HEX),
+    "error": _rgb(_ERROR_HEX),
+}
+
+#: ADR 0031, point 7: a state is shape *and* word *and* colour, never colour alone. Only the
+#: three states that :func:`status` actually carries get a glyph; ``plain`` and ``heading`` are
+#: not states.
+_STATE_GLYPHS: Final[dict[Style, str]] = {
+    "success": "\N{BLACK CIRCLE}",  # "●"
+    "warning": "\N{BLACK UP-POINTING TRIANGLE}",  # "▲"
+    "error": "\N{MULTIPLICATION X}",  # "✕"
+}
+
+_ANSI_RESET: Final[str] = "\x1b[0m"
+
+#: Matches a whole SGR sequence, for the padding math in :func:`steps`: a coloured level-1
+#: frame is wider in bytes than it is on screen, and the erase line has to blank what is on
+#: screen, not what is in the string.
+_ANSI_SGR_RE: Final[re.Pattern[str]] = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _ansi_fg(hex_color: str) -> str:
+    """The raw truecolour escape for ``hex_color``, for the one surface that cannot ask ``click``
+    to build it: the live-redrawn frames of :func:`progress` and :func:`steps`, which write
+    straight to the stream themselves and never go through ``typer.secho``.
+    """
+    red, green, blue = _rgb(hex_color)
+    return f"\x1b[38;2;{red};{green};{blue}m"
+
+
+def _visible_length(text: str) -> int:
+    """``len(text)`` with any SGR sequence removed - what actually occupies a cell on screen."""
+    return len(_ANSI_SGR_RE.sub("", text))
+
+
 _DUMB_TERM: Final[str] = "dumb"
 
 #: Frames of the activity indicator, in ASCII on purpose. A Windows console running a
@@ -151,9 +218,29 @@ _DUMB_TERM: Final[str] = "dumb"
 #: found while walking the install path, so braille dots and block characters are out.
 _SPINNER_FRAMES: Final[tuple[str, ...]] = ("-", "\\", "|", "/")
 
+#: Level-1 spinner: ``rich``'s own "dots" set (ten Braille frames), rendered in the accent
+#: colour. Level 0 never sees these - a legacy code page draws a Braille dot as ``?``, which is
+#: the finding behind ADR 0027 and the reason these stay behind :func:`terminal_level`.
+_SPINNER_FRAMES_LEVEL_1: Final[tuple[str, ...]] = (
+    "\N{BRAILLE PATTERN DOTS-124}",
+    "\N{BRAILLE PATTERN DOTS-145}",
+    "\N{BRAILLE PATTERN DOTS-1456}",
+    "\N{BRAILLE PATTERN DOTS-456}",
+    "\N{BRAILLE PATTERN DOTS-3456}",
+    "\N{BRAILLE PATTERN DOTS-356}",
+    "\N{BRAILLE PATTERN DOTS-236}",
+    "\N{BRAILLE PATTERN DOTS-1236}",
+    "\N{BRAILLE PATTERN DOTS-123}",
+    "\N{BRAILLE PATTERN DOTS-1234}",
+)
+
 #: Seconds between frames. Fast enough to read as motion, slow enough not to flood a
 #: slow terminal or a serial console.
 _SPINNER_INTERVAL_S: Final[float] = 0.12
+
+#: Ten frames read as smoother motion than the four ASCII ones at the same wall-clock speed
+#: would, so the interval can drop a little without the eye reading it as flicker.
+_SPINNER_INTERVAL_LEVEL_1_S: Final[float] = 0.08
 
 #: Seconds of silence before the first frame is drawn. Below this, a person has not
 #: started waiting yet and an indicator that appears and vanishes is flicker, not
@@ -173,6 +260,12 @@ _BAR_WIDTH: Final[int] = 20
 #: Characters of that bar. ASCII, for the same reason as the spinner frames.
 _BAR_DONE: Final[str] = "#"
 _BAR_TODO: Final[str] = "-"
+
+#: Level-1 bar: solid and light Unicode blocks, the filled part in the accent colour
+#: (ADR 0031, point 5: "glifo, color semántico y barra de progreso"). Same width as level 0,
+#: only the material changes.
+_BAR_DONE_LEVEL_1: Final[str] = "\N{FULL BLOCK}"
+_BAR_TODO_LEVEL_1: Final[str] = "\N{LIGHT SHADE}"
 
 #: Line width used when the text is not going to a terminal at all: redirected, piped, in
 #: CI, read by another process. Fixed on purpose - there is no window to measure and the
@@ -344,6 +437,20 @@ def terminal_level(stream: SupportsIsatty | None = None) -> TerminalLevel:
         lambda: not _windows_console_renders_unicode(),
     )
     return 0 if any(fired() for fired in floor_signals) else 1
+
+
+def stdout_terminal_level() -> TerminalLevel:
+    """:func:`terminal_level` of stdout, for the caller that draws for the payload channel.
+
+    Exists so that no other module ever has to spell ``sys.stdout``: the reservation contract
+    (ADR 0027, addendum 1; ``tests/contract/test_serve_stdout_protocol_only.py``) forbids naming
+    that descriptor anywhere outside this module, reading included, because a name-based check
+    can only ever be a blacklist and the file descriptor swap of
+    :func:`stdout_reserved_for_protocol` is what actually holds. ``list-profiles`` is the one
+    caller (ADR 0031, point 1: a caller asks about its own channel; the profile table travels
+    on stdout, the same way :func:`display_width`'s own default already does).
+    """
+    return terminal_level(sys.stdout)
 
 
 #: Escape hatch of ADR 0028, condition 1. Anyone whose terminal, multiplexer or remote
@@ -590,13 +697,24 @@ def _write_live(text: str) -> None:
         sys.stderr.flush()
 
 
-def _animate(message: str, stop: threading.Event) -> None:
-    """Redraw ``message`` with a rotating frame until ``stop`` is set, then clear the line."""
+def _animate(message: str, stop: threading.Event, level: TerminalLevel) -> None:
+    """Redraw ``message`` with a rotating frame until ``stop`` is set, then clear the line.
+
+    Level 0 keeps the four ASCII frames it always had, with no escape sequence. Level 1 cycles
+    the ten-frame Braille set in the accent colour (ADR 0031, point 5) - more frames read as
+    smoother motion, which is the whole ask of "spinner fluido". Either way the erase width is
+    the same two cells (frame, space) plus the message: the accent colour changes what is
+    written, never how much of the line it occupies.
+    """
     if stop.wait(_SPINNER_GRACE_S):
         return
-    for frame in itertools.cycle(_SPINNER_FRAMES):
-        _write_live(f"\r{frame} {message}")
-        if stop.wait(_SPINNER_INTERVAL_S):
+    frames = _SPINNER_FRAMES_LEVEL_1 if level == 1 else _SPINNER_FRAMES
+    interval = _SPINNER_INTERVAL_LEVEL_1_S if level == 1 else _SPINNER_INTERVAL_S
+    accent = _ansi_fg(_ACCENT_HEX)
+    for frame in itertools.cycle(frames):
+        drawn = f"{accent}{frame}{_ANSI_RESET}" if level == 1 else frame
+        _write_live(f"\r{drawn} {message}")
+        if stop.wait(interval):
             break
     # Erase with spaces rather than an ANSI clear-line: the indicator then needs no escape
     # sequence at all, only a carriage return, so nothing here depends on what the terminal
@@ -632,7 +750,7 @@ def progress(message: str) -> Iterator[None]:
     stop = threading.Event()
     # Daemon: a hung write on the terminal must never keep the interpreter alive, and the
     # only state this thread owns is one line it is about to erase.
-    worker = threading.Thread(target=_animate, args=(message, stop), daemon=True)
+    worker = threading.Thread(target=_animate, args=(message, stop, terminal_level()), daemon=True)
     worker.start()
     try:
         yield
@@ -641,10 +759,21 @@ def progress(message: str) -> Iterator[None]:
         worker.join(timeout=_SPINNER_JOIN_S)
 
 
-def _render_step(done: int, total: int, label: str) -> str:
-    """One frame of the determinate indicator: bar, counter and what is running now."""
+def _render_step(done: int, total: int, label: str, level: TerminalLevel) -> str:
+    """One frame of the determinate indicator: bar, counter and what is running now.
+
+    Level 0 keeps the ``#``/``-`` bar with no escape sequence. Level 1 fills the same width
+    with Unicode blocks in the accent colour (ADR 0031, point 5) - the counter and the label
+    stay in the terminal's own foreground, because they are content, not structure (point 7,
+    rule 2).
+    """
     filled = round(_BAR_WIDTH * done / total) if total else _BAR_WIDTH
-    bar = _BAR_DONE * filled + _BAR_TODO * (_BAR_WIDTH - filled)
+    empty = _BAR_WIDTH - filled
+    if level == 1:
+        filled_run = _ansi_fg(_ACCENT_HEX) + _BAR_DONE_LEVEL_1 * filled + _ANSI_RESET
+        bar = filled_run + _BAR_TODO_LEVEL_1 * empty
+    else:
+        bar = _BAR_DONE * filled + _BAR_TODO * empty
     return f"[{bar}] {done}/{total} {label}"
 
 
@@ -676,13 +805,17 @@ def steps(total: int) -> Iterator[Callable[[int, str], None]]:
     if not animation_enabled():
         yield lambda _done, _label: None
         return
+    level = terminal_level()
     widest = 0
 
     def update(done: int, label: str) -> None:
         nonlocal widest
-        frame = _render_step(done, total, label)
-        widest = max(widest, len(frame))
-        _write_live("\r" + frame.ljust(widest))
+        frame = _render_step(done, total, label, level)
+        # A level-1 frame carries SGR bytes that occupy no cell on screen: the padding math
+        # has to measure what is drawn, not what is written, or the erase line comes up short.
+        visible = _visible_length(frame)
+        widest = max(widest, visible)
+        _write_live("\r" + frame + " " * (widest - visible))
 
     try:
         yield update
@@ -776,13 +909,30 @@ def emit(message: str = "") -> None:
 
 
 def status(message: str, *, style: Style = "plain") -> None:
-    """Write a human-facing line to stderr, styled only when the terminal allows it."""
+    """Write a human-facing line to stderr, styled only when the terminal allows it.
+
+    Level 0 keeps drawing exactly what it always has: the plain word, in the basic eight
+    colours, gated by :func:`color_enabled` alone would have been enough - except it is not
+    (ADR 0031, point 8, trap 2). ``color_enabled`` never asks about ``CI`` or an unknown
+    ``TERM``, so a build runner with a real pty attached can pass it while
+    :func:`terminal_level` still says 0, and that gap is exactly where a stray escape sequence
+    - bold included - would leak into a log file someone reads a month later. So the gate here
+    is :func:`terminal_level`, which is a strict superset of :func:`color_enabled`'s checks:
+    everywhere the two used to agree, they still do.
+
+    Level 1 adds the ADR 0031 palette in place of the basic eight, and, for the three states
+    that carry one, the glyph that goes with it - shape, word and colour together, never colour
+    alone (ADR 0031, point 7, rule 1).
+    """
+    level_1 = terminal_level(sys.stderr) == 1
+    glyph = _STATE_GLYPHS.get(style) if level_1 else None
+    text = f"{glyph} {message}" if glyph else message
     typer.secho(
-        message,
-        fg=_STYLE_COLORS[style],
-        bold=style == "heading",
+        text,
+        fg=_LEVEL_1_STYLE_COLORS[style] if level_1 else _STYLE_COLORS[style],
+        bold=level_1 and style == "heading",
         err=True,
-        color=color_enabled(sys.stderr),
+        color=level_1,
     )
 
 
@@ -901,8 +1051,20 @@ def _as_records(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> str:
     return "\n\n".join(block for block in blocks if block)
 
 
+#: Extra cells :func:`table` reserves for the outer frame at level 1: one border character
+#: and one padding space on each side, so text never touches the frame. Level 0 draws no
+#: outer frame (``show_edge=False``) and reserves nothing; level 1 does, and the width budget
+#: has to know about it before ``rich`` ever sees a column, or a table that just fit the
+#: window would overflow it by exactly this much.
+_LEVEL_1_EDGE_WIDTH: Final[int] = 4
+
+
 def table(
-    headers: Sequence[str], rows: Sequence[Sequence[str]], *, width: int | None = None
+    headers: Sequence[str],
+    rows: Sequence[Sequence[str]],
+    *,
+    width: int | None = None,
+    level: TerminalLevel = 0,
 ) -> str:
     """Render ``rows`` as aligned columns and return the text, without writing it anywhere.
 
@@ -923,13 +1085,18 @@ def table(
       project builds writes to a memory buffer and holds no file descriptor, which satisfies
       condition 1 of ADR 0027 (addendum 1: *no console writes to stdout*) more strictly than
       ``Console(stderr=True)`` does: this one cannot reach stderr either.
-    - **ASCII frame, no colour.** ``box.ASCII`` and ``no_color`` are not a fallback for
-      hostile terminals, they are the output: a Windows console on a legacy code page turns
-      the Unicode box characters ``rich`` would otherwise pick into ``?``, and colour that
-      carries meaning is unreadable for whoever does not see it or redirects it to a file.
-      What is left is a header rule and column separators, which is all a table needs.
-    - **No outer frame and no trailing blanks.** Padding a row out to the frame puts
-      invisible characters in a redirected file for no gain.
+    - **Level 0: ASCII frame, no colour.** ``box.ASCII`` and ``no_color`` are not a fallback
+      for hostile terminals, they are the floor's output (ADR 0031, point 4): a Windows console
+      on a legacy code page turns the Unicode box characters ``rich`` would otherwise pick into
+      ``?``, and colour that carries meaning is unreadable for whoever does not see it or
+      redirects it to a file. What is left is a header rule and column separators, which is all
+      a table needs, with no outer frame and no trailing blanks: padding a row out to a frame
+      puts invisible characters in a redirected file for no gain.
+    - **Level 1: rounded frame, accent on header and border.** ADR 0031, point 5, and its own
+      point 7, rule 2: the accent draws the structure - headers, the frame - and cell content
+      keeps the terminal's own foreground. Identifiers are not recoloured, so nothing here needs
+      a per-cell style, and the width budget this function already computes is untouched except
+      for the two cells :data:`_LEVEL_1_EDGE_WIDTH` reserves for the frame itself.
 
     Args:
         headers: Column titles, already localized.
@@ -937,17 +1104,28 @@ def table(
         width: Cells to fit into. Defaults to :func:`display_width` of stdout; passed
             explicitly by the callers that write elsewhere, and by tests, which is how the
             behaviour at every width is pinned without opening a terminal.
+        level: The capability level to draw for (:func:`terminal_level` of the caller's own
+            channel). Defaults to 0 - the floor - on purpose: a caller that does not ask for
+            level 1 gets exactly what it always got, which is what keeps this default safe for
+            every existing call site and for the level-0 contract tests, none of which pass it.
 
     Returns:
         The rendered table, newline separated and without a trailing newline. Or, when the
         window cannot hold even the headers, the same data as ``key: value`` blocks.
     """
     available = display_width() if width is None else width
+    edge_reserve = _LEVEL_1_EDGE_WIDTH if level == 1 else 0
     natural = _natural_widths(headers, rows)
-    fitted = _fitted_widths(natural, [len(header) for header in headers], available)
+    fitted = _fitted_widths(natural, [len(header) for header in headers], available - edge_reserve)
     if fitted is None:
         return _as_records(headers, rows)
-    grid = Table(box=box.ASCII, show_edge=False, pad_edge=False)
+    grid = Table(
+        box=box.ROUNDED if level == 1 else box.ASCII,
+        show_edge=level == 1,
+        pad_edge=level == 1,
+        header_style=f"bold {_ACCENT_HEX}" if level == 1 else None,
+        border_style=_ACCENT_HEX if level == 1 else None,
+    )
     for header in headers:
         grid.add_column(header)
     for row in rows:
@@ -961,7 +1139,15 @@ def table(
         # none of the decisions above are taken twice, differently.
         file=buffer,
         width=max(available, 1),
-        no_color=True,
+        no_color=level == 0,
+        # Only forced at level 1: the buffer itself never answers ``isatty()``, and without
+        # this ``rich`` would silently fall back to no colour, defeating the whole point of
+        # asking for one. The colour system is pinned rather than auto-detected for the same
+        # reason width is passed explicitly: a memory buffer has no ``COLORTERM`` to read, and
+        # every hex in the ADR 0031 palette is meant to reach the terminal exactly, not
+        # downgraded to the nearest of sixteen.
+        color_system="truecolor" if level == 1 else None,
+        force_terminal=level == 1,
         emoji=False,
         highlight=False,
         markup=False,
@@ -1013,6 +1199,7 @@ __all__: Final[tuple[str, ...]] = (
     "status",
     "stdout_is_reserved",
     "stdout_reserved_for_protocol",
+    "stdout_terminal_level",
     "steps",
     "success",
     "table",

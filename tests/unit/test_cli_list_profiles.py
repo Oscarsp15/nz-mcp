@@ -16,6 +16,7 @@ from typing import Final
 import pytest
 from typer.testing import CliRunner
 
+from nz_mcp import cli_output
 from nz_mcp.cli import app
 
 runner = CliRunner()
@@ -172,6 +173,28 @@ def test_the_table_is_plain_text_when_redirected(tmp_path: Path) -> None:
     assert _ESC not in proc.stdout
     assert _ESC not in proc.stderr
     assert "RETAIL" in proc.stdout
+
+
+def test_level_1_marks_the_active_profile_with_a_dot_and_keeps_the_same_data(
+    monkeypatch: pytest.MonkeyPatch, tmp_profiles: Path
+) -> None:
+    """ADR 0031, point 5: a rounded frame and an accented header, the same data as level 0.
+
+    ``NZ_MCP_UI_LEVEL=1`` forces the level (ADR 0031, point 3); ``color=True`` is what keeps
+    ``click``'s own test runner from stripping the escape sequences it would otherwise assume
+    a captured, non-terminal stream cannot use.
+    """
+    monkeypatch.setenv("NZ_MCP_LANG", "es")
+    monkeypatch.setenv(cli_output.UI_LEVEL_ENV, "1")
+    tmp_profiles.write_text(_THREE_PROFILES, encoding="utf-8")
+    result = runner.invoke(app, ["list-profiles"], color=True)
+    assert result.exit_code == 0
+    body = result.stdout
+    assert _ESC in body, "level 1 must colour the header and the frame"
+    assert "\N{BLACK CIRCLE}" in body, "the active profile keeps a marker at level 1"
+    assert "*" not in body, "level 1 replaces the level-0 marker, it does not add to it"
+    assert "RETAIL" in body
+    assert "prod" in body and "lab" in body and "broken" in body
 
 
 def test_the_table_uses_only_characters_a_legacy_console_can_draw(tmp_path: Path) -> None:
