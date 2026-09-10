@@ -148,10 +148,16 @@ def test_no_color_still_allows_the_indicator(monkeypatch: pytest.MonkeyPatch) ->
 def test_a_real_terminal_gets_frames_and_gets_its_line_back(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """On a terminal the indicator draws, names the wait, and erases itself on the way out."""
+    """On a terminal the indicator draws, names the wait, and erases itself on the way out.
+
+    Level pinned to 0: this test is about the ASCII frames, and the level - not just
+    ``isatty`` - now decides which set is drawn (issue #237). See
+    ``test_a_level_1_terminal_gets_the_fluid_braille_spinner`` for the other branch.
+    """
     terminal = _FakeTerminal()
     monkeypatch.setattr(sys, "stderr", terminal)
     monkeypatch.delenv("TERM", raising=False)
+    monkeypatch.setenv(cli_output.UI_LEVEL_ENV, "0")
 
     with cli_output.progress("opening the session"):
         time.sleep(_ENOUGH_TO_DRAW_S)
@@ -162,6 +168,25 @@ def test_a_real_terminal_gets_frames_and_gets_its_line_back(
     assert "\x1b" not in rendered, "the indicator must not need an escape sequence to redraw"
     assert rendered.endswith("\r"), "the indicator left its line on screen instead of erasing it"
     # The erase is spaces, not an ANSI clear: the last write blanks the whole drawn line.
+    assert " " * len("opening the session") in terminal.writes[-1]
+
+
+def test_a_level_1_terminal_gets_the_fluid_braille_spinner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR 0031, point 5: a fluid indicator at level 1, in the accent colour, still erased."""
+    terminal = _FakeTerminal()
+    monkeypatch.setattr(sys, "stderr", terminal)
+    monkeypatch.setenv(cli_output.UI_LEVEL_ENV, "1")
+
+    with cli_output.progress("opening the session"):
+        time.sleep(_ENOUGH_TO_DRAW_S)
+
+    rendered = terminal.rendered()
+    assert "opening the session" in rendered
+    assert any(frame in rendered for frame in cli_output._SPINNER_FRAMES_LEVEL_1)
+    assert "\x1b[38;2;0;163;163m" in rendered, "the frame must carry the accent colour"
+    assert rendered.endswith("\r"), "the indicator left its line on screen instead of erasing it"
     assert " " * len("opening the session") in terminal.writes[-1]
 
 
@@ -228,10 +253,14 @@ def test_the_determinate_indicator_counts_and_names_the_step(
 
     The name is the part that answers "on which one did it hang?" — the question fourteen
     queries of silence used to leave open. It is also what makes the bar worth drawing at all.
+
+    Level pinned to 0: the ``#``/``-`` bar is this test's claim. See
+    ``test_the_determinate_indicator_draws_the_level_1_block_bar`` for the other branch.
     """
     terminal = _FakeTerminal()
     monkeypatch.setattr(sys, "stderr", terminal)
     monkeypatch.delenv("TERM", raising=False)
+    monkeypatch.setenv(cli_output.UI_LEVEL_ENV, "0")
 
     with cli_output.steps(14) as step:
         step(1, "list_databases")
@@ -253,6 +282,7 @@ def test_the_determinate_indicator_erases_the_widest_line_it_drew(
     terminal = _FakeTerminal()
     monkeypatch.setattr(sys, "stderr", terminal)
     monkeypatch.delenv("TERM", raising=False)
+    monkeypatch.setenv(cli_output.UI_LEVEL_ENV, "0")
 
     with cli_output.steps(2) as step:
         step(1, "a_very_long_catalog_query_identifier")
@@ -260,6 +290,31 @@ def test_the_determinate_indicator_erases_the_widest_line_it_drew(
 
     assert "a_very_long_catalog_query_identifier" not in terminal.writes[-1]
     assert terminal.writes[-1].count(" ") >= len("a_very_long_catalog_query_identifier")
+
+
+def test_the_determinate_indicator_draws_the_level_1_block_bar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR 0031, point 5: Unicode blocks in the accent colour, same width, still erased clean.
+
+    The erase padding is what proves the SGR-aware width math in :func:`steps` works: a long
+    step followed by a short one must not leave a coloured fragment behind either.
+    """
+    terminal = _FakeTerminal()
+    monkeypatch.setattr(sys, "stderr", terminal)
+    monkeypatch.setenv(cli_output.UI_LEVEL_ENV, "1")
+
+    with cli_output.steps(2) as step:
+        step(1, "a_very_long_catalog_query_identifier")
+        step(2, "short")
+
+    rendered = terminal.rendered()
+    assert "1/2 a_very_long_catalog_query_identifier" in rendered
+    assert "2/2 short" in rendered
+    assert cli_output._BAR_DONE_LEVEL_1 in rendered
+    assert cli_output._BAR_TODO_LEVEL_1 in rendered
+    assert "\x1b[38;2;0;163;163m" in rendered
+    assert "a_very_long_catalog_query_identifier" not in terminal.writes[-1]
 
 
 def test_the_indicator_lets_a_failure_through(monkeypatch: pytest.MonkeyPatch) -> None:
