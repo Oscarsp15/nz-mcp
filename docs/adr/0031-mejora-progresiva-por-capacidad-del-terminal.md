@@ -41,11 +41,11 @@ del entorno en vez de con una bandera que el usuario tenga que descubrir.
 Dato medido en la máquina del owner, y motivo de que la comprobación de Windows no pueda reducirse
 a "es Windows": en Git Bash sobre Windows 11, `GetConsoleOutputCP()` devuelve **850** y
 `WT_SESSION` no está definida, mientras que `TERM` vale `xterm-256color`. Un detector que solo
-mirase `TERM` daría por bueno un terminal que va a pintar `?` en cada `✔`.
+mirase `TERM` daría por bueno un terminal que va a pintar `?` en cada `●`.
 
 ## Decisión
 
-### 1. Tres niveles, y una sola función que decide
+### 1. Tres niveles; `terminal_level()` decide entre 0 y 1
 
 **`cli_output.terminal_level(stream=None) -> Literal[0, 1]`**. Una función **pura**: lee variables
 de entorno y pregunta `isatty()` al flujo de destino. No abre terminal, no escribe nada, no
@@ -117,8 +117,10 @@ mejora de un nivel superior puede modificarla. En particular:
 1. **Cero secuencias de escape.** Ni `\x1b[`, ni negrita, ni cursor. La negrita también es una
    secuencia: una consola sin VT la escupe como basura y un redirect la deja escrita en el
    fichero.
-2. **Solo ASCII imprimible.** Los marcos de `box.ASCII`, los marcadores en texto (`OK`, `WARN`,
-   `FAIL`), el `...` de truncado y los fotogramas `- \ | /` del indicador.
+2. **Solo ASCII imprimible.** Los marcos de `box.ASCII`, los marcadores de estado sin glifo —la
+   palabra sola: `OK`, `Aviso`, `Error`—, los identificadores no traducidos `OK` / `WARN` / `FAIL`
+   que `probe-catalog` comparte con su salida `--json` y con el README, el `...` de truncado y los
+   fotogramas `- \ | /` del indicador.
 3. **`serve` sigue sin pintar nada en stdout.** La adenda 1 del ADR 0027 —*ninguna consola escribe
    a stdout*— y la reserva de descriptor del #203 no se tocan. Los niveles son una decisión sobre
    **stderr**; stdout es del protocolo y de `emit()`, y ahí no hay niveles.
@@ -141,7 +143,7 @@ de éste:
 |---|---|---|
 | Cabecera del comando | línea de texto | regla con el acento y el nombre del comando |
 | Tabla de `list-profiles` | `box.ASCII`, sin color | borde redondeado, cabecera con acento, marcador `●` en el perfil activo |
-| Estado por fila (activo, con aviso, con error) | `OK`, `WARN`, `FAIL` | `✔`, `▲`, `✖` **con el mismo texto al lado** |
+| Estado por fila (activo, con aviso, con error) | `OK`, `Aviso`, `Error` (la palabra sola) | `● OK`, `▲ Aviso`, `✕ Error`, **el glifo nunca sin su palabra** y unificados con el ADR 0032 |
 | Escalera de `doctor` y `probe-catalog` | `[OK]` y contador `n/14` | glifo, color semántico y barra de progreso |
 | Indicador de espera | `- \ \| /` sobre `\r` | spinner fluido de `rich` |
 | Mensajes de `status`, `success`, `warn` y `fail` | texto plano | color de la paleta del punto 7 |
@@ -154,7 +156,7 @@ Los glifos del nivel 1 aparecen siempre **acompañados de texto**. Ver el punto 
 ### 6. El resaltado de SQL no se implementa, porque no hay dónde ponerlo
 
 Comprobado sobre el código, no supuesto: **ningún comando del CLI muestra SQL o DDL a una
-persona**. `cli.py` no imprime SQL en ninguno de sus once comandos, y `catalog/probe.py` —el único
+persona**. `cli.py` no imprime SQL en ninguno de los comandos de Typer, y `catalog/probe.py` —el único
 que maneja SQL en el camino del CLI— lo **ejecuta** para validarlo y reporta el resultado, sin
 enseñar la sentencia. El DDL que produce nz-mcp sale por las tools MCP, y ahí lo lee un modelo, no
 un par de ojos: colorearlo sería gastar bytes en quien no los mira.
@@ -192,10 +194,19 @@ componentes de interfaz, y es el máximo que se puede garantizar sin saber el fo
 arriba son reproducibles: los calcula el script de la maqueta con la fórmula de luminancia
 relativa de WCAG 2.1.
 
+**El nivel 1 y el nivel 2 usan paletas distintas, y no es una incoherencia.** El nivel 1 pinta
+**sobre el fondo del terminal**, que nadie nos dice cuál es; por eso su listón es 3:1 medido sobre
+blanco y sobre negro **a la vez**, que es lo máximo garantizable sin conocer el fondo. El nivel 2
+pinta **su propio fondo** —una aplicación de pantalla completa lo declara en su hoja de estilos—,
+así que ahí el par de colores se conoce entero y el listón puede ser el 4,5:1 de WCAG AA que fija
+el ADR 0032. Distinta pregunta, distinta respuesta. Lo que **sí** comparten los dos niveles es el
+vocabulario de estados, y por eso este ADR adopta el del ADR 0032: `● OK`, `▲ Aviso`, `✕ Error`
+(en inglés, `OK` / `Warning` / `Error`). En el nivel 0 queda la palabra sola, sin glifo.
+
 Tres reglas que acompañan a la paleta:
 
 1. **El color nunca es el único portador de significado.** Cada estado lleva además texto o
-   símbolo: `✔ activo`, `▲ sin probar`, `✖ error`. Quien no distingue rojo de verde, quien lee por
+   símbolo: `● OK`, `▲ Aviso`, `✕ Error`. Quien no distingue rojo de verde, quien lee por
    un lector de pantalla y quien está en nivel 0 reciben la misma información. Esto es lo que hace
    que degradar a nivel 0 no pierda **nada** salvo el adorno.
 2. **Los identificadores no se colorean.** Nombres de perfil, de base de datos, de tabla y de
@@ -226,20 +237,49 @@ cuando se descubren dibujando. Quedan como **restricciones** para los issues
 ### 9. El nivel 2 tiene su propia puerta, y esta función no la abre
 
 `terminal_level()` devuelve 0 o 1. El nivel 2 —pantalla completa— lo autorizan los ADR 0028, 0029
-y 0030 para dos superficies concretas, y lo decide `cli_output.interactive_ui_blocker()` con sus
-ocho disparadores, que preguntan cosas que esta función no pregunta: tamaño de ventana, grupo de
-proceso en primer plano, capacidad `cup`. **No se unifican**: son dos preguntas distintas —*"¿qué
-llega entero por esta línea?"* frente a *"¿puedo tomar la terminal entera?"*— y fundirlas haría que
-arreglar una rompiese la otra.
+y 0030 para dos superficies concretas, y lo decide `cli_output.interactive_ui_blocker()`, que hoy
+tiene **siete disparadores** de arranque (`opted_out`, `term_dumb`, `no_terminal`,
+`background_process`, `terminal_without_capabilities`, `console_without_vt` y `window_too_small`)
+más uno que desde ahí no se puede ver y vive en la propia aplicación: encoger la ventana por debajo
+del mínimo **a mitad de sesión**. Preguntan cosas que `terminal_level()` no pregunta: tamaño de
+ventana, grupo de proceso en primer plano, capacidad `cup`. **No se unifican**: son dos preguntas
+distintas —*"¿qué llega entero por esta línea?"* frente a *"¿puedo tomar la terminal entera?"*— y
+fundirlas haría que arreglar una rompiese la otra.
 
 Con una excepción, que es de coherencia y se decide aquí:
 
-- **`NZ_MCP_UI_LEVEL=0` cierra también la puerta del nivel 2**, como noveno disparador de
-  `interactive_ui_blocker()`. Si "forzar el piso" dejase salir una aplicación de pantalla
-  completa, forzar el piso sería una mentira.
-- **`NZ_MCP_UI_LEVEL=1` no la abre.** Un nivel superior no se puede forzar contra una terminal que
-  no lo aguanta: ahí el precio de equivocarse es una terminal inservible —el `SIGTTIN` del ADR
-  0030—, no un carácter feo.
+- **El nivel 2 exige nivel 1: `terminal_level() == 0` cierra su puerta**, y lo hace como **octavo
+  disparador de la función** (el redimensionado a mitad de sesión sigue siendo de la aplicación, no
+  de la lista). El disparador **no** es "hay un override a 0": pregunta por el **resultado** de
+  `terminal_level()`, así que lo dispara cualquiera de las señales del punto 2. En concreto cierran
+  la pantalla completa `NO_COLOR`, `TERM=dumb`, `CI`, un destino que no es terminal, un `TERM`
+  desconocido para terminfo, la consola de Windows sin `WT_SESSION` y sin code page 65001, y
+  `NZ_MCP_UI_LEVEL=0`. En todos esos casos se toma el camino de texto que el ADR 0028 ya exige como
+  degradación, que existe y está probado.
+- **Esto cambia el comportamiento de hoy, y a propósito.** Hoy `NO_COLOR=1` abre el asistente y el
+  menú a pantalla completa y a todo color, porque `interactive_ui_blocker()` no mira `NO_COLOR`. A
+  partir de aquí, no. El nivel 2 se dibuja con color y con Unicode —son su materia prima, no un
+  adorno—, y quien pide *sin color* tiene que recibir sin color; ofrecerle en su lugar una
+  aplicación de pantalla completa despintada es peor que la lista de prompts, que está diseñada
+  exactamente para ese caso.
+- **`NZ_MCP_UI_LEVEL=1` no abre el nivel 2.** Forzar el nivel 1 apaga el octavo disparador cuando la
+  detección habría dado 0, pero no toca los otros siete, y son ellos los que deciden. Un nivel
+  superior no se puede forzar contra una terminal que no lo aguanta: ahí el precio de equivocarse
+  es una terminal inservible —el `SIGTTIN` del ADR 0030—, no un carácter feo.
+
+**Relación con `NZ_MCP_NO_TUI`.** Son dos variables con alcances distintos, y ninguna de las dos
+abre nada. `NZ_MCP_NO_TUI` ya existe y es el primer disparador de `interactive_ui_blocker()`:
+cierra **solo el nivel 2** —el asistente y el menú caen a los prompts encadenados—, y la salida del
+comando sigue dibujándose en nivel 1 si el terminal da para ello. `NZ_MCP_UI_LEVEL=0` cierra **los
+niveles 1 y 2**: el 1 por la tabla del punto 2 y el 2 por el octavo disparador. Dicho al revés:
+quien solo quiere quitarse la pantalla completa escribe `NZ_MCP_NO_TUI=1` y conserva el color;
+quien quiere la salida de siempre, byte a byte, escribe `NZ_MCP_UI_LEVEL=0`. Ninguna de las dos
+enciende nada: no hay variable de entorno que abra el nivel 2 donde la detección lo cierra.
+
+El octavo disparador **no lo implementa este ADR**: es del issue
+[#236](https://github.com/Oscarsp15/nz-mcp/issues/236), junto con `terminal_level()` y los tests
+que fijan el nivel 0. Es el mismo módulo y la misma matriz de entornos, así que el único punto de
+contacto entre las dos preguntas nace probado en vez de heredado.
 
 ### 10. Qué se enmienda del ADR 0027, exactamente
 
@@ -290,7 +330,7 @@ promesa, y las promesas en `docs/` envejecen mal.
    averiguar solo, y no arregla el caso que importa —quien nunca leerá la documentación—, porque
    una bandera solo la encuentra quien ya sabe que existe. Se conserva **como salida de
    emergencia**, y en forma de variable de entorno (`NZ_MCP_UI_LEVEL`) en vez de bandera: se
-   escribe una vez en el perfil del shell y vale para los once comandos, mientras que una bandera
+   escribe una vez en el perfil del shell y vale para los comandos de Typer, mientras que una bandera
    habría que repetirla en cada invocación y añadirla a cada comando.
 4. **Delegar la decisión a `rich`** (`Console` con autodetección). `rich` decide *colores*, no
    decide niveles, y no sabe nada de nuestro caso de la code page 65001. Además repartiría el
@@ -312,6 +352,9 @@ promesa, y las promesas en `docs/` envejecen mal.
   degradada sea la de ayer; a partir de este ADR, sí.
 - El resto del rediseño —issues #236 y #237, y el nivel 2 del #235— cuelga de una regla escrita en
   vez de de criterios sueltos por PR.
+- **El octavo disparador del punto 9 tiene dueño: el issue #236**, que ya implementa la detección y
+  los tests del nivel 0. No hay que abrir nada nuevo; sí hay que sacarlo de su lista de "fuera de
+  alcance", donde estaba antes de este ADR.
 - La accesibilidad deja de depender de la buena voluntad de quien escribe cada línea: el listón de
   contraste está medido y el color nunca va solo.
 
@@ -325,8 +368,8 @@ promesa, y las promesas en `docs/` envejecen mal.
 - **Una variable de entorno pública más que mantener**, con su documentación y su compatibilidad
   hacia atrás a partir del primer release que la incluya.
 - **Dos preguntas parecidas conviviendo** (`terminal_level` e `interactive_ui_blocker`). Está
-  justificado en el punto 9, pero alguien lo confundirá; el enlace entre las dos es el noveno
-  disparador y conviene que siga siendo el único punto de contacto.
+  justificado en el punto 9, pero alguien lo confundirá; el enlace entre las dos es el octavo
+  disparador de la función y conviene que siga siendo el único punto de contacto.
 
 ### Qué monitorizar
 
@@ -353,8 +396,8 @@ promesa, y las promesas en `docs/` envejecen mal.
 ## Referencias
 
 - [ADR 0027](0027-adoptar-rich-para-la-presentacion-del-cli.md) — adopta y acota `rich`; este ADR enmienda su alcance: el ASCII pasa de techo a piso
-- [ADR 0028](0028-asistente-de-configuracion-interactivo.md), [ADR 0029](0029-adoptar-textual-para-el-asistente-de-configuracion.md) y [ADR 0030](0030-menu-interactivo-como-punto-de-entrada.md) — el nivel 2 y sus ocho disparadores
-- [ADR 0005](0005-sin-frontend.md) — sin frontend ni UI propia, vigente salvo las dos excepciones
+- [ADR 0028](0028-asistente-de-configuracion-interactivo.md), [ADR 0029](0029-adoptar-textual-para-el-asistente-de-configuracion.md) y [ADR 0030](0030-menu-interactivo-como-punto-de-entrada.md) — el nivel 2 y sus siete disparadores de arranque, más el redimensionado que vigila la propia aplicación
+- [ADR 0005](0005-sin-frontend.md) — sin frontend ni UI propia, vigente salvo las excepciones que sus ADR abren
 - [docs/architecture/cli-experience.md](../architecture/cli-experience.md) §2 (R2: sin terminal, la salida queda limpia) y §4 (qué se muestra y qué se calla)
 - `docs/roles/tui-designer.md` (issue [#233](https://github.com/Oscarsp15/nz-mcp/issues/233)) — el rol que redacta este ADR y que es dueño de la paleta y de la detección
 - [docs/roles/dx-engineer.md](../roles/dx-engineer.md) y [docs/roles/tech-lead.md](../roles/tech-lead.md)
