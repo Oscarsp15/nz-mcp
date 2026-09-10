@@ -8,7 +8,7 @@ La mejora es progresiva, por niveles, y cada nivel superior es un extra, nunca u
 
 - **Nivel 0 — ASCII sin color.** Redirección a archivo, canalización a otro proceso, CI, `TERM=dumb`, `NO_COLOR` presente, o una consola heredada que no declara soporte Unicode/ANSI. Es la salida que todo lo demás debe seguir pudiendo reproducir.
 - **Nivel 1 — terminal moderno.** Windows Terminal, VS Code, Linux/macOS con locale UTF-8: color semántico, bordes, resaltado, spinners.
-- **Nivel 2 — pantalla completa con Textual.** Solo donde un ADR ya lo permite explícitamente: el asistente de configuración ([ADR 0028](../adr/0028-asistente-de-configuracion-interactivo.md) y [ADR 0029](../adr/0029-adoptar-textual-para-el-asistente-de-configuracion.md)) y el menú de entrada ([ADR 0030](../adr/0030-menu-interactivo-como-punto-de-entrada.md)).
+- **Nivel 2 — pantalla completa con Textual.** Solo donde un ADR lo permite explícitamente: hoy el asistente de configuración ([ADR 0028](../adr/0028-asistente-de-configuracion-interactivo.md) y [ADR 0029](../adr/0029-adoptar-textual-para-el-asistente-de-configuracion.md)), el menú de entrada ([ADR 0030](../adr/0030-menu-interactivo-como-punto-de-entrada.md)) y la pantalla de perfiles ([ADR 0032](../adr/0032-rediseno-del-nivel-2-del-cli-interactivo.md)). La regla de niveles y la detección están en el [ADR 0031](../adr/0031-mejora-progresiva-por-capacidad-del-terminal.md).
 
 ## Responsabilidades
 
@@ -24,7 +24,7 @@ La mejora es progresiva, por niveles, y cada nivel superior es un extra, nunca u
 ## Qué NO decide este rol
 
 - **No elige librerías ni dependencias.** Adoptar `rich`, `textual` o cualquier otra cosa es una decisión de arquitectura y exige **ADR** en `docs/adr/`. Este rol puede recomendar con argumentos; no aprueba.
-- **No amplía el [ADR 0005](../adr/0005-sin-frontend.md) ni abre pantallas completas nuevas.** Los dos únicos sitios con Textual son los que ya cubren el [ADR 0028](../adr/0028-asistente-de-configuracion-interactivo.md)/[ADR 0029](../adr/0029-adoptar-textual-para-el-asistente-de-configuracion.md) y el [ADR 0030](../adr/0030-menu-interactivo-como-punto-de-entrada.md). Un tercer sitio necesita su propio ADR; ninguno de los dos precedentes sirve de jurisprudencia.
+- **No amplía el [ADR 0005](../adr/0005-sin-frontend.md) ni abre pantallas completas nuevas.** Las superficies con Textual son exactamente las que un ADR autoriza por escrito; cada una nueva necesita su propio ADR y ninguna de las anteriores sirve de jurisprudencia.
 - **No decide qué se muestra ni el texto que se lee.** Eso es del [dx-engineer](dx-engineer.md): este rol trabaja sobre lo que ese rol ya decidió mostrar.
 - **No toca i18n**, salvo los símbolos que forman parte del sistema visual (iconos de estado, por ejemplo), nunca el texto de los mensajes.
 - **No toca seguridad ni logging.** Qué se registra, a qué nivel, o cómo se sanea una credencial, no es de este rol.
@@ -68,6 +68,6 @@ Un PR que toque paleta, hojas `.tcss`, detección de nivel o cualquier cosa que 
 
 Por cada pieza de diseño visual, antes de que se implemente:
 
-- Maqueta en **SVG** (o captura reproducible equivalente) de cada nivel afectado.
+- Maqueta en **SVG** (o captura equivalente) de cada nivel afectado, junto con el script o comando que la regenera, adjuntos al PR o enlazados desde él.
 - **Hoja de estilos** (`.tcss`) o especificación de colores lista para que `dx-engineer` u otro rol la aplique sin decidir colores a mano.
 - **Tabla de decisiones de paleta**: color, uso previsto, contraste medido (fondo claro y fondo oscuro).

@@ -52,7 +52,7 @@
 | `README`, `docs`, `descripción tool`, `documentación` | [roles/technical-writer.md](docs/roles/technical-writer.md) · [standards/i18n.md](docs/standards/i18n.md) |
 | `tool description`, `prompt`, `cómo IA usa tool`, `UX IA` | [roles/dx-engineer.md](docs/roles/dx-engineer.md) |
 | `UX CLI`, `experiencia terminal`, `salida CLI`, `progreso`, `spinner`, `tabla CLI`, `tono mensajes` | [roles/dx-engineer.md](docs/roles/dx-engineer.md) · [standards/i18n.md](docs/standards/i18n.md) · [adr/0005-sin-frontend.md](docs/adr/0005-sin-frontend.md) |
-| `diseño visual`, `paleta`, `tema`, `tcss`, `estilo terminal`, `color`, `capacidad del terminal`, `mejora progresiva` | [roles/tui-designer.md](docs/roles/tui-designer.md) · [adr/0027-adoptar-rich-para-la-presentacion-del-cli.md](docs/adr/0027-adoptar-rich-para-la-presentacion-del-cli.md) · [adr/0029-adoptar-textual-para-el-asistente-de-configuracion.md](docs/adr/0029-adoptar-textual-para-el-asistente-de-configuracion.md) |
+| `diseño visual`, `paleta`, `tema`, `tcss`, `estilo terminal`, `color`, `capacidad del terminal`, `mejora progresiva` | [roles/tui-designer.md](docs/roles/tui-designer.md) · [adr/0031-mejora-progresiva-por-capacidad-del-terminal.md](docs/adr/0031-mejora-progresiva-por-capacidad-del-terminal.md) · [adr/0032-rediseno-del-nivel-2-del-cli-interactivo.md](docs/adr/0032-rediseno-del-nivel-2-del-cli-interactivo.md) · [adr/0027-adoptar-rich-para-la-presentacion-del-cli.md](docs/adr/0027-adoptar-rich-para-la-presentacion-del-cli.md) |
 | `arquitectura`, `decisión`, `ADR`, `diseño` | [arch/overview.md](docs/architecture/overview.md) · nuevo ADR en `docs/adr/` |
 
 **Si tu acción NO aparece en la tabla → detente y pregunta al humano.**
