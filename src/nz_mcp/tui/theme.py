@@ -59,6 +59,9 @@ NZ_DARK: Final[Theme] = Theme(
         # it has the focus. Two carriers at once - the band and the bold.
         "band-idle": "#16262A",
         "band-focus": "#204045",
+        # Textual would derive the selection from the primary at 40% alpha, which lands
+        # near 3:1 under the foreground on the focus band. Declared, and measured.
+        "input-selection-background": "#2A5A5F",
     },
 )
 
@@ -80,6 +83,7 @@ NZ_LIGHT: Final[Theme] = Theme(
         "text-muted": "#4E5856",
         "band-idle": "#DCE9E6",
         "band-focus": "#C9DFDA",
+        "input-selection-background": "#9FD3CC",
     },
 )
 

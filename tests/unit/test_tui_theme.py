@@ -55,6 +55,8 @@ _TEXT_ROLES: Final[tuple[str, ...]] = (
 _SURFACES: Final[tuple[str, ...]] = ("background", "surface", "panel")
 _BAND_ROLES: Final[tuple[str, ...]] = ("foreground", "accent")
 _BANDS: Final[tuple[str, ...]] = ("band-idle", "band-focus")
+#: Selected text in a field: the foreground is the only role drawn on it.
+_SELECTION: Final[str] = "input-selection-background"
 
 
 def _channel(value: int) -> float:
@@ -92,6 +94,7 @@ def _pairs() -> Iterator[tuple[str, str, str]]:
         for band in _BANDS:
             for role in _BAND_ROLES:
                 yield theme.name, role, band
+        yield theme.name, "foreground", _SELECTION
 
 
 def _theme(name: str) -> Theme:
@@ -239,14 +242,20 @@ def test_both_screens_load_the_one_sheet() -> None:
 #: The packages whose modules draw a screen. ``tui`` is where the palette lives, on purpose.
 _SCREEN_PACKAGES: Final[tuple[str, ...]] = ("menu", "wizard")
 
-#: The class attributes through which Textual accepts a stylesheet from code.
-_INLINE_CSS_ATTRIBUTES: Final[frozenset[str]] = frozenset({"CSS", "DEFAULT_CSS"})
+#: The class attributes through which Textual accepts a stylesheet from code, or a second
+#: sheet from a file: a screen inherits ``CSS_PATH`` and never declares its own.
+_INLINE_CSS_ATTRIBUTES: Final[frozenset[str]] = frozenset({"CSS", "DEFAULT_CSS", "CSS_PATH"})
+
+#: The methods that feed styles in at run time: inline CSS on a widget, a source added to
+#: the application's stylesheet.
+_STYLE_INJECTION_METHODS: Final[frozenset[str]] = frozenset({"set_styles", "add_source"})
 
 #: The functional forms, which the tokeniser below would break apart.
 _COLOUR_FUNCTION: Final[re.Pattern[str]] = re.compile(r"\b(?:rgba?|hsla?)\(")
 
-#: What separates tokens inside a string: whitespace and the punctuation of a stylesheet.
-_TOKEN_BREAK: Final[re.Pattern[str]] = re.compile(r"[\s;:,{}()\"']+")
+#: What separates tokens inside a string: whitespace, the punctuation of a stylesheet and
+#: the brackets of Rich markup (``[bold red]``, ``[on red]``, ``[#ff0000]``).
+_TOKEN_BREAK: Final[re.Pattern[str]] = re.compile(r"[\s;:,{}()\[\]\"']+")
 
 
 def _docstrings(tree: ast.AST) -> set[int]:
@@ -275,6 +284,25 @@ def _through_styles(node: ast.expr) -> bool:
     return False
 
 
+def _call_violations(node: ast.Call) -> Iterator[str]:
+    """The calls that decide a colour: a style fed in, a style set by name, a colour built."""
+    func = node.func
+    name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+    if isinstance(func, ast.Attribute) and name in _STYLE_INJECTION_METHODS:
+        yield f"{name}()"
+    if name == "setattr" and node.args and _is_styles(node.args[0]):
+        yield "setattr() on styles"
+    if name == "Color":
+        yield "Color() built in code"
+
+
+def _is_styles(node: ast.expr) -> bool:
+    """Whether an expression is a ``styles`` object, bare or reached through an attribute."""
+    if isinstance(node, ast.Name):
+        return node.id == "styles"
+    return _through_styles(node)
+
+
 def collect_colour_violations(source: str) -> list[str]:
     """Every place a module of a screen decides a colour. Empty means it does not."""
     tree = ast.parse(source)
@@ -299,8 +327,7 @@ def collect_colour_violations(source: str) -> list[str]:
                 if isinstance(target, ast.Attribute) and _through_styles(target):
                     found.append(f"line {node.lineno}: {ast.unparse(target)} assigned")
         elif isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Attribute) and node.func.attr == "set_styles":
-                found.append(f"line {node.lineno}: set_styles()")
+            found.extend(f"line {node.lineno}: {reason}" for reason in _call_violations(node))
         elif (
             isinstance(node, ast.Constant)
             and isinstance(node.value, str)
@@ -344,6 +371,17 @@ _INJECTED: Final[tuple[tuple[str, str], ...]] = (
     ("named-colour", 'x = "tomato"\n'),
     ("ansi-colour", 'x = "ansi_red"\n'),
     ("colour-inside-text", 'x = "background: teal;"\n'),
+    # Rich markup: the audit of PR #247 found these walked straight past the tokeniser.
+    ("markup-bold-red", 'Static("[bold red]error[/]")\n'),
+    ("markup-red", 'x = "[red]"\n'),
+    ("markup-on-red", 'x = "[on red]"\n'),
+    ("markup-hex", 'x = "[#ff0000]"\n'),
+    ("markup-ansi", 'x = "[ansi_red]"\n'),
+    ("colour-constructor", "c = Color(255, 0, 0)\n"),
+    ("colour-constructor-qualified", "c = textual.color.Color(1, 2, 3)\n"),
+    ("setattr-on-styles", 'setattr(self.styles, "background", value)\n'),
+    ("css-path-in-a-screen", 'class X:\n    CSS_PATH = "other.tcss"\n'),
+    ("stylesheet-add-source", 'self.stylesheet.add_source("X { }")\n'),
 )
 
 
