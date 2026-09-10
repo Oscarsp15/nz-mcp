@@ -21,12 +21,14 @@ import textwrap
 from typing import Final
 
 import pytest
+from textual.color import Color
 from textual.widget import Widget
 from textual.widgets import Static
 
 from nz_mcp.i18n import MESSAGES, Locale, t
 from nz_mcp.menu import MIN_HEIGHT, MIN_WIDTH, MenuChoice, MenuEntry
 from nz_mcp.menu.app import CommandMenuApp
+from nz_mcp.tui import NZ_DARK, NZ_LIGHT
 
 #: A window with room to spare, and the minimum one, used side by side on purpose.
 _ROOMY: Final[tuple[int, int]] = (100, 30)
@@ -257,6 +259,30 @@ async def test_the_screen_is_drawable_on_a_console_with_a_legacy_code_page() -> 
         for key in ("CLI.MENU_TITLE", "CLI.MENU_KEYS"):
             for code_page in ("cp437", "cp850"):
                 MESSAGES[key][locale].encode(code_page)
+
+
+@pytest.mark.asyncio
+async def test_f2_swaps_the_theme_and_the_screen_repaints_from_it() -> None:
+    """ADR 0032, decision 5: two themes, one key, and the colour comes from the theme.
+
+    The background is read back from the rendered screen rather than from the theme
+    object, so this fails if the sheet stopped drawing from the theme, not only if F2
+    stopped switching the name.
+    """
+    app = _app()
+    async with app.run_test(size=_ROOMY) as pilot:
+        await pilot.pause()
+        assert app.theme == NZ_DARK.name
+        await pilot.press("f2")
+        await pilot.pause()
+        light = (app.theme, app.screen.styles.background)
+        await pilot.press("f2")
+        await pilot.pause()
+        dark = (app.theme, app.screen.styles.background)
+        await pilot.press("escape")
+
+    assert light == (NZ_LIGHT.name, Color.parse(NZ_LIGHT.background or ""))
+    assert dark == (NZ_DARK.name, Color.parse(NZ_DARK.background or ""))
 
 
 @pytest.mark.asyncio

@@ -20,6 +20,7 @@ import keyring as _keyring
 import pytest
 
 from nz_mcp import cli_output, config
+from nz_mcp.tui import theme
 
 #: Opt-in switch for the integration suite; see docs/standards/testing.md.
 RUN_INTEGRATION_ENV = "NZ_MCP_RUN_INTEGRATION"
@@ -108,6 +109,17 @@ def unreserved_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
     later test. ``monkeypatch.setitem`` restores whatever the test left behind.
     """
     monkeypatch.setitem(cli_output._STATE, "stdout_reserved", False)
+
+
+@pytest.fixture(autouse=True)
+def default_theme(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Start every test with the dark theme, whatever the previous one pressed.
+
+    F2 is meant to outlive the screen that pressed it - the choice is kept for the rest of
+    the process (ADR 0032, decision 5) - which inside one pytest process would mean the
+    next test opens on whichever theme the last one left.
+    """
+    monkeypatch.setattr(theme._SESSION, "name", theme.NZ_DARK.name)
 
 
 @pytest.fixture

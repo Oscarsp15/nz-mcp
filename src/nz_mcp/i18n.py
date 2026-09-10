@@ -573,10 +573,11 @@ MESSAGES: Final[dict[str, Message]] = {
         "en": "nz-mcp: profile '{profile}'",
     },
     # The password key is not repeated here: its own row already carries it, and the line
-    # has to fit in the narrowest window the wizard accepts.
+    # has to fit in the narrowest window the wizard accepts. Three shortcuts at most (ADR
+    # 0032, decision 7): F2 took the place of Tab, which every form already teaches.
     "CLI.WIZARD_UI_KEYS": {
-        "es": "Tab campo | Enter continuar | Esc salir",
-        "en": "Tab field | Enter continue | Esc quit",
+        "es": "Enter continuar | Esc salir | F2 tema",
+        "en": "Enter continue | Esc quit | F2 theme",
     },
     # The interactive menu (issue #226). Two keys, and only two: the name of each command and
     # the sentence describing it come from the "CLI.HELP.*" entries the help screen already
@@ -588,9 +589,11 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "nz-mcp: elige un comando",
         "en": "nz-mcp: pick a command",
     },
+    # Three shortcuts at most (ADR 0032, decision 7): F2 took the place of the arrows,
+    # which a list teaches on its own.
     "CLI.MENU_KEYS": {
-        "es": "Flechas mover | Enter ejecutar | Esc salir",
-        "en": "Arrows move | Enter run | Esc quit",
+        "es": "Enter ejecutar | Esc salir | F2 tema",
+        "en": "Enter run | Esc quit | F2 theme",
     },
     "CLI.WIZARD_UI_PASSWORD_SET": {
         "es": "definida (escribe aquí para cambiarla)",

@@ -83,6 +83,7 @@ editing a list in this file, on purpose, in a diff a reviewer sees.
 from __future__ import annotations
 
 import ast
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Final
@@ -106,9 +107,11 @@ from nz_mcp.wizard.secret_field import SecretField
 #:
 #: None of these can produce a credential. ``nz_mcp.config`` reads ``profiles.toml``,
 #: which by design never contains the password - it lives in the OS keyring - and
-#: ``nz_mcp.i18n`` is a dictionary of static text. ``nz_mcp.auth``, ``nz_mcp.secret``,
-#: ``keyring`` and ``os`` are not on the list, so they cannot be imported, and no
-#: renaming gets round that.
+#: ``nz_mcp.i18n`` is a dictionary of static text. ``nz_mcp.tui`` is the stylesheet, the
+#: two themes and the base application that loads them (ADR 0032): hexadecimals and a
+#: key binding, nothing that reads input. ``nz_mcp.auth``, ``nz_mcp.secret``, ``keyring``
+#: and ``os`` are not on the list, so they cannot be imported, and no renaming gets round
+#: that.
 _ALLOWED_IMPORTS: Final[frozenset[str]] = frozenset(
     {
         "__future__",
@@ -118,6 +121,7 @@ _ALLOWED_IMPORTS: Final[frozenset[str]] = frozenset(
         "textual",
         "nz_mcp.config",
         "nz_mcp.i18n",
+        "nz_mcp.tui",
         "nz_mcp.wizard",
     }
 )
@@ -673,6 +677,49 @@ def test_the_wizard_package_cannot_hold_the_credential() -> None:
         f"the wizard package grew a slot the allowlists do not know about: {offenders} — "
         "if the addition is legitimate, add it to the list in this file on purpose "
         "(ADR 0029, condition 5)."
+    )
+
+
+#: What the visual layer may import: the framework, itself, and the standard library. It is
+#: on the wizard's import allowlist, so what it can reach is what the wizard can reach.
+_VISUAL_LAYER_IMPORTS: Final[frozenset[str]] = frozenset({"textual", "nz_mcp.tui"})
+
+
+def _imported_modules(tree: ast.AST) -> Iterator[tuple[int, str]]:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                yield node.lineno, alias.name
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            yield node.lineno, node.module
+
+
+@pytest.mark.contract
+def test_the_visual_layer_imports_nothing_that_could_carry_a_credential() -> None:
+    """``nz_mcp.tui`` is allowed into the wizard, so it is held to the same question.
+
+    The audit of PR #247 asked it: adding a package to :data:`_ALLOWED_IMPORTS` without
+    looking at what that package imports would be a route around every list above. The
+    answer is the standard library, ``textual`` and itself - no ``nz_mcp.auth``, no
+    ``nz_mcp.secret``, no ``keyring``, and none of it by renaming.
+    """
+    package = Path(__file__).resolve().parents[2] / "src" / "nz_mcp" / "tui"
+    offenders: dict[str, list[str]] = {}
+    for module in sorted(package.rglob("*.py")):
+        tree = ast.parse(module.read_text(encoding="utf-8"))
+        outside = [
+            f"line {lineno}: {name!r}"
+            for lineno, name in _imported_modules(tree)
+            if name.split(".")[0] not in sys.stdlib_module_names
+            and not any(
+                name == prefix or name.startswith(f"{prefix}.") for prefix in _VISUAL_LAYER_IMPORTS
+            )
+        ]
+        if outside:
+            offenders[module.name] = outside
+    assert offenders == {}, (
+        f"the visual layer imports something the wizard may not reach: {offenders} — "
+        "it is on the wizard's import allowlist, so it is bound by it (ADR 0029, condition 5)."
     )
 
 
