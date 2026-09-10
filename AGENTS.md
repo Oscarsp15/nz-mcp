@@ -52,6 +52,7 @@
 | `README`, `docs`, `descripción tool`, `documentación` | [roles/technical-writer.md](docs/roles/technical-writer.md) · [standards/i18n.md](docs/standards/i18n.md) |
 | `tool description`, `prompt`, `cómo IA usa tool`, `UX IA` | [roles/dx-engineer.md](docs/roles/dx-engineer.md) |
 | `UX CLI`, `experiencia terminal`, `salida CLI`, `progreso`, `spinner`, `tabla CLI`, `tono mensajes` | [roles/dx-engineer.md](docs/roles/dx-engineer.md) · [standards/i18n.md](docs/standards/i18n.md) · [adr/0005-sin-frontend.md](docs/adr/0005-sin-frontend.md) |
+| `diseño visual`, `paleta`, `tema`, `tcss`, `estilo terminal`, `color`, `capacidad del terminal`, `mejora progresiva` | [roles/tui-designer.md](docs/roles/tui-designer.md) · [adr/0027-adoptar-rich-para-la-presentacion-del-cli.md](docs/adr/0027-adoptar-rich-para-la-presentacion-del-cli.md) · [adr/0029-adoptar-textual-para-el-asistente-de-configuracion.md](docs/adr/0029-adoptar-textual-para-el-asistente-de-configuracion.md) |
 | `arquitectura`, `decisión`, `ADR`, `diseño` | [arch/overview.md](docs/architecture/overview.md) · nuevo ADR en `docs/adr/` |
 
 **Si tu acción NO aparece en la tabla → detente y pregunta al humano.**
@@ -87,6 +88,7 @@ Según la acción, asume uno de estos roles senior y lee su doc:
 | CI/CD, PyPI, SemVer, releases | Release Engineer / OSS | [roles/release-engineer.md](docs/roles/release-engineer.md) |
 | Documentación, README ES/EN | Technical Writer | [roles/technical-writer.md](docs/roles/technical-writer.md) |
 | Tool descriptions y UX para la IA; experiencia del CLI para la persona | DX Engineer | [roles/dx-engineer.md](docs/roles/dx-engineer.md) |
+| Diseño visual de la terminal: paleta, temas, estilos, capacidad del terminal | TUI Designer | [roles/tui-designer.md](docs/roles/tui-designer.md) |
 
 Todos los roles se trabajan **a nivel senior**: si dudas entre dos enfoques, elige el más defensivo, el más testeable y el más explícito.
 
@@ -169,7 +171,8 @@ docs/
 │   ├── qa-engineer.md
 │   ├── release-engineer.md
 │   ├── technical-writer.md
-│   └── dx-engineer.md
+│   ├── dx-engineer.md
+│   └── tui-designer.md
 ├── standards/
 │   ├── coding.md                  ← estilo, tipado, errores
 │   ├── testing.md                 ← estrategia, mocks, marks

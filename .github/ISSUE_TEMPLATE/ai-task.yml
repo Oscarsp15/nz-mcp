@@ -54,6 +54,7 @@ body:
         - Release Engineer
         - Technical Writer
         - DX Engineer
+        - TUI Designer
     validations:
       required: true
 

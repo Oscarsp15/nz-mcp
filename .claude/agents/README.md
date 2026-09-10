@@ -16,6 +16,7 @@ Perfiles de subagente (Claude Code) reutilizables para que cualquier sesión ret
 | `security-engineer` | security-engineer | sql_guard, auth, SSL/securityLevel, sanitización |
 | `qa-engineer` | qa-engineer | Tests unit/contract/integración fieles al motor real |
 | `dx-engineer` | dx-engineer | Hints de error, descripciones de tools, i18n |
+| `tui-designer` | tui-designer | Paleta, temas, hojas `.tcss`, capacidad del terminal |
 | `technical-writer` | technical-writer | Docs, ADRs, guías ES/EN |
 | `release-engineer` | release-engineer | CI, versionado, CHANGELOG, releases |
 | `tech-lead` | tech-lead | Prioriza, triajea, revisa y delega |
