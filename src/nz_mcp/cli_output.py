@@ -996,7 +996,6 @@ __all__: Final[tuple[str, ...]] = (
     "InteractiveBlocker",
     "Style",
     "SupportsIsatty",
-    "TerminalLevel",
     "animation_enabled",
     "ask",
     "ask_int",

@@ -421,7 +421,7 @@ def test_a_dumb_terminal_is_below_level_1_too(monkeypatch: pytest.MonkeyPatch) -
     open_the_gate(monkeypatch)
     monkeypatch.setenv("TERM", "dumb")
     assert out.terminal_level() == 0
-    assert _blocker() is not None
+    assert _blocker() == "term_dumb"
 
 
 def test_forcing_level_1_silences_only_the_eighth_trigger(
