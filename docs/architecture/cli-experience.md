@@ -116,6 +116,8 @@ Sin frontend, sin UI propia, sin TUI navegable. Esto es formato y progreso en co
 > **Enmienda posterior (2026-09-06).** El [ADR 0028](../adr/0028-asistente-de-configuracion-interactivo.md) permite un interfaz de pantalla completa **en el asistente de configuración y solo en él**, con la degradación al camino de texto como requisito. Todo lo que este documento decide sobre los otros diez comandos sigue igual, y el menú de cuatro opciones sigue existiendo: es el que corre cuando el asistente degrada, y el que se ejecuta tras la escalera de validación en los dos caminos.
 >
 > **Segunda enmienda (2026-09-06).** El [ADR 0030](../adr/0030-menu-interactivo-como-punto-de-entrada.md) permite además un menú navegable en `nz-mcp` **sin argumentos**, con los mismos ocho disparadores de degradación y con esta misma ayuda como caída. Ningún comando gana pantalla: el menú elige uno y se cierra, y el comando corre en la terminal de siempre.
+>
+> **Tercera enmienda (2026-09-10).** El [ADR 0031](../adr/0031-mejora-progresiva-por-capacidad-del-terminal.md) corrige dos recuentos de las enmiendas anteriores. El ADR 0005 sigue vigente **salvo las excepciones que sus ADR abren** —ya no son dos: el ADR 0032 añade una tercera—. Y la degradación de la pantalla completa la deciden **siete disparadores en la función `interactive_ui_blocker()` y uno en la aplicación** (encoger la ventana a mitad de sesión), **más el octavo de la función que añade el ADR 0031**: `terminal_level() == 0`, que la cierra allí donde el terminal no da ni para el nivel 1.
 
 ### R4 — La librería no la decide este documento
 
@@ -272,6 +274,8 @@ Un diseño que solo suma no es un diseño.
 11. **Ni traducción de superficies de máquina.** Códigos de error, nombres de comandos y tools, y el JSON de `--json`, estables y en inglés.
 12. **Ni adopción de `rich` en este documento.** Sección 7.
 13. **Ni tocar el rediseño del asistente más allá del ritmo.** Su lógica de borrador, reintento y corrección de un campo funciona; este diseño le añade recapitulación, progreso y un solo final, y no le cambia el flujo.
+
+> **Enmienda (2026-09-10).** El [ADR 0031](../adr/0031-mejora-progresiva-por-capacidad-del-terminal.md) acota la **prohibición 4** al **nivel 0**: ahí los marcadores de estado siguen siendo ASCII, sin excepción. En los **niveles 1 y 2** se permiten los **símbolos** `●`, `▲` y `✕` —símbolos, no emoji: ancho de una celda, sin secuencia de variación ni presentación en color, y presentes en cualquier fuente de terminal—, y **siempre con su palabra al lado** (`● OK`, `▲ Aviso`, `✕ Error`), de modo que la prohibición 5 se sigue cumpliendo entera. El emoji sigue prohibido en los tres niveles. La misma enmienda corrige dos recuentos de la **prohibición 1**: el ADR 0005 queda vigente **salvo las excepciones que sus ADR abren** (ya no son dos) y la degradación la deciden **siete disparadores en la función y uno en la aplicación, más el octavo que añade el ADR 0031**.
 
 ---
 

@@ -5,6 +5,19 @@
 - **Decidido por**: Tech Lead (IA) + validación humana (auditor: DX Engineer)
 - **Issue**: [#204](https://github.com/Oscarsp15/nz-mcp/issues/204) · sale de [`docs/architecture/cli-experience.md`](../architecture/cli-experience.md) §7
 
+> **Enmienda vigente (2026-09-10)**: el ASCII sin color de este ADR —marcos `box.ASCII`,
+> `no_color`, marcadores de texto— deja de ser *la* salida y pasa a ser **el piso garantizado**,
+> por el [ADR 0031](0031-mejora-progresiva-por-capacidad-del-terminal.md). A partir de ahí, el CLI
+> dibuja por **niveles de capacidad** decididos en un único punto (`cli_output.terminal_level()`):
+> nivel 0 es exactamente esta salida —contrato verificado con tests, no costumbre—, y nivel 1
+> añade color semántico, bordes redondeados y glifos Unicode **solo** donde el terminal demuestra
+> que los recibe enteros.
+>
+> **Todo lo demás de este ADR sigue vigente sin cambios**: `rich` como dependencia directa acotada,
+> las cuatro condiciones, el confinamiento a `cli_output.py`, y las dos adendas de más abajo
+> —ninguna consola escribe a stdout; el suelo de `rich` es `14.2`—. El contenido histórico se
+> conserva tal como se escribió.
+
 ## Contexto
 
 La dirección del owner para el CLI, del 2026-09-05, es explícita: *"me gustaría que se vea muy
