@@ -66,6 +66,12 @@ def open_the_gate(monkeypatch: pytest.MonkeyPatch) -> _FakeTerminal:
     # nothing real to ask; it is stubbed here and exercised for real, against the two
     # process groups, in ``test_wizard_gate.py``.
     monkeypatch.setattr(out, "_owns_the_terminal", lambda: True)
+    # Trigger 8 asks ``terminal_level()``: no override, no ``NO_COLOR``, no ``CI`` (set on
+    # every runner) and, on Windows, Windows Terminal hosting us.
+    monkeypatch.delenv(out.UI_LEVEL_ENV, raising=False)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setenv("WT_SESSION", "1")
     stdout = _FakeTerminal()
     monkeypatch.setattr("sys.stdin", _FakeTerminal())
     monkeypatch.setattr("sys.stdout", stdout)
