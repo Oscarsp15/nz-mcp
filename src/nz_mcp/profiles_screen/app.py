@@ -41,7 +41,7 @@ back to the table after a command ran).
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import ClassVar, Final
+from typing import ClassVar, Final, cast
 
 from textual import events
 from textual.app import ComposeResult
@@ -245,12 +245,16 @@ class _ActionsModal(ModalScreen[None]):
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
         action_id = event.option.id
+        # ``in`` narrows the type only from mypy 2.x onwards, and the project supports
+        # ``mypy>=1.10``: the explicit cast keeps both ends of that range honest, and the
+        # check above it is what actually proves the value is one of the four.
         if action_id not in _ACTIONS:  # pragma: no cover - defensive, ids are set above
             raise RuntimeError(f"unexpected action id {action_id!r}")
+        action = cast("ProfileAction", action_id)
         app = self.app
         if not isinstance(app, ProfilesApp):  # pragma: no cover - always pushed on one
             raise RuntimeError("the actions modal was pushed on an app that is not ProfilesApp")
-        choice = ProfilesChoice(status="chosen", profile=self._profile, action=action_id)
+        choice = ProfilesChoice(status="chosen", profile=self._profile, action=action)
         app.exit(choice)
 
     def action_close(self) -> None:

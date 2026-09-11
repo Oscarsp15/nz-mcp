@@ -271,6 +271,8 @@ def test_the_diagnostic_report_never_truncates_a_value() -> None:
         active_profile="prod",
         keyring_backend="WinVaultKeyring",
         keyring_available=True,
+        terminal_level=0,
+        full_screen_blocker="terminal_level_0",
         locale="es",
     )
     rendered = format_diagnostic_report(report, locale="es")

@@ -341,7 +341,7 @@ def remove_profile_cmd(
 @app.command("doctor", help=_help("CLI.HELP.DOCTOR"), rich_help_panel=_COMMANDS_PANEL)
 def doctor_cmd() -> None:
     """Print local diagnostics (package, Python, profiles metadata, keyring) — no Netezza."""
-    report = collect_diagnostic()
+    report = collect_diagnostic(min_width=MENU_MIN_WIDTH, min_height=MENU_MIN_HEIGHT)
     locale = resolve_locale()
     out.emit(format_diagnostic_report(report, locale=locale))
     raise typer.Exit(code=0 if report.is_healthy else 1)
