@@ -586,14 +586,124 @@ MESSAGES: Final[dict[str, Message]] = {
     # Same rule as the help texts: no character a Windows console on a legacy code page
     # cannot draw. Hence a colon and not an em dash, which renders there as "?".
     "CLI.MENU_TITLE": {
-        "es": "nz-mcp: elige un comando",
-        "en": "nz-mcp: pick a command",
+        "es": "nz-mcp: elige una tarea",
+        "en": "nz-mcp: pick a task",
     },
-    # Three shortcuts at most (ADR 0032, decision 7): F2 took the place of the arrows,
-    # which a list teaches on its own.
+    # Three shortcuts at most (ADR 0032, decision 7): "?" took the third slot from F2, which
+    # still works - it is just not advertised here, the same way the arrows never were.
     "CLI.MENU_KEYS": {
-        "es": "Enter ejecutar | Esc salir | F2 tema",
-        "en": "Enter run | Esc quit | F2 theme",
+        "es": "Enter abrir | Esc salir | ? ayuda",
+        "en": "Enter open | Esc quit | ? help",
+    },
+    # The six tasks of ADR 0032, decision 1, in its own fixed order. Written by hand, not
+    # derived from typer (that derivation is what this decision spends): the label is the
+    # verb the task list shows, the description is the sentence under the highlighted one.
+    "CLI.MENU.TASK.CONNECT.LABEL": {
+        "es": "Configurar una conexión",
+        "en": "Set up a connection",
+    },
+    "CLI.MENU.TASK.CONNECT.DESCRIPTION": {
+        "es": "Host, base de datos, usuario y contraseña.",
+        "en": "Host, database, user and password.",
+    },
+    "CLI.MENU.TASK.PROFILES.LABEL": {
+        "es": "Ver perfiles",
+        "en": "View profiles",
+    },
+    "CLI.MENU.TASK.PROFILES.DESCRIPTION": {
+        "es": "Lista los perfiles configurados y a qué apunta cada uno.",
+        "en": "List the configured profiles and what each one points to.",
+    },
+    "CLI.MENU.TASK.TEST.LABEL": {
+        "es": "Probar la conexión",
+        "en": "Test the connection",
+    },
+    "CLI.MENU.TASK.TEST.DESCRIPTION": {
+        "es": "Comprueba que el perfil activo llega a Netezza.",
+        "en": "Check that the active profile reaches Netezza.",
+    },
+    "CLI.MENU.TASK.SERVE.LABEL": {
+        "es": "Iniciar el servidor MCP",
+        "en": "Start the MCP server",
+    },
+    "CLI.MENU.TASK.SERVE.DESCRIPTION": {
+        "es": "Arranca el servidor para tu cliente de IA.",
+        "en": "Start the server for your AI client.",
+    },
+    "CLI.MENU.TASK.DOCTOR.LABEL": {
+        "es": "Diagnosticar la instalación",
+        "en": "Diagnose the install",
+    },
+    "CLI.MENU.TASK.DOCTOR.DESCRIPTION": {
+        "es": "Revisa versión, perfiles y credenciales, sin tocar Netezza.",
+        "en": "Check version, profiles and credentials, without touching Netezza.",
+    },
+    "CLI.MENU.TASK.TOOLS.LABEL": {
+        "es": "Ver herramientas",
+        "en": "View tools",
+    },
+    "CLI.MENU.TASK.TOOLS.DESCRIPTION": {
+        "es": "Ejecuta el catálogo de consultas y dice cuáles fallan.",
+        "en": "Run the query catalog and report which ones fail.",
+    },
+    # The context panel, "Etiqueta: valor" (ADR 0032, decision 1). Mode itself is never
+    # translated - it is configuration surface, per decision 10 - so it has no STATUS-style
+    # key here, only the label that names the row.
+    "CLI.MENU_CONTEXT.TITLE": {
+        "es": "Conexión",
+        "en": "Connection",
+    },
+    "CLI.MENU_CONTEXT.PROFILE": {
+        "es": "Perfil",
+        "en": "Profile",
+    },
+    "CLI.MENU_CONTEXT.HOST": {
+        "es": "Host",
+        "en": "Host",
+    },
+    "CLI.MENU_CONTEXT.DATABASE": {
+        "es": "Base",
+        "en": "Database",
+    },
+    "CLI.MENU_CONTEXT.MODE": {
+        "es": "Modo",
+        "en": "Mode",
+    },
+    "CLI.MENU_CONTEXT.STATUS": {
+        "es": "Estado",
+        "en": "Status",
+    },
+    # Placeholder for a field with nothing to say - no active profile, or one that will not
+    # load (acceptance criterion 4 of issue #239). One glyph, same in both locales.
+    "CLI.MENU_CONTEXT.NO_VALUE": {
+        "es": "—",
+        "en": "—",
+    },
+    "CLI.MENU_CONTEXT.STATUS_OK": {
+        "es": "OK",
+        "en": "OK",
+    },
+    "CLI.MENU_CONTEXT.STATUS_WARNING": {
+        "es": "Aviso",
+        "en": "Warning",
+    },
+    "CLI.MENU_CONTEXT.STATUS_ERROR": {
+        "es": "Error",
+        "en": "Error",
+    },
+    # "?" and "nz-mcp help" (ADR 0032, decision 2): the one heading and the one row format
+    # both surfaces share, so the correspondence cannot read differently in each.
+    "CLI.MENU_HELP_MODAL.TITLE": {
+        "es": "Tareas y su comando",
+        "en": "Tasks and their command",
+    },
+    "CLI.MENU_HELP_MODAL.UNAVAILABLE": {
+        "es": "no disponible",
+        "en": "not available",
+    },
+    "CLI.MENU_HELP_MODAL.KEYS": {
+        "es": "Esc cerrar",
+        "en": "Esc close",
     },
     "CLI.WIZARD_UI_PASSWORD_SET": {
         "es": "definida (escribe aquí para cambiarla)",
@@ -889,6 +999,10 @@ MESSAGES: Final[dict[str, Message]] = {
     "CLI.HELP.SERVE": {
         "es": "Arranca el servidor MCP. Lo lanza tu cliente de IA; no hace falta a mano.",
         "en": "Run the MCP server. Your AI client starts it; you do not need to run it by hand.",
+    },
+    "CLI.HELP.HELP": {
+        "es": "Muestra las tareas del menú y el comando que ejecuta cada una.",
+        "en": "Show the menu's tasks and the command each one runs.",
     },
     # Options and arguments of those commands.
     "CLI.HELP.OPT.NEW_PROFILE_NAME": {

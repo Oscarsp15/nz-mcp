@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import sys
 from typing import Final
 
@@ -24,8 +25,8 @@ import typer
 from nz_mcp import __version__
 from nz_mcp import cli_output as out
 from nz_mcp.cli import _HELP_LOCALE, app
-from nz_mcp.i18n import MESSAGES, t
-from nz_mcp.menu import MIN_HEIGHT, MIN_WIDTH, MenuChoice
+from nz_mcp.i18n import resolve_locale, t
+from nz_mcp.menu import MIN_HEIGHT, MIN_WIDTH, TASKS, MenuChoice
 
 #: Exit code ``click`` uses for "no arguments", and the one this CLI answered with before
 #: the menu existed. Preserved to the number.
@@ -324,7 +325,7 @@ def test_the_gate_is_asked_about_this_screen_and_not_about_the_other_one(
     assert asked == {"min_width": MIN_WIDTH, "min_height": MIN_HEIGHT}
 
 
-# --- the entries: one source, shared with the help ----------------------------
+# --- the entries: six fixed tasks, resolved for one locale (ADR 0032, decision 1) ------
 
 
 def _capture_entries(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
@@ -340,50 +341,158 @@ def _capture_entries(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     return seen
 
 
-def test_the_entries_are_the_registered_commands_in_the_same_order(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The menu offers what the help lists, in the order someone needs them.
+def test_the_entries_are_the_six_fixed_tasks_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ADR 0032, decision 1: the menu offers tasks, not the eleven registered commands.
 
-    Built from the commands typer registered rather than from a list of our own, so a
-    command added tomorrow appears in both places or in neither.
+    Written by hand in :data:`nz_mcp.menu.TASKS` rather than derived from typer - that
+    derivation (ADR 0030, point 4) is exactly what this decision spends.
     """
     open_the_gate(monkeypatch)
     entries = list(_capture_entries(monkeypatch)["entries"])  # type: ignore[call-overload]
-    assert [entry.command for entry in entries] == [
-        "init",
-        "test-connection",
-        "list-profiles",
-        "switch-profile",
-        "add-profile",
-        "edit-profile",
-        "remove-profile",
-        "doctor",
-        "probe-catalog",
-        "version",
-        "serve",
-    ]
+    assert [entry.command for entry in entries] == [task.command for task in TASKS]
 
 
-def test_every_entry_says_what_the_catalog_says(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The sentences are not written twice: they are the help entries of issue #217.
+def test_every_entry_speaks_its_own_locale_and_says_what_the_catalog_says(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The sentences are not written twice: they are ``CLI.MENU.TASK.*`` (issue #239).
 
-    A second copy would be a second thing to translate, and the first one to go stale.
+    Resolved for the runtime locale, unlike the discarded per-command help text, which was
+    frozen to the language typer captured ``help=`` in.
     """
     open_the_gate(monkeypatch)
+    monkeypatch.setenv("NZ_MCP_LANG", "en")
     seen = _capture_entries(monkeypatch)
-    for entry in list(seen["entries"]):  # type: ignore[call-overload]
-        key = "CLI.HELP." + entry.command.upper().replace("-", "_")
-        assert key in MESSAGES
-        # The help language, not the runtime one: typer captures ``help=`` while the module
-        # is imported, so that is the language the menu inherits along with the text.
-        assert entry.description == t(key, _HELP_LOCALE)
+    locale = resolve_locale()
+    for task, entry in zip(TASKS, seen["entries"], strict=True):  # type: ignore[call-overload]
+        assert entry.label == t(f"CLI.MENU.TASK.{task.id.upper()}.LABEL", locale)
+        assert entry.description == t(f"CLI.MENU.TASK.{task.id.upper()}.DESCRIPTION", locale)
+
+
+def test_command_names_never_appear_as_a_task_label(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ADR 0032, decision 1: a task reads as a verb, never as the command it hands off to.
+
+    Matched on a word boundary, not a bare substring: "serve" sits inside "server" as
+    letters without being the word "serve", and English's "Start the MCP server" is not the
+    violation this test exists to catch.
+    """
+    open_the_gate(monkeypatch)
+    entries = list(_capture_entries(monkeypatch)["entries"])  # type: ignore[call-overload]
+    for entry in entries:
+        pattern = rf"\b{re.escape(entry.command)}\b"
+        assert re.search(pattern, entry.label) is None
+
+
+def test_a_task_pointing_at_a_missing_command_is_marked_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR 0032, risk 1: a renamed or removed command breaks visibly, not silently.
+
+    Simulated the same way the group itself would report it missing: ``get_command``
+    returns ``None`` for a name that is no longer registered.
+    """
+    from nz_mcp import cli as cli_module
+
+    open_the_gate(monkeypatch)
+    real_menu_entries = cli_module._menu_entries
+
+    def patched(ctx: object, locale: object) -> tuple[object, ...]:
+        entries = real_menu_entries(ctx, locale)  # type: ignore[arg-type]
+        first, *rest = entries
+        broken = type(first)(
+            command="not-a-real-command",
+            label=first.label,
+            description=first.description,
+            command_available=False,
+        )
+        return (broken, *rest)
+
+    monkeypatch.setattr(cli_module, "_menu_entries", patched)
+    entries = list(_capture_entries(monkeypatch)["entries"])  # type: ignore[call-overload]
+    assert entries[0].command_available is False
+    assert all(entry.command_available for entry in entries[1:])
 
 
 def test_the_minimum_window_fits_in_the_oldest_default_terminal() -> None:
     """80x24 has been the default for forty years; asking for more would exclude people."""
     assert MIN_WIDTH <= 80
     assert MIN_HEIGHT <= 24
+
+
+# --- the context panel: read before any command runs (ADR 0032, decision 1) ------------
+
+
+def test_the_context_is_built_and_handed_to_the_menu(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: object
+) -> None:
+    del two_profiles
+    open_the_gate(monkeypatch)
+    seen = _capture_entries(monkeypatch)
+    context = seen["context"]
+    assert context.profile == "dev"  # type: ignore[attr-defined]
+    assert context.host == "nz-dev.example.com"  # type: ignore[attr-defined]
+    assert context.mode == "read"  # type: ignore[attr-defined]
+    assert context.status == "ok"  # type: ignore[attr-defined]
+
+
+def test_no_profile_configured_is_a_warning_not_an_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_profiles: object
+) -> None:
+    del tmp_profiles
+    open_the_gate(monkeypatch)
+    seen = _capture_entries(monkeypatch)
+    context = seen["context"]
+    assert context.profile is None  # type: ignore[attr-defined]
+    assert context.status == "warning"  # type: ignore[attr-defined]
+
+
+def test_an_active_profile_that_does_not_load_is_the_error_state(
+    monkeypatch: pytest.MonkeyPatch, tmp_profiles: object
+) -> None:
+    """The name a broken ``active`` field names still reaches the panel, so it can be read."""
+    from pathlib import Path
+
+    path = tmp_profiles  # the fixture is the profiles.toml path itself
+    assert isinstance(path, Path)
+    path.write_text('active = "missing"\n', encoding="utf-8")
+    open_the_gate(monkeypatch)
+    seen = _capture_entries(monkeypatch)
+    context = seen["context"]
+    assert context.profile == "missing"  # type: ignore[attr-defined]
+    assert context.status == "error"  # type: ignore[attr-defined]
+
+
+# --- ``nz-mcp help``: the non-interactive equivalent of ``?`` (ADR 0032, decision 2) ---
+
+
+def test_help_prints_the_six_tasks_and_their_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    open_the_gate(monkeypatch)
+    code, written = run_cli("help")
+    assert code == 0
+    for task in TASKS:
+        assert f"nz-mcp {task.command}" in written
+
+
+def test_help_does_not_open_a_screen(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The plain-text equivalent works on any terminal, including one that could not open it."""
+    open_the_gate(monkeypatch)
+    refuse_to_open(monkeypatch)
+    code, written = run_cli("help")
+    assert code == 0
+    assert "nz-mcp init" in written
+
+
+def test_help_is_registered_and_does_not_change_the_other_commands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``nz-mcp --help`` and ``nz-mcp <command>`` do not change (issue #239, out of scope)."""
+    open_the_gate(monkeypatch)
+    refuse_to_open(monkeypatch)
+    code, written = run_cli("--help")
+    assert code == 0
+    assert "help" in written
+    for command in ("init", "test-connection", "doctor", "serve"):
+        assert command in written
 
 
 # --- launching what was picked -------------------------------------------------

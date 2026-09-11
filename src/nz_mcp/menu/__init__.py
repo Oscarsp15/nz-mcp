@@ -29,13 +29,20 @@ from nz_mcp.i18n import Locale
 from nz_mcp.menu.entries import (
     MIN_HEIGHT,
     MIN_WIDTH,
+    TASKS,
+    ContextStatus,
     MenuChoice,
+    MenuContext,
     MenuEntry,
     MenuStatus,
+    MenuTask,
+    command_line,
 )
 
 
-def choose_command(*, entries: Sequence[MenuEntry], locale: Locale) -> MenuChoice:
+def choose_command(
+    *, entries: Sequence[MenuEntry], locale: Locale, context: MenuContext
+) -> MenuChoice:
     """Show the menu and return what was picked.
 
     The caller has already checked, through ``cli_output.interactive_ui_enabled()``, that
@@ -44,8 +51,9 @@ def choose_command(*, entries: Sequence[MenuEntry], locale: Locale) -> MenuChoic
     decided before anything is constructed).
 
     Args:
-        entries: The commands to offer, in the order they should be read.
+        entries: The six tasks to offer, in the order they should be read.
         locale: Language of every visible string.
+        context: The active profile, as the context panel of ADR 0032 shows it.
 
     Returns:
         The command that was picked, or why none was. A window closed without an explicit
@@ -53,7 +61,7 @@ def choose_command(*, entries: Sequence[MenuEntry], locale: Locale) -> MenuChoic
     """
     from nz_mcp.menu.app import CommandMenuApp  # noqa: PLC0415 - see module docstring
 
-    application = CommandMenuApp(entries=entries, locale=locale)
+    application = CommandMenuApp(entries=entries, locale=locale, context=context)
     result = application.run()
     return MenuChoice(status="cancelled") if result is None else result
 
@@ -61,8 +69,13 @@ def choose_command(*, entries: Sequence[MenuEntry], locale: Locale) -> MenuChoic
 __all__: Final[tuple[str, ...]] = (
     "MIN_HEIGHT",
     "MIN_WIDTH",
+    "TASKS",
+    "ContextStatus",
     "MenuChoice",
+    "MenuContext",
     "MenuEntry",
     "MenuStatus",
+    "MenuTask",
     "choose_command",
+    "command_line",
 )

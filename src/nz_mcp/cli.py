@@ -16,6 +16,7 @@ rarely type by hand.
 - ``probe-catalog``      execute every catalog query with dummy parameters (validates overrides).
 - ``version``            print the package version.
 - ``serve``              run the MCP server over stdio.
+- ``help``               print the menu's six tasks and the command each one runs.
 
 Every user-facing string here — help texts included — comes from the i18n catalog. Help is
 resolved once at import time into ``_HELP_LOCALE``: typer reads ``help=`` while the module is
@@ -83,7 +84,7 @@ from nz_mcp.logging_config import configure_logging_for_stdio
 from nz_mcp.logging_utils import sanitize
 from nz_mcp.menu import MIN_HEIGHT as MENU_MIN_HEIGHT
 from nz_mcp.menu import MIN_WIDTH as MENU_MIN_WIDTH
-from nz_mcp.menu import MenuEntry, choose_command
+from nz_mcp.menu import TASKS, MenuContext, MenuEntry, choose_command, command_line
 from nz_mcp.profile_check import (
     CHECK_LEVELS,
     CheckLevel,
@@ -403,6 +404,22 @@ def serve_cmd() -> None:
         run_stdio_server(protocol_stdout=protocol_stdout)
 
 
+@app.command("help", help=_help("CLI.HELP.HELP"), rich_help_panel=_COMMANDS_PANEL)
+def help_cmd(ctx: typer.Context) -> None:
+    """The menu's own tasks, in plain text (ADR 0032, decision 2).
+
+    The non-interactive equivalent of ``?``: same list, same one-line-per-task format,
+    built the same way from what typer has registered. Works on any terminal, including one
+    that could never open the menu - ``--help`` is the reference for the program, this is
+    the translation from a task to the command that does it.
+    """
+    locale = resolve_locale()
+    out.heading(t("CLI.MENU_HELP_MODAL.TITLE", locale))
+    unavailable = t("CLI.MENU_HELP_MODAL.UNAVAILABLE", locale)
+    for entry in _menu_entries(ctx, locale):
+        out.emit(command_line(entry, unavailable=unavailable))
+
+
 # --- nz-mcp with no arguments: the menu, or the help -------------------------
 
 
@@ -416,7 +433,10 @@ def _no_arguments(ctx: typer.Context) -> None:
     application, and comes back as ``degraded``.
     """
     if out.interactive_ui_enabled(min_width=MENU_MIN_WIDTH, min_height=MENU_MIN_HEIGHT):
-        choice = choose_command(entries=_menu_entries(ctx), locale=resolve_locale())
+        locale = resolve_locale()
+        choice = choose_command(
+            entries=_menu_entries(ctx, locale), locale=locale, context=_menu_context()
+        )
         if choice.status == "chosen" and choice.command is not None:
             _launch(ctx, choice.command)
             return
@@ -441,24 +461,57 @@ def _print_help(ctx: typer.Context) -> None:
         out.emit(rendered)
 
 
-def _menu_entries(ctx: typer.Context) -> tuple[MenuEntry, ...]:
-    """Build the menu from the commands typer actually registered.
+def _menu_entries(ctx: typer.Context, locale: Locale) -> tuple[MenuEntry, ...]:
+    """Resolve the six fixed tasks of ADR 0032, decision 1, for one locale.
 
-    Not from a list kept in the menu package: the order is the registration order, which is
-    the reading order the help screen already uses (install, prove it works, live with it,
-    diagnose, and last the two nobody types by hand), and each sentence is the ``help=`` of
-    the command, which comes from the i18n catalog. One source, so the menu cannot offer a
-    command the help does not, describe one differently, or list them in another order.
+    Not derived from what typer registered any more - that derivation is exactly what this
+    decision spends (ADR 0030, point 4). :data:`TASKS` is the hand-written order; what still
+    comes from the registered group is ``command_available``, so a task whose command was
+    renamed or removed does not silently claim it in ``?`` or in ``nz-mcp help`` (ADR 0032,
+    risk 1).
+
+    Reads the group off ``ctx.find_root()`` rather than off ``ctx.command`` directly: this
+    is called both from the callback, where ``ctx`` already *is* the group's own context,
+    and from ``help_cmd``, where ``ctx`` is the ``help`` subcommand's context and the group
+    is its parent's.
     """
-    group = cast(TyperGroup, ctx.command)
+    root_ctx = ctx.find_root()
+    group = cast(TyperGroup, root_ctx.command)
     entries = []
-    for name in group.list_commands(ctx):
-        command = group.get_command(ctx, name)
-        if command is None:  # pragma: no cover - the names come from this same group
-            continue
-        description = (command.help or "").strip().splitlines()
-        entries.append(MenuEntry(command=name, description=description[0] if description else ""))
+    for task in TASKS:
+        available = group.get_command(root_ctx, task.command) is not None
+        entries.append(
+            MenuEntry(
+                command=task.command,
+                label=t(f"CLI.MENU.TASK.{task.id.upper()}.LABEL", locale),
+                description=t(f"CLI.MENU.TASK.{task.id.upper()}.DESCRIPTION", locale),
+                command_available=available,
+            )
+        )
     return tuple(entries)
+
+
+def _menu_context() -> MenuContext:
+    """Read the active profile the way the context panel shows it (ADR 0032, decision 1).
+
+    A configuration reading, not a live one: the menu opens before any command runs, so
+    ``status`` says whether the active profile loads, never whether Netezza answers. That
+    is exactly what "Probar la conexión" is for.
+    """
+    try:
+        profiles_file = load_profiles_file()
+    except InvalidProfileError:
+        return MenuContext(profile=None, host=None, database=None, mode=None, status="error")
+    name = active_profile_name(profiles_file)
+    if name is None:
+        return MenuContext(profile=None, host=None, database=None, mode=None, status="warning")
+    try:
+        profile = get_profile(name)
+    except (ProfileNotFoundError, InvalidProfileError):
+        return MenuContext(profile=name, host=None, database=None, mode=None, status="error")
+    return MenuContext(
+        profile=name, host=profile.host, database=profile.database, mode=profile.mode, status="ok"
+    )
 
 
 def _launch(ctx: typer.Context, name: str) -> None:

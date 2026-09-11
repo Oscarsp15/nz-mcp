@@ -32,6 +32,7 @@ from textual.theme import Theme
 from textual.widgets import Static
 
 from nz_mcp.i18n import t
+from nz_mcp.menu import MenuContext
 from nz_mcp.menu.app import CommandMenuApp
 from nz_mcp.tui import NZ_DARK, NZ_LIGHT, STYLESHEET, THEMES, ThemedApp
 from nz_mcp.wizard import DraftFields
@@ -409,7 +410,8 @@ def test_the_structural_check_lets_the_ordinary_shapes_through(source: str) -> N
 
 
 def _menu() -> CommandMenuApp:
-    return CommandMenuApp(entries=(), locale="es")
+    context = MenuContext(profile=None, host=None, database=None, mode=None, status="warning")
+    return CommandMenuApp(entries=(), locale="es", context=context)
 
 
 def _wizard() -> ProfileWizardApp:
