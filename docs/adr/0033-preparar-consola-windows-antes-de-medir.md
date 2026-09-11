@@ -57,15 +57,25 @@ proceso sin terminal no tiene destinatario:
    de salida, `STD_OUTPUT_HANDLE` y `STD_ERROR_HANDLE` — el menú dibuja en el primero, `status()` y
    sus atajos dibujan en el segundo, y una consola que interprete secuencias ANSI en uno pero no en
    el otro dejaría la mitad de la salida en basura literal (`\x1b[...`).
-3. **`sys.stdout.reconfigure(encoding="utf-8")` y lo mismo para `sys.stderr`**, cuando el flujo lo
-   soporta. Es el paso que un cambio de code page por sí solo no cubre: Python ya abrió esos dos
-   flujos contra la code page **anterior**, así que cambiar la consola sin reconfigurarlos deja
-   exactamente el mojibake que esto existe para evitar — la propia salida de Python, no solo la de
-   la API de consola, tiene que enterarse del cambio.
+3. **`sys.stdout.reconfigure(encoding="utf-8")` y lo mismo para `sys.stderr`, cada uno solo si
+   ese flujo en concreto es la consola.** Es el paso que un cambio de code page por sí solo no
+   cubre: Python ya abrió esos dos flujos contra la code page **anterior**, así que cambiar la
+   consola sin reconfigurar el que sí es la consola deja exactamente el mojibake que esto existe
+   para evitar. Y al revés: reconfigurar el que **no** lo es — `nz-mcp list-profiles > out.txt`
+   corrido desde una consola real tiene `stdout` redirigido a un archivo y `stderr` como la
+   consola — cambiaría en silencio los bytes de un fichero que el ADR 0031 promete son los de
+   nivel 0, byte a byte, tocado o no el resto de la consola.
 
-**Nada de esto se intenta si no hay una consola real detrás.** Redirigido a archivo, canalizado a
-otro proceso, en CI: la comprobación de `isatty()` ya lo dice y no hay handle de consola al que
-pedirle nada.
+**El gesto de arriba (1 y 2) se intenta si `sys.stdout` *o* `sys.stderr` es una consola real** —
+son propiedades de la consola entera, no de un descriptor, así que basta con que una de las dos
+lo sea. **El punto 3 es distinto: cada flujo se reconfigura solo si él mismo lo es**, comprobado
+de nuevo por separado — no heredado de la comprobación anterior. Es esta pregunta por flujo, y no
+el nombre del comando del punto 5, la que hace estructural que `serve` con su stdout en una
+tubería nunca vea tocado ese flujo.
+
+**Nada de esto se intenta si ninguno de los dos es una consola real.** Redirigido a archivo,
+canalizado a otro proceso, en CI: la comprobación de `isatty()` ya lo dice y no hay handle de
+consola al que pedirle nada.
 
 ### 3. Qué se restaura, y con qué mecanismo
 
@@ -99,17 +109,23 @@ Preparar la consola es una mejora opcional, nunca un requisito — el mismo prin
 proceso exactamente donde estaría si este ADR no existiese: nivel 0, sin excepción y sin una línea
 de aviso que nadie pidió leer.
 
-### 5. `serve` queda fuera, sin excepción
+### 5. `serve` queda fuera, sin excepción — y la barrera de verdad es estructural, no el nombre
 
 La reserva de `stdout_reserved_for_protocol()` — adenda 1 del ADR 0027, el contrato del #203 — no
 se toca, no se adelanta y no se relaja. `cli.entry_point()` solo llama a
-`prepare_windows_console()` cuando `ctx.invoked_subcommand != "serve"`; para `serve`, y para
-`serve --help`, la función ni se importa en ese camino de ejecución. La razón es de orden, no de
-oportunidad: `ctx.invoked_subcommand` ya vale `"serve"` en el momento en que `click` invoca el
-callback del grupo — antes de tocar nada del subcomando — así que la exclusión ocurre por nombre de
-comando conocido, no por adivinar si stdout ya está reservado. `prepare_windows_console()` en sí
-misma tampoco sabe nada de `stdout_reserved_for_protocol()`: ni la importa, ni la llama, ni podría
-tocarla por accidente. Dos guardas independientes, cualquiera de las dos basta.
+`prepare_windows_console()` cuando `ctx.invoked_subcommand != "serve"`, y esa comparación por
+nombre está — se queda, es barata y hace el caso explícito de leer. Pero este proyecto ya tiene
+jurisprudencia de que una lista por nombre, sola, se rompe (ADR 0030, punto 1: el mismo error dos
+veces el mismo día), así que el nombre **no es la barrera**: es un cinturón, no el tirante — el
+tirante es el punto 2/3 de arriba. `nz-mcp serve` habla el protocolo por una tubería que el
+proceso que lo lanza (Claude Desktop u otro cliente MCP) crea antes de arrancar: `sys.stdout` no
+es una consola ahí, así que aunque mañana un comando nuevo olvide compararse contra `"serve"`, o
+alguien borre esa línea sin darse cuenta, la reconfiguración del punto 2/3 sigue sin alcanzar un
+`stdout` que `_is_a_terminal()` nunca dice que sí. `prepare_windows_console()` en sí misma
+tampoco sabe nada de `stdout_reserved_for_protocol()`: ni la importa, ni la llama, ni podría
+tocarla por accidente. Tres guardas, no dos: el nombre, la pregunta de entrada del punto 2 y la
+pregunta por flujo del punto 3 — la última es la que sostiene la promesa aunque las otras dos
+fallen.
 
 ### 6. Variable de escape: `NZ_MCP_NO_CONSOLE_PREP`
 

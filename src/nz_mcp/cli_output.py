@@ -527,14 +527,25 @@ def prepare_windows_console() -> None:
     1. Not Windows — nothing to prepare, and no ``ctypes`` import happens on this path.
     2. :data:`NO_CONSOLE_PREP_ENV` opted out.
     3. Neither stdout nor stderr is attached to a real console — nothing a person would see
-       the improvement on, and nothing this function may safely touch.
+       the improvement on, and nothing this function may safely touch. Deliberately an
+       ``or``, not an ``and``: the code page and the VT mode are properties of the console
+       itself, not of one descriptor, so either stream being a real console is reason enough
+       to *attempt* the console-wide part of this. What is **not** decided by this ``or`` is
+       which Python stream gets reconfigured - that is answered per stream below, precisely
+       because this gate cannot tell ``nz-mcp list-profiles > out.txt`` (stdout redirected,
+       stderr the console) from the fully-interactive case, and must not treat them the same.
     4. The console API itself refused, in whatever way — see :func:`_prepare_windows_console`.
 
-    When it succeeds: the console output code page becomes UTF-8 (65001), the two standard
-    output handles gain ``ENABLE_VIRTUAL_TERMINAL_PROCESSING``, and ``sys.stdout`` /
-    ``sys.stderr`` are reconfigured to the same encoding — a console change alone does not
-    reach the streams Python already opened against the old code page, and skipping this
-    step would leave exactly the mojibake this function exists to prevent.
+    When it succeeds: the console output code page becomes UTF-8 (65001) and the two standard
+    output handles gain ``ENABLE_VIRTUAL_TERMINAL_PROCESSING`` - both console-wide, so both
+    happen whenever gate 3 opens. ``sys.stdout`` and ``sys.stderr`` are reconfigured to the
+    same encoding **only the ones that are themselves a real console** - checked again here,
+    per stream, not inherited from gate 3. A console change alone does not reach the streams
+    Python already opened against the old code page, and reconfiguring a stream that is *not*
+    the console - a redirected ``stdout`` while ``stderr`` is a terminal - would silently
+    change the bytes of a file ADR 0031 promises are level 0's, byte for byte, whether or not
+    anything about the console changed. Skipping the reconfiguration of the stream that *is*
+    the console would leave exactly the mojibake this function exists to prevent.
 
     Everything it changed is restored by an :func:`atexit` callback, not by a ``finally``
     around the caller: the entry-point callback and the command body are two separate steps
@@ -544,8 +555,11 @@ def prepare_windows_console() -> None:
     ordinary interpreter shutdown from its point of view.
 
     The one caller is ``cli.entry_point``, once per process, for every command except
-    ``serve``: the exclusion happens by command name before this function is ever reached,
-    so it never runs while stdout is - or is about to be - reserved for the MCP protocol.
+    ``serve``, which is excluded there by command name before this function is ever reached
+    (ADR 0033, point 5). That name check is a belt, not the suspenders: the structural
+    guarantee is the per-stream check above, which means a stray future caller that forgot
+    the name comparison still cannot touch a redirected ``stdout`` - the one ``serve`` needs
+    left alone - because a piped descriptor never passes :func:`_is_a_terminal`.
     """
     if os.name != "nt":
         return
@@ -557,7 +571,15 @@ def prepare_windows_console() -> None:
     if restore is None:
         return
     atexit.register(restore)
+    # Each stream is reconfigured only if *that* stream is the console: ``list-profiles >
+    # out.txt`` run from a real console has an ``stdout`` that is a file and an ``stderr``
+    # that is the console the ``or`` above found. Reconfiguring both because *one* of them
+    # is a console would change the bytes of a redirected level-0 payload - the exact thing
+    # ADR 0031 pins byte for byte - and it is this per-stream check, not the ``serve`` name
+    # comparison below, that keeps that promise structurally.
     for stream in (sys.stdout, sys.stderr):
+        if not _is_a_terminal(stream):
+            continue
         reconfigure = getattr(stream, "reconfigure", None)
         if callable(reconfigure):
             with contextlib.suppress(AttributeError, OSError, ValueError):

@@ -486,19 +486,32 @@ class _FakeReconfigurableStream:
         self.reconfigure_calls.append(kwargs)
 
 
-def _windows_terminal(
-    monkeypatch: pytest.MonkeyPatch,
+def _windows_process(
+    monkeypatch: pytest.MonkeyPatch, *, stdout_tty: bool, stderr_tty: bool
 ) -> tuple[_FakeKernel32, _FakeReconfigurableStream, _FakeReconfigurableStream]:
-    """A Windows process with a real console attached on both standard streams."""
+    """A Windows process with each standard stream's ``isatty`` set independently.
+
+    ``nz-mcp list-profiles > out.txt`` run from a real console is exactly the asymmetric
+    case: ``stdout_tty=False`` (redirected to a file), ``stderr_tty=True`` (the console the
+    person is sitting at). Reconfiguring the wrong one is the bug this shape of test exists
+    to catch.
+    """
     monkeypatch.setattr(os, "name", "nt")
     monkeypatch.delenv(cli_output.NO_CONSOLE_PREP_ENV, raising=False)
     kernel32 = _FakeKernel32()
     monkeypatch.setattr(ctypes, "windll", _Windll(kernel32), raising=False)
-    stdout = _FakeReconfigurableStream(tty=True)
-    stderr = _FakeReconfigurableStream(tty=True)
+    stdout = _FakeReconfigurableStream(tty=stdout_tty)
+    stderr = _FakeReconfigurableStream(tty=stderr_tty)
     monkeypatch.setattr(sys, "stdout", stdout)
     monkeypatch.setattr(sys, "stderr", stderr)
     return kernel32, stdout, stderr
+
+
+def _windows_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[_FakeKernel32, _FakeReconfigurableStream, _FakeReconfigurableStream]:
+    """A Windows process with a real console attached on both standard streams."""
+    return _windows_process(monkeypatch, stdout_tty=True, stderr_tty=True)
 
 
 def test_prepare_windows_console_is_a_noop_on_posix(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -672,6 +685,39 @@ def test_prepare_windows_console_enables_vt_and_utf8_and_reconfigures_the_stream
     assert stdout.reconfigure_calls == [{"encoding": "utf-8"}]
     assert stderr.reconfigure_calls == [{"encoding": "utf-8"}]
     assert len(registered) == 1
+
+
+def test_a_redirected_stdout_keeps_its_encoding_when_stderr_is_the_console(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``nz-mcp list-profiles > out.txt`` run from a real console: the file, not the screen,
+    is the one that must not change its bytes (ADR 0031's level-0 promise).
+    """
+    kernel32, stdout, stderr = _windows_process(monkeypatch, stdout_tty=False, stderr_tty=True)
+    registered: list[Callable[[], None]] = []
+    monkeypatch.setattr(atexit, "register", registered.append)
+
+    cli_output.prepare_windows_console()
+
+    # The console-wide gesture still runs: either stream being a console is enough for it.
+    assert kernel32.set_output_cp_calls == [cli_output._UTF8_CODE_PAGE]
+    assert stdout.reconfigure_calls == []
+    assert stderr.reconfigure_calls == [{"encoding": "utf-8"}]
+
+
+def test_a_redirected_stderr_keeps_its_encoding_when_stdout_is_the_console(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The symmetric case: a log file on stderr, the console on stdout."""
+    kernel32, stdout, stderr = _windows_process(monkeypatch, stdout_tty=True, stderr_tty=False)
+    registered: list[Callable[[], None]] = []
+    monkeypatch.setattr(atexit, "register", registered.append)
+
+    cli_output.prepare_windows_console()
+
+    assert kernel32.set_output_cp_calls == [cli_output._UTF8_CODE_PAGE]
+    assert stdout.reconfigure_calls == [{"encoding": "utf-8"}]
+    assert stderr.reconfigure_calls == []
 
 
 def test_prepare_windows_console_restore_undoes_exactly_what_changed(
