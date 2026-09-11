@@ -1254,6 +1254,68 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Perfil activo",
         "en": "Active profile",
     },
+    "DOCTOR.LABEL.TERMINAL_LEVEL": {
+        "es": "Nivel del terminal",
+        "en": "Terminal level",
+    },
+    "DOCTOR.LABEL.TERMINAL_DRAWS": {
+        "es": "Dibuja",
+        "en": "Draws",
+    },
+    "DOCTOR.LABEL.FULL_SCREEN": {
+        "es": "Pantalla completa",
+        "en": "Full screen",
+    },
+    "DOCTOR.TERMINAL.LEVEL_0": {
+        "es": "ASCII sin color (el piso garantizado)",
+        "en": "ASCII without colour (the guaranteed floor)",
+    },
+    "DOCTOR.TERMINAL.LEVEL_1": {
+        "es": "color, bordes redondeados e indicador fluido",
+        "en": "colour, rounded borders and a fluid indicator",
+    },
+    "DOCTOR.TERMINAL.FULL_SCREEN_OPEN": {
+        "es": "disponible (el menu y el asistente se abren)",
+        "en": "available (the menu and the wizard open)",
+    },
+    "DOCTOR.TERMINAL.BLOCKER.OPTED_OUT": {
+        "es": "cerrada por NZ_MCP_NO_TUI; quita esa variable para abrirla",
+        "en": "closed by NZ_MCP_NO_TUI; unset that variable to open it",
+    },
+    "DOCTOR.TERMINAL.BLOCKER.TERM_DUMB": {
+        "es": "cerrada porque TERM=dumb; usa un terminal que declare sus capacidades",
+        "en": "closed because TERM=dumb; use a terminal that declares its capabilities",
+    },
+    "DOCTOR.TERMINAL.BLOCKER.NO_TERMINAL": {
+        "es": "cerrada porque la salida no va a un terminal (tuberia o redireccion)",
+        "en": "closed because output is not going to a terminal (pipe or redirection)",
+    },
+    "DOCTOR.TERMINAL.BLOCKER.BACKGROUND_PROCESS": {
+        "es": "cerrada porque el proceso corre en segundo plano; traelo al frente",
+        "en": "closed because the process runs in the background; bring it to the foreground",
+    },
+    "DOCTOR.TERMINAL.BLOCKER.TERMINAL_WITHOUT_CAPABILITIES": {
+        "es": "cerrada porque el tipo de terminal no sabe mover el cursor; revisa TERM",
+        "en": "closed because this terminal type cannot address the cursor; check TERM",
+    },
+    "DOCTOR.TERMINAL.BLOCKER.CONSOLE_WITHOUT_VT": {
+        "es": "cerrada porque la consola no procesa secuencias VT; usa Windows Terminal",
+        "en": "closed because the console does not process VT sequences; use Windows Terminal",
+    },
+    "DOCTOR.TERMINAL.BLOCKER.WINDOW_TOO_SMALL": {
+        "es": "cerrada porque la ventana es demasiado pequena; agrandala y repite",
+        "en": "closed because the window is too small; enlarge it and try again",
+    },
+    "DOCTOR.TERMINAL.BLOCKER.TERMINAL_LEVEL_0": {
+        "es": (
+            "cerrada porque el terminal esta en nivel 0; usa Windows Terminal, o pon la "
+            "consola en code page 65001, o fuerza NZ_MCP_UI_LEVEL=1"
+        ),
+        "en": (
+            "closed because the terminal is at level 0; use Windows Terminal, or set the "
+            "console to code page 65001, or force NZ_MCP_UI_LEVEL=1"
+        ),
+    },
     "DOCTOR.LABEL.KEYRING_BACKEND": {
         "es": "Backend de keyring",
         "en": "Keyring backend",

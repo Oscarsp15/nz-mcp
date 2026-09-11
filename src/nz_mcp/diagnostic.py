@@ -16,6 +16,12 @@ from keyring.backends.fail import Keyring as FailKeyring
 from pydantic import BaseModel, ConfigDict
 
 from nz_mcp import __version__
+from nz_mcp.cli_output import (
+    InteractiveBlocker,
+    TerminalLevel,
+    interactive_ui_blocker,
+    terminal_level,
+)
 from nz_mcp.config import (
     config_dir,
     load_profiles_file,
@@ -45,6 +51,12 @@ class DiagnosticReport(BaseModel):
     active_profile: str | None
     keyring_backend: str
     keyring_available: bool
+    #: What the CLI can draw on this terminal, and - when the full screen is closed - which
+    #: of the eight triggers closed it. Reported because a silent degradation is
+    #: indistinguishable from a missing feature: the menu simply does not appear, and the
+    #: reader has nothing to act on.
+    terminal_level: TerminalLevel
+    full_screen_blocker: InteractiveBlocker | None
     locale: Locale
 
     @property
@@ -84,6 +96,8 @@ def _probe_keyring() -> tuple[str, bool]:
 
 def collect_diagnostic(
     *,
+    min_width: int,
+    min_height: int,
     profiles_file: Path | None = None,
     config_dir_override: Path | None = None,
 ) -> DiagnosticReport:
@@ -133,6 +147,8 @@ def collect_diagnostic(
         active_profile=active_profile,
         keyring_backend=kr_name,
         keyring_available=kr_ok,
+        terminal_level=terminal_level(),
+        full_screen_blocker=interactive_ui_blocker(min_width=min_width, min_height=min_height),
         locale=loc,
     )
 
@@ -172,6 +188,21 @@ def format_diagnostic_report(report: DiagnosticReport, *, locale: Locale | None 
         f"  {lbl('DOCTOR.LABEL.AVAILABLE')}: {yn(report.keyring_available)}",
         f"{lbl('DOCTOR.LABEL.LOCALE')}: {report.locale}",
     ]
+
+    lines.extend(
+        [
+            "",
+            f"{lbl('DOCTOR.LABEL.TERMINAL_LEVEL')}: {report.terminal_level}",
+            f"  {lbl('DOCTOR.LABEL.TERMINAL_DRAWS')}: "
+            f"{lbl(f'DOCTOR.TERMINAL.LEVEL_{report.terminal_level}')}",
+            f"  {lbl('DOCTOR.LABEL.FULL_SCREEN')}: "
+            + (
+                lbl("DOCTOR.TERMINAL.FULL_SCREEN_OPEN")
+                if report.full_screen_blocker is None
+                else lbl(f"DOCTOR.TERMINAL.BLOCKER.{report.full_screen_blocker.upper()}")
+            ),
+        ]
+    )
 
     if not report.is_healthy:
         lines.extend(["", lbl("DOCTOR.CRITICAL_HEADER")])

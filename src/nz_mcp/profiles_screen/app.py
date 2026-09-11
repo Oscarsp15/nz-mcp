@@ -244,13 +244,17 @@ class _ActionsModal(ModalScreen[None]):
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         event.stop()
-        action_id = event.option.id
-        if action_id not in _ACTIONS:  # pragma: no cover - defensive, ids are set above
-            raise RuntimeError(f"unexpected action id {action_id!r}")
+        # Looked up rather than tested with ``in``: the lookup narrows the type on every
+        # mypy the project supports (``>=1.10``), while ``in`` only narrows from 2.x, and a
+        # ``cast`` that satisfies 1.x is flagged as redundant by 2.x. The ``None`` branch is
+        # what proves the id is one of the four.
+        action = next((known for known in _ACTIONS if known == event.option.id), None)
+        if action is None:  # pragma: no cover - defensive, ids are set above
+            raise RuntimeError(f"unexpected action id {event.option.id!r}")
         app = self.app
         if not isinstance(app, ProfilesApp):  # pragma: no cover - always pushed on one
             raise RuntimeError("the actions modal was pushed on an app that is not ProfilesApp")
-        choice = ProfilesChoice(status="chosen", profile=self._profile, action=action_id)
+        choice = ProfilesChoice(status="chosen", profile=self._profile, action=action)
         app.exit(choice)
 
     def action_close(self) -> None:
