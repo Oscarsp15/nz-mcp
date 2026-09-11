@@ -338,7 +338,7 @@ Uno por intención, todos referenciando el #201.
 |---|---|---|
 | 0 — piso garantizado | Marcos ASCII, marcadores en texto (`OK`, `Aviso`, `Error`), sin color ni secuencia de escape | Terminal heredado, `NO_COLOR`, `TERM=dumb`, `CI`, salida redirigida o canalizada, o `NZ_MCP_UI_LEVEL=0` |
 | 1 — terminal moderno | Color semántico, bordes redondeados, glifos junto a su palabra (`● OK`, `▲ Aviso`, `✕ Error`), indicador de actividad fluido | Terminal moderno detectado por `terminal_level()` (incluye Windows Terminal, y macOS/Linux con locale UTF-8), o forzado con `NZ_MCP_UI_LEVEL=1` |
-| 2 — pantalla completa | El menú de inicio, el asistente de configuración y la pantalla "Ver perfiles" (issue #240) | No lo decide `terminal_level()`: ver [ADR 0028](../adr/0028-asistente-de-configuracion-interactivo.md), [ADR 0030](../adr/0030-menu-interactivo-como-punto-de-entrada.md) y [ADR 0032](../adr/0032-rediseno-del-nivel-2-del-cli-interactivo.md) |
+| 2 — pantalla completa | El menú de inicio, el asistente de configuración y la pantalla "Ver perfiles" | No lo decide `terminal_level()`: ver [ADR 0028](../adr/0028-asistente-de-configuracion-interactivo.md), [ADR 0030](../adr/0030-menu-interactivo-como-punto-de-entrada.md) y [ADR 0032](../adr/0032-rediseno-del-nivel-2-del-cli-interactivo.md) |
 
 Ningún nivel añade ni quita información respecto a los demás: cambia solo con qué se dibuja. El nivel 0 es el piso garantizado, no una versión reducida — el CLI funciona igual en los tres.
 

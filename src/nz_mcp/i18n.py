@@ -705,6 +705,52 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Esc cerrar",
         "en": "Esc close",
     },
+    # "Ver perfiles" (issue #240, ADR 0032, decision 3): the third and last screen the ADR
+    # authorises. Column headers and the status word reuse the context panel's own keys
+    # above (``CLI.MENU_CONTEXT.*``) rather than duplicating "Perfil", "Host", "Base",
+    # "Modo", "Estado", "OK", "Aviso" and "Error" a second time - same vocabulary, same
+    # level. Only the screen's own title, key hints, empty state and the actions modal add
+    # keys here.
+    "CLI.PROFILES_SCREEN.TITLE": {
+        "es": "nz-mcp: perfiles",
+        "en": "nz-mcp: profiles",
+    },
+    "CLI.PROFILES_SCREEN.KEYS": {
+        "es": "Enter acciones | Esc volver",
+        "en": "Enter actions | Esc back",
+    },
+    "CLI.PROFILES_SCREEN.EMPTY": {
+        "es": "No hay perfiles configurados.",
+        "en": "No profiles are configured.",
+    },
+    "CLI.PROFILES_SCREEN.EMPTY_KEYS": {
+        "es": "Enter configurar | Esc volver",
+        "en": "Enter configure | Esc back",
+    },
+    "CLI.PROFILES_SCREEN.ACTIONS_TITLE": {
+        "es": "Acciones de {profile}",
+        "en": "Actions for {profile}",
+    },
+    "CLI.PROFILES_SCREEN.ACTIONS_KEYS": {
+        "es": "Enter elegir | Esc volver",
+        "en": "Enter choose | Esc back",
+    },
+    "CLI.PROFILES_SCREEN.ACTION_USE": {
+        "es": "Usar",
+        "en": "Use",
+    },
+    "CLI.PROFILES_SCREEN.ACTION_TEST": {
+        "es": "Probar",
+        "en": "Test",
+    },
+    "CLI.PROFILES_SCREEN.ACTION_EDIT": {
+        "es": "Editar",
+        "en": "Edit",
+    },
+    "CLI.PROFILES_SCREEN.ACTION_REMOVE": {
+        "es": "Borrar",
+        "en": "Delete",
+    },
     "CLI.WIZARD_UI_PASSWORD_SET": {
         "es": "definida (escribe aquí para cambiarla)",
         "en": "set (type here to change it)",

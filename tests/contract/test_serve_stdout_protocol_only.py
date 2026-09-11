@@ -86,12 +86,12 @@ _FORBIDDEN_DYNAMIC: Final[frozenset[tuple[str, str]]] = frozenset(
 #:   that corrupts the JSON-RPC of ``serve`` — so condition 2 of ADR 0027 confines the whole
 #:   package to ``cli_output.py``, where the channel is decided once.
 #: - ``textual``: condition 2 of ADR 0029 confines it to the full-screen surfaces this
-#:   project has - the wizard (ADR 0028), the menu (ADR 0030) - and to the one visual
-#:   layer they share, ``tui`` (ADR 0032: the sheet, the themes and the base application),
-#:   and pointedly **not** to the output layer, which would then be two things at once. It
-#:   writes to ``sys.__stdout__``, which a name-based protection would miss entirely; the
-#:   descriptor swap covers it, and this keeps it away from the ``serve`` import graph as
-#:   well.
+#:   project has - the wizard (ADR 0028), the menu (ADR 0030) and "Ver perfiles"
+#:   (ADR 0032) - and to the one visual layer they share, ``tui`` (ADR 0032: the sheet,
+#:   the themes and the base application), and pointedly **not** to the output layer,
+#:   which would then be two things at once. It writes to ``sys.__stdout__``, which a
+#:   name-based protection would miss entirely; the descriptor swap covers it, and this
+#:   keeps it away from the ``serve`` import graph as well.
 #:
 #: The values are paths under ``src/nz_mcp`` and match as prefixes, so a whole directory
 #: can own a package. Everything outside the homes of a package is forbidden - including,
@@ -100,7 +100,7 @@ _FORBIDDEN_DYNAMIC: Final[frozenset[tuple[str, str]]] = frozenset(
 #: has exactly one entry.
 _LAYER_ONLY_MODULES: Final[dict[str, tuple[str, ...]]] = {
     "rich": ("cli_output.py",),
-    "textual": ("wizard", "menu", "tui"),
+    "textual": ("wizard", "menu", "profiles_screen", "tui"),
 }
 
 _ANSI: Final[re.Pattern[str]] = re.compile("\x1b\\[")
