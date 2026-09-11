@@ -717,14 +717,6 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "definida en el terminal (escribe aquí para cambiarla)",
         "en": "set on the terminal (type here to change it)",
     },
-    "CLI.WIZARD_UI_MISSING": {
-        "es": "Falta por rellenar: {fields}",
-        "en": "Still missing: {fields}",
-    },
-    "CLI.WIZARD_UI_READY": {
-        "es": "Listo. Enter para validar contra Netezza y guardar.",
-        "en": "Ready. Enter to validate against Netezza and save.",
-    },
     "CLI.WIZARD_UI_DEGRADED": {
         "es": (
             "La ventana se ha quedado por debajo de {width}x{height}, así que sigo con "
@@ -734,6 +726,42 @@ MESSAGES: Final[dict[str, Message]] = {
             "The window dropped below {width}x{height}, so I am carrying on with "
             "questions. Nothing you already typed is lost."
         ),
+    },
+    # Full-screen wizard, ADR 0032 decision 4: the stepper, one log line per broken field,
+    # and the toast on save. Grouped here as one block since they are a single change
+    # (issue #241). Register: technical and terse, "Label: value", no "todo bien" / "listo"
+    # / "genial" - a test of this exact catalog block enforces it.
+    "CLI.WIZARD_UI_STEP_CONNECTION": {
+        "es": "1 Conexión",
+        "en": "1 Connection",
+    },
+    "CLI.WIZARD_UI_STEP_CREDENTIALS": {
+        "es": "2 Credenciales",
+        "en": "2 Credentials",
+    },
+    "CLI.WIZARD_UI_STEP_CONFIRM": {
+        "es": "3 Confirmar",
+        "en": "3 Confirm",
+    },
+    "CLI.WIZARD_UI_ERROR_REQUIRED": {
+        "es": "valor requerido",
+        "en": "value required",
+    },
+    "CLI.WIZARD_UI_ERROR_PORT": {
+        "es": "fuera de rango (1-65535)",
+        "en": "out of range (1-65535)",
+    },
+    "CLI.WIZARD_UI_ERROR_MODE": {
+        "es": "valor no válido (read, write, admin)",
+        "en": "not a valid value (read, write, admin)",
+    },
+    "CLI.WIZARD_UI_ERROR_SECURITY": {
+        "es": "fuera de rango (0-3)",
+        "en": "out of range (0-3)",
+    },
+    "CLI.WIZARD_UI_TOAST_SAVED": {
+        "es": "Perfil guardado: {profile}",
+        "en": "Profile saved: {profile}",
     },
     # Validation ladder run before persisting the profile
     "CLI.VALIDATE_ASK": {

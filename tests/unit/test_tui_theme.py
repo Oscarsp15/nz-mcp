@@ -31,7 +31,6 @@ from textual.color import Color, ColorParseError
 from textual.theme import Theme
 from textual.widgets import Static
 
-from nz_mcp.i18n import t
 from nz_mcp.menu import MenuContext
 from nz_mcp.menu.app import CommandMenuApp
 from nz_mcp.tui import NZ_DARK, NZ_LIGHT, STYLESHEET, THEMES, ThemedApp
@@ -458,14 +457,26 @@ async def test_the_theme_chosen_on_one_screen_is_the_one_the_next_screen_opens_w
 
 @pytest.mark.asyncio
 async def test_what_a_widget_draws_is_what_the_theme_declares() -> None:
-    """The status line is coloured by the sheet from the theme, and by nothing else."""
-    wizard = _wizard()
+    """The field-error log is coloured by the sheet from the theme, and by nothing else."""
+    wizard = ProfileWizardApp(
+        profile="dev",
+        initial=DraftFields(),
+        password_set=False,
+        ask_password=lambda: True,
+        credential=_Sink(),
+        locale="es",
+    )
     async with wizard.run_test(size=(100, 30)) as pilot:
         await pilot.pause()
-        status = wizard.query_one("#status", Static)
-        assert str(status.content) == t("CLI.WIZARD_UI_READY", "es")
-        assert status.styles.color == Color.parse(NZ_DARK.success or "")
+        explain = wizard.query_one("#explain", Static)
+        assert str(explain.content) != "", "an incomplete draft has to report something"
+        # Textual's colour system, not the raw declared value: rendering derives "error"
+        # from it and rounds by a shade (measured: #F87171 renders as #F77171), which the
+        # WCAG measurement in this file does not see because it reads the dataclass field
+        # directly. What is checked here is that no code in the wizard substitutes a third
+        # value of its own - the sheet's variable is what reaches the screen either way.
+        assert explain.styles.color == Color.parse(NZ_DARK.to_color_system().generate()["error"])
         await pilot.press("f2")
         await pilot.pause()
-        assert status.styles.color == Color.parse(NZ_LIGHT.success or "")
+        assert explain.styles.color == Color.parse(NZ_LIGHT.to_color_system().generate()["error"])
         await pilot.press("escape")

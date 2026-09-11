@@ -12,15 +12,20 @@ stays true.
 
 from __future__ import annotations
 
+from typing import Final
+
 import pytest
 
-from nz_mcp.i18n import MESSAGES
+from nz_mcp.i18n import MESSAGES, t
 from nz_mcp.wizard import (
     CREDENTIAL_SLOT,
     FIELD_KEYS,
     FIELD_SPECS,
+    STEP_GROUPS,
+    STEP_LABEL_KEYS,
     DraftFields,
     as_previous,
+    field_errors,
     first_shape_error,
     from_previous,
     label_key,
@@ -29,6 +34,7 @@ from nz_mcp.wizard import (
     normalize_port,
     normalize_security_level,
     shape_error_key,
+    step_of,
 )
 
 
@@ -256,3 +262,143 @@ def test_a_window_closed_without_an_answer_counts_as_cancelled(
 
     assert result.status == "cancelled"
     assert result.fields == seed
+
+
+# --- the field-error log (ADR 0032, decision 4; issue #241) --------------------
+
+
+def test_a_complete_form_reports_no_errors() -> None:
+    draft = DraftFields(host="h", database="d", user="u")
+    assert field_errors(draft, password_set=True) == ()
+
+
+def test_an_empty_required_field_is_reported_with_the_generic_message() -> None:
+    draft = DraftFields(host="", database="d", user="u")
+    assert field_errors(draft, password_set=True) == (("host", "CLI.WIZARD_UI_ERROR_REQUIRED"),)
+
+
+def test_the_optional_field_is_never_an_error() -> None:
+    draft = DraftFields(host="h", database="d", user="u", ca_certs="")
+    assert field_errors(draft, password_set=True) == ()
+
+
+def test_the_credential_is_reported_last_when_missing() -> None:
+    draft = DraftFields(host="", database="d", user="u")
+    assert field_errors(draft, password_set=False) == (
+        ("host", "CLI.WIZARD_UI_ERROR_REQUIRED"),
+        (CREDENTIAL_SLOT, "CLI.WIZARD_UI_ERROR_REQUIRED"),
+    )
+
+
+@pytest.mark.parametrize(
+    ("slot", "typed", "message_key"),
+    [
+        pytest.param("port", "not-a-number", "CLI.WIZARD_UI_ERROR_PORT", id="port"),
+        pytest.param("mode", "root", "CLI.WIZARD_UI_ERROR_MODE", id="mode"),
+        pytest.param("security_level", "9", "CLI.WIZARD_UI_ERROR_SECURITY", id="security-level"),
+    ],
+)
+def test_a_value_that_will_not_parse_gets_its_own_short_message(
+    slot: str, typed: str, message_key: str
+) -> None:
+    """The full-screen form's vocabulary, separate from the chained questions' sentences.
+
+    ``CLI.WIZARD_PORT_INVALID`` and its siblings repeat the typed value; these do not
+    (ADR 0032, decision 4: no sentence where a datum fits).
+    """
+    draft = DraftFields(host="h", database="d", user="u", **{slot: typed})
+    assert field_errors(draft, password_set=True) == ((slot, message_key),)
+
+
+def test_a_blank_value_is_missing_rather_than_invalid_in_the_error_log() -> None:
+    draft = DraftFields(host="h", database="d", user="u", port="")
+    assert field_errors(draft, password_set=True) == (("port", "CLI.WIZARD_UI_ERROR_REQUIRED"),)
+
+
+def test_every_error_message_exists_in_both_languages() -> None:
+    for message_key in (
+        "CLI.WIZARD_UI_ERROR_REQUIRED",
+        "CLI.WIZARD_UI_ERROR_PORT",
+        "CLI.WIZARD_UI_ERROR_MODE",
+        "CLI.WIZARD_UI_ERROR_SECURITY",
+    ):
+        message = MESSAGES[message_key]
+        assert message["es"].strip()
+        assert message["en"].strip()
+
+
+# --- the stepper's three groups (ADR 0032, decision 4; issue #241) -------------
+
+
+def test_every_field_and_the_credential_sit_in_exactly_one_step() -> None:
+    """The stepper can always say which step the focus is in - nothing falls through."""
+    covered = [slot for group in STEP_GROUPS for slot in group]
+    assert sorted(covered) == sorted((*FIELD_KEYS, CREDENTIAL_SLOT))
+    assert len(covered) == len(set(covered)), "a slot counted in two steps at once"
+
+
+def test_there_are_exactly_three_steps() -> None:
+    assert len(STEP_GROUPS) == len(STEP_LABEL_KEYS) == 3
+
+
+@pytest.mark.parametrize(
+    ("slot", "step"),
+    [
+        ("host", 0),
+        ("port", 0),
+        ("database", 0),
+        ("user", 1),
+        (CREDENTIAL_SLOT, 1),
+        ("mode", 2),
+        ("security_level", 2),
+        ("ca_certs", 2),
+    ],
+)
+def test_step_of_names_the_group_a_slot_belongs_to(slot: str, step: int) -> None:
+    assert step_of(slot) == step
+
+
+def test_step_of_an_unknown_slot_falls_back_to_the_first_step() -> None:
+    assert step_of("not-a-real-field") == 0
+
+
+def test_every_step_label_exists_in_both_languages() -> None:
+    for key in STEP_LABEL_KEYS:
+        message = MESSAGES[key]
+        assert message["es"].strip()
+        assert message["en"].strip()
+
+
+# --- the register: technical and terse, no celebration (ADR 0032, decision 7) --
+
+#: Case-insensitive fragments the ADR bans by name. Checked against every ES string this
+#: issue added, because the register is exactly what distinguishes "Perfil guardado:
+#: <nombre>" from the "todo bien" this decision rules out.
+_BANNED_FRAGMENTS: Final[tuple[str, ...]] = ("todo bien", "listo", "genial")
+
+#: Every i18n key issue #241 adds. A closed list, not a scan of the whole catalog: older
+#: debt is not this issue's to fix, and a hardcoded list means a future key is checked only
+#: once someone remembers to add it here - which is the same trade-off the credential
+#: guardrail's allowlists make, on purpose.
+_NEW_KEYS: Final[tuple[str, ...]] = (
+    *STEP_LABEL_KEYS,
+    "CLI.WIZARD_UI_ERROR_REQUIRED",
+    "CLI.WIZARD_UI_ERROR_PORT",
+    "CLI.WIZARD_UI_ERROR_MODE",
+    "CLI.WIZARD_UI_ERROR_SECURITY",
+    "CLI.WIZARD_UI_TOAST_SAVED",
+)
+
+
+def test_none_of_the_new_keys_use_a_banned_word() -> None:
+    for key in _NEW_KEYS:
+        es = MESSAGES[key]["es"].lower()
+        for fragment in _BANNED_FRAGMENTS:
+            assert fragment not in es, f"{key} uses the banned word {fragment!r}: {es!r}"
+
+
+def test_the_toast_is_one_line_and_names_the_profile() -> None:
+    for locale in ("es", "en"):
+        rendered = t("CLI.WIZARD_UI_TOAST_SAVED", locale, profile="prod_dw")
+        assert "\n" not in rendered
+        assert "prod_dw" in rendered

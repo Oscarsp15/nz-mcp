@@ -219,6 +219,10 @@ _ALLOWED_MODULE_NAMES: Final[frozenset[str]] = frozenset(
         "_MAX_PORT",
         "_SLOT_LABEL_KEYS",
         "_SHAPE_ERROR_KEYS",
+        "_REQUIRED_ERROR_KEY",
+        "_UI_SHAPE_ERROR_KEYS",
+        "STEP_GROUPS",
+        "STEP_LABEL_KEYS",
         # nz_mcp.wizard.app
         "_FIELD_ID_PREFIX",
         # nz_mcp.wizard.secret_field - what the mask is drawn with, and which keys edit it

@@ -57,11 +57,11 @@ class _Sink:
         return "".join(self.characters)
 
 
-def _app(sink: _Sink, *, locale: Locale = "es") -> ProfileWizardApp:
+def _app(sink: _Sink, *, locale: Locale = "es", password_set: bool = False) -> ProfileWizardApp:
     return ProfileWizardApp(
         profile="dev",
         initial=DraftFields(host="nz.example.com", database="PROD", user="svc"),
-        password_set=False,
+        password_set=password_set,
         ask_password=lambda: True,
         credential=sink,
         locale=locale,
@@ -72,8 +72,8 @@ def _field(app: ProfileWizardApp) -> SecretField:
     return app.query_one(SecretField)
 
 
-def _status(app: ProfileWizardApp) -> str:
-    return str(app.query_one("#status", Static).content)
+def _feedback(app: ProfileWizardApp) -> str:
+    return str(app.query_one("#explain", Static).content)
 
 
 # --- typing -------------------------------------------------------------------
@@ -251,9 +251,13 @@ async def test_an_unattended_screen_does_not_even_show_the_length() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("locale", ["es", "en"])
 async def test_the_row_explains_itself_in_the_language_of_the_session(locale: Locale) -> None:
-    """The same didactic line the chained questions print, while the answer is written."""
+    """The same didactic line the chained questions print, while the answer is written.
+
+    A credential already held (ADR 0028, condition 2: overwriting a profile keeps it), so
+    nothing blocks the form and the hint is what the feedback area has left to say.
+    """
     sink = _Sink()
-    app = _app(sink, locale=locale)
+    app = _app(sink, locale=locale, password_set=True)
     async with app.run_test(size=_ROOMY) as pilot:
         _field(app).focus()
         await pilot.pause()
@@ -554,21 +558,22 @@ async def test_backspace_on_a_terminal_credential_clears_it_rather_than_corrupti
 
 @pytest.mark.asyncio
 async def test_the_form_knows_the_credential_is_missing_until_a_key_is_pressed() -> None:
-    """The status line and the field agree, because the field is the one that decides."""
+    """The error log and the field agree, because the field is the one that decides."""
     sink = _Sink()
     app = _app(sink)
     async with app.run_test(size=(MIN_WIDTH, MIN_HEIGHT)) as pilot:
         await pilot.pause()
-        before = _status(app)
+        before = _feedback(app)
         _field(app).focus()
         await pilot.press("x")
         await pilot.pause()
-        after = _status(app)
+        after = _feedback(app)
         await pilot.press("backspace")
         await pilot.pause()
-        emptied = _status(app)
+        emptied = _feedback(app)
         await pilot.press("escape")
 
-    assert before == t("CLI.WIZARD_UI_MISSING", "es", fields=t("CLI.WIZARD_FIELD_PASSWORD", "es"))
-    assert after == t("CLI.WIZARD_UI_READY", "es")
-    assert emptied == before, "emptying the field must put the credential back on the missing list"
+    missing = f"{t('CLI.WIZARD_FIELD_PASSWORD', 'es')}: {t('CLI.WIZARD_UI_ERROR_REQUIRED', 'es')}"
+    assert before == missing
+    assert after == t("CLI.WIZARD_PASSWORD_EXPLAIN", "es")
+    assert emptied == before, "emptying the field must put the credential back on the error log"

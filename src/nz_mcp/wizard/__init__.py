@@ -31,12 +31,15 @@ from nz_mcp.wizard.fields import (
     MIN_HEIGHT,
     MIN_WIDTH,
     MODES,
+    STEP_GROUPS,
+    STEP_LABEL_KEYS,
     CredentialSink,
     DraftFields,
     FieldSpec,
     WizardResult,
     WizardStatus,
     as_previous,
+    field_errors,
     first_shape_error,
     from_previous,
     label_key,
@@ -45,6 +48,7 @@ from nz_mcp.wizard.fields import (
     normalize_port,
     normalize_security_level,
     shape_error_key,
+    step_of,
 )
 
 
@@ -103,6 +107,8 @@ __all__: Final[tuple[str, ...]] = (
     "MIN_HEIGHT",
     "MIN_WIDTH",
     "MODES",
+    "STEP_GROUPS",
+    "STEP_LABEL_KEYS",
     "CredentialSink",
     "DraftFields",
     "FieldSpec",
@@ -110,6 +116,7 @@ __all__: Final[tuple[str, ...]] = (
     "WizardStatus",
     "as_previous",
     "collect_profile_draft",
+    "field_errors",
     "first_shape_error",
     "from_previous",
     "label_key",
@@ -118,4 +125,5 @@ __all__: Final[tuple[str, ...]] = (
     "normalize_port",
     "normalize_security_level",
     "shape_error_key",
+    "step_of",
 )

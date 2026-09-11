@@ -108,6 +108,26 @@ OptionList:focus > .option-list--option-highlighted {
 
 /* -------------------------------------------------------------------- wizard --- */
 
+/* The three-step tracker of ADR 0032, decision 4: follows the focus, never advances on
+   its own. Bold is what says which step is current; colour is a second carrier, never
+   the only one (issue #241). */
+#stepper {
+    height: 1;
+}
+
+.step {
+    color: $text-muted;
+}
+
+.step.-current {
+    color: $foreground;
+    text-style: bold;
+}
+
+.step-sep {
+    color: $text-muted;
+}
+
 .row {
     height: 1;
 }
@@ -139,26 +159,17 @@ SecretField:focus {
     background: $band-focus;
 }
 
+/* Doubles as the field-error log of decision 4: the didactic hint of the focused field
+   when nothing is broken, one "Label: message" line per broken field when something is
+   (issue #241). */
 #explain {
     height: 6;
     margin-top: 1;
     color: $text-muted;
 }
 
-#status {
-    height: 1;
-}
-
-#status.-blocked {
-    color: $warning;
-}
-
-#status.-invalid {
+#explain.-error {
     color: $error;
-}
-
-#status.-ready {
-    color: $success;
 }
 
 /* ---------------------------------------------------------------- help modal --- */
