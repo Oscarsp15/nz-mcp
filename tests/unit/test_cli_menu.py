@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import sys
 from typing import Final
 
@@ -369,11 +370,17 @@ def test_every_entry_speaks_its_own_locale_and_says_what_the_catalog_says(
 
 
 def test_command_names_never_appear_as_a_task_label(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ADR 0032, decision 1: a task reads as a verb, never as the command it hands off to."""
+    """ADR 0032, decision 1: a task reads as a verb, never as the command it hands off to.
+
+    Matched on a word boundary, not a bare substring: "serve" sits inside "server" as
+    letters without being the word "serve", and English's "Start the MCP server" is not the
+    violation this test exists to catch.
+    """
     open_the_gate(monkeypatch)
     entries = list(_capture_entries(monkeypatch)["entries"])  # type: ignore[call-overload]
     for entry in entries:
-        assert entry.command not in entry.label
+        pattern = rf"\b{re.escape(entry.command)}\b"
+        assert re.search(pattern, entry.label) is None
 
 
 def test_a_task_pointing_at_a_missing_command_is_marked_unavailable(
