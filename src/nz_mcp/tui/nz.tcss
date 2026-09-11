@@ -116,6 +116,7 @@ OptionList:focus > .option-list--option-highlighted {
 }
 
 .step {
+    width: auto;
     color: $text-muted;
 }
 
@@ -125,6 +126,7 @@ OptionList:focus > .option-list--option-highlighted {
 }
 
 .step-sep {
+    width: auto;
     color: $text-muted;
 }
 
