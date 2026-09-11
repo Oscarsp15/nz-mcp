@@ -6,6 +6,13 @@
 - **Issue**: [#234](https://github.com/Oscarsp15/nz-mcp/issues/234)
 - **Alcance**: **cuántos niveles hay, con qué señal se decide cada uno y qué puede pintar cada uno**. Con qué librería se pinta lo decidieron el [ADR 0027](0027-adoptar-rich-para-la-presentacion-del-cli.md) y el [ADR 0029](0029-adoptar-textual-para-el-asistente-de-configuracion.md); **qué** se muestra sigue siendo del rol DX. Este ADR no elige contenido ni librería.
 
+> **Enmienda (2026-09-11, issue #255).** La señal 7 del punto 2 — Windows sin `WT_SESSION` y sin
+> code page 65001 — pasa a evaluarse **después** de que el [ADR 0033](0033-preparar-consola-windows-antes-de-medir.md)
+> intente mejorar la consola, no antes: `cli.entry_point()` llama a `cli_output.prepare_windows_console()`
+> antes de que `terminal_level()` pregunte nada, salvo cuando el subcomando es `serve`. La lógica de
+> la señal — y de `_windows_console_renders_unicode()`, que la implementa — **no cambia una línea**;
+> lo que cambia es qué consola se le pregunta. El resto de este ADR sigue vigente sin cambios.
+
 ## Contexto
 
 El 2026-09-09, con el CLI ya terminado y funcionando, el owner lo resumió en una palabra:

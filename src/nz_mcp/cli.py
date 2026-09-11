@@ -146,12 +146,22 @@ _NO_ARGUMENTS_EXIT_CODE: Final[int] = 2
 
 @app.callback(invoke_without_command=True)
 def entry_point(ctx: typer.Context) -> None:
-    """Open the menu when ``nz-mcp`` is run with nothing after it (issue #226, ADR 0030).
+    """Prepare the console, then open the menu when ``nz-mcp`` is run with nothing after it.
 
-    Runs before every command and gets out of the way immediately when there is one:
-    ``nz-mcp <command>`` and ``nz-mcp --help`` behave exactly as they did, which is what
-    whoever pipes the output or reads the documentation depends on.
+    Two independent things happen here, in order, and each is documented where it lives:
+
+    1. :func:`nz_mcp.cli_output.prepare_windows_console` (ADR 0033, issue #255) runs for
+       every command **except** ``serve`` — the check is by name, before anything else, so
+       the console is never touched on the one path whose stdout is about to become the MCP
+       protocol channel. ``ctx.invoked_subcommand`` already names the resolved subcommand at
+       this point, because ``click`` sets it before invoking this callback.
+    2. The menu opens when there is nothing after ``nz-mcp`` (issue #226, ADR 0030); with a
+       subcommand, this callback gets out of the way immediately, so ``nz-mcp <command>`` and
+       ``nz-mcp --help`` behave exactly as they did, which is what whoever pipes the output or
+       reads the documentation depends on.
     """
+    if ctx.invoked_subcommand != "serve":
+        out.prepare_windows_console()
     if ctx.invoked_subcommand is not None:
         return
     _no_arguments(ctx)

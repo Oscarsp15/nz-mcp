@@ -101,6 +101,20 @@ condition 1, and it lives in this module for the reason everything else about
 terminals does - one place decides. It returns a value and builds nothing; it
 does not import ``textual`` and never will. The wizard is the only caller.
 
+:func:`prepare_windows_console` is ADR 0033's answer to a measurement ADR 0031 made
+correctly and still left a real user unable to see the redesign: a Windows console on a
+legacy code page is not a fact to accept, it is a fact to try to change first. On Windows,
+and only when a real console is attached, it turns on ``ENABLE_VIRTUAL_TERMINAL_PROCESSING``
+for both standard output handles and switches the console to code page 65001 - the same
+constant :func:`_windows_console_renders_unicode` already compared against - before
+reconfiguring ``sys.stdout`` and ``sys.stderr`` to UTF-8, because Python opened both against
+the *old* code page and a console change alone would not reach them. Every failure of the
+console API is swallowed: preparing the console is an improvement, never a requirement, and
+``NZ_MCP_NO_CONSOLE_PREP`` opts out of the attempt entirely. What it changes is undone with
+``atexit`` when the process exits, whatever the reason. It is called exactly once, from
+``cli.entry_point``, for every command except ``serve`` - see the module docstring's
+"Protocol reservation" section below for why that exclusion cannot be an afterthought.
+
 Protocol reservation
 --------------------
 ``serve`` runs inside :func:`stdout_reserved_for_protocol`, which works at the
@@ -119,6 +133,7 @@ construction.
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import io
 import itertools
@@ -128,7 +143,7 @@ import shutil
 import sys
 import threading
 from collections.abc import Callable, Iterator, Sequence
-from typing import Final, Literal, Protocol, TextIO
+from typing import Any, Final, Literal, Protocol, TextIO
 
 import typer
 from rich import box
@@ -393,6 +408,182 @@ def _windows_console_renders_unicode() -> bool:
     if os.environ.get("WT_SESSION") is not None:
         return True
     return _console_output_code_page() == _UTF8_CODE_PAGE
+
+
+#: Escape hatch of ADR 0033. Same spellings as :data:`NO_TUI_ENV`: any value counts as *yes*
+#: except the two that conventionally mean "no", so that whoever sets it does not have their
+#: console touched at all - no code page, no console mode, no stream reconfiguration.
+NO_CONSOLE_PREP_ENV: Final[str] = "NZ_MCP_NO_CONSOLE_PREP"
+
+#: ``nStdHandle`` values ``GetStdHandle`` accepts for the two streams this layer draws on -
+#: the menu on stdout, ``status()`` and its shorthands on stderr (ADR 0033, point 2).
+_STD_OUTPUT_HANDLE: Final[int] = -11
+_STD_ERROR_HANDLE: Final[int] = -12
+
+#: Console mode bit that turns on interpretation of ANSI/VT escape sequences (Windows 10,
+#: version 1511, and later). Without it a legacy console prints ``\x1b[...`` literally
+#: instead of colouring anything, which is worse than not trying.
+_ENABLE_VIRTUAL_TERMINAL_PROCESSING: Final[int] = 0x0004
+
+
+def _opted_out_of_console_prep() -> bool:
+    """Whether ``NZ_MCP_NO_CONSOLE_PREP`` asks to leave the console exactly as found."""
+    value = os.environ.get(NO_CONSOLE_PREP_ENV, "").strip().lower()
+    return bool(value) and value not in ("0", "false")
+
+
+#: Names of the five ``kernel32`` calls :func:`_prepare_windows_console` needs, in the order
+#: it uses them. A tuple rather than five separate lookups so a missing one is a single
+#: ``None`` check instead of five, which is also what keeps the caller's branch count sane.
+_CONSOLE_API_NAMES: Final[tuple[str, ...]] = (
+    "GetConsoleOutputCP",
+    "SetConsoleOutputCP",
+    "GetStdHandle",
+    "GetConsoleMode",
+    "SetConsoleMode",
+)
+
+
+def _console_functions(kernel32: object) -> tuple[Any, ...] | None:
+    """The five ``kernel32`` calls, looked up together, or ``None`` if any is missing.
+
+    Grouping the lookup here - instead of five ``if x is None: return None`` guards inline -
+    is what lets the caller narrow all five with a single check: unpacking a tuple mypy
+    knows is not ``None`` yields five ``Any`` values, none of them ``Any | None``.
+    """
+    functions = tuple(getattr(kernel32, name, None) for name in _CONSOLE_API_NAMES)
+    return None if None in functions else functions
+
+
+def _prepare_windows_console() -> Callable[[], None] | None:
+    """Try to switch the real Windows console to UTF-8 and turn on VT processing.
+
+    Returns a callable that restores the code page and the two console modes this touched,
+    or ``None`` when nothing changed - either there was nothing to change or the console API
+    refused somewhere along the way. Every failure it can raise is caught here: preparing
+    the console is an improvement (ADR 0033), never a requirement, and the caller falls back
+    to measuring whatever it finds, exactly as it did before this function existed.
+
+    The API is looked up rather than imported at module level, for the same reason
+    :func:`_console_output_code_page` looks it up: ``ctypes.windll`` does not exist on
+    POSIX, and this keeps the module importable there without ever touching it.
+    """
+    import ctypes  # noqa: PLC0415 - Windows-only path
+
+    console_api_errors: tuple[type[BaseException], ...] = (
+        ctypes.ArgumentError,
+        AttributeError,
+        OSError,
+        TypeError,
+        ValueError,
+    )
+
+    kernel32 = getattr(getattr(ctypes, "windll", None), "kernel32", None)
+    if kernel32 is None:
+        return None
+    functions = _console_functions(kernel32)
+    if functions is None:
+        return None
+    get_output_cp, set_output_cp, get_std_handle, get_mode, set_mode = functions
+
+    try:
+        # ``GetStdHandle`` returns a pointer-sized HANDLE. The default ``restype`` (``c_int``)
+        # would truncate it on 64-bit Windows; forcing ``c_void_p`` keeps it whole. The two
+        # mode functions get the matching ``argtypes`` for the same reason, on the handle
+        # they are given back.
+        get_std_handle.restype = ctypes.c_void_p
+        get_mode.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32))
+        set_mode.argtypes = (ctypes.c_void_p, ctypes.c_uint32)
+
+        original_code_page = int(get_output_cp())
+        if not set_output_cp(_UTF8_CODE_PAGE):
+            return None
+
+        original_modes: list[tuple[object, int]] = []
+        for std_handle in (_STD_OUTPUT_HANDLE, _STD_ERROR_HANDLE):
+            handle = get_std_handle(std_handle)
+            mode = ctypes.c_uint32()
+            if not get_mode(handle, ctypes.pointer(mode)):
+                continue
+            if set_mode(handle, mode.value | _ENABLE_VIRTUAL_TERMINAL_PROCESSING):
+                original_modes.append((handle, mode.value))
+    except console_api_errors:
+        return None
+
+    def restore() -> None:
+        with contextlib.suppress(*console_api_errors):
+            for handle, mode in original_modes:
+                set_mode(handle, mode)
+            set_output_cp(original_code_page)
+
+    return restore
+
+
+def prepare_windows_console() -> None:
+    """Improve the real Windows console before anything asks it what it can draw (ADR 0033).
+
+    Four gates, each enough on its own to do nothing:
+
+    1. Not Windows — nothing to prepare, and no ``ctypes`` import happens on this path.
+    2. :data:`NO_CONSOLE_PREP_ENV` opted out.
+    3. Neither stdout nor stderr is attached to a real console — nothing a person would see
+       the improvement on, and nothing this function may safely touch. Deliberately an
+       ``or``, not an ``and``: the code page and the VT mode are properties of the console
+       itself, not of one descriptor, so either stream being a real console is reason enough
+       to *attempt* the console-wide part of this. What is **not** decided by this ``or`` is
+       which Python stream gets reconfigured - that is answered per stream below, precisely
+       because this gate cannot tell ``nz-mcp list-profiles > out.txt`` (stdout redirected,
+       stderr the console) from the fully-interactive case, and must not treat them the same.
+    4. The console API itself refused, in whatever way — see :func:`_prepare_windows_console`.
+
+    When it succeeds: the console output code page becomes UTF-8 (65001) and the two standard
+    output handles gain ``ENABLE_VIRTUAL_TERMINAL_PROCESSING`` - both console-wide, so both
+    happen whenever gate 3 opens. ``sys.stdout`` and ``sys.stderr`` are reconfigured to the
+    same encoding **only the ones that are themselves a real console** - checked again here,
+    per stream, not inherited from gate 3. A console change alone does not reach the streams
+    Python already opened against the old code page, and reconfiguring a stream that is *not*
+    the console - a redirected ``stdout`` while ``stderr`` is a terminal - would silently
+    change the bytes of a file ADR 0031 promises are level 0's, byte for byte, whether or not
+    anything about the console changed. Skipping the reconfiguration of the stream that *is*
+    the console would leave exactly the mojibake this function exists to prevent.
+
+    Everything it changed is restored by an :func:`atexit` callback, not by a ``finally``
+    around the caller: the entry-point callback and the command body are two separate steps
+    of ``click``'s own dispatch, not one nested inside the other, so a ``finally`` written in
+    the callback would never see a command's exception. ``atexit`` runs regardless — on a
+    clean return, on an uncaught exception, on an unhandled ``Ctrl+C`` — because all three are
+    ordinary interpreter shutdown from its point of view.
+
+    The one caller is ``cli.entry_point``, once per process, for every command except
+    ``serve``, which is excluded there by command name before this function is ever reached
+    (ADR 0033, point 5). That name check is a belt, not the suspenders: the structural
+    guarantee is the per-stream check above, which means a stray future caller that forgot
+    the name comparison still cannot touch a redirected ``stdout`` - the one ``serve`` needs
+    left alone - because a piped descriptor never passes :func:`_is_a_terminal`.
+    """
+    if os.name != "nt":
+        return
+    if _opted_out_of_console_prep():
+        return
+    if not (_is_a_terminal(sys.stdout) or _is_a_terminal(sys.stderr)):
+        return
+    restore = _prepare_windows_console()
+    if restore is None:
+        return
+    atexit.register(restore)
+    # Each stream is reconfigured only if *that* stream is the console: ``list-profiles >
+    # out.txt`` run from a real console has an ``stdout`` that is a file and an ``stderr``
+    # that is the console the ``or`` above found. Reconfiguring both because *one* of them
+    # is a console would change the bytes of a redirected level-0 payload - the exact thing
+    # ADR 0031 pins byte for byte - and it is this per-stream check, not the ``serve`` name
+    # comparison below, that keeps that promise structurally.
+    for stream in (sys.stdout, sys.stderr):
+        if not _is_a_terminal(stream):
+            continue
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            with contextlib.suppress(AttributeError, OSError, ValueError):
+                reconfigure(encoding="utf-8")
 
 
 def terminal_level(stream: SupportsIsatty | None = None) -> TerminalLevel:
@@ -1177,6 +1368,7 @@ def confirm(prompt: str, *, default: bool = False) -> bool:
 
 
 __all__: Final[tuple[str, ...]] = (
+    "NO_CONSOLE_PREP_ENV",
     "NO_TUI_ENV",
     "UI_LEVEL_ENV",
     "InteractiveBlocker",
@@ -1195,6 +1387,7 @@ __all__: Final[tuple[str, ...]] = (
     "interactive_ui_blocker",
     "interactive_ui_enabled",
     "note",
+    "prepare_windows_console",
     "progress",
     "status",
     "stdout_is_reserved",
