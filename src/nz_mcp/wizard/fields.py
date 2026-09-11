@@ -237,6 +237,74 @@ def missing_slots(draft: DraftFields, *, password_set: bool) -> tuple[str, ...]:
     return tuple(missing)
 
 
+#: i18n key of the log-register line shown next to an empty required field or the unset
+#: credential (ADR 0032, decision 4: short, lower case, no typed value interpolated - the
+#: value is not the problem, its absence is).
+_REQUIRED_ERROR_KEY: Final[str] = "CLI.WIZARD_UI_ERROR_REQUIRED"
+
+#: i18n key of the log-register line for each field with a shape of its own. Deliberately
+#: separate from ``_SHAPE_ERROR_KEYS``: those are the sentences the chained questions print
+#: after a failed answer (``CLI.WIZARD_PORT_INVALID`` and siblings), these are the shorter
+#: ones decision 4 asks the full-screen form for. Two vocabularies for the same three
+#: fields, on purpose - the full-screen form never repeats what was typed.
+_UI_SHAPE_ERROR_KEYS: Final[dict[str, str]] = {
+    "port": "CLI.WIZARD_UI_ERROR_PORT",
+    "mode": "CLI.WIZARD_UI_ERROR_MODE",
+    "security_level": "CLI.WIZARD_UI_ERROR_SECURITY",
+}
+
+
+def field_errors(draft: DraftFields, *, password_set: bool) -> tuple[tuple[str, str], ...]:
+    """Every field that blocks continuing, as ``(slot, message key)``, credential last.
+
+    One entry per broken field, in form order: :func:`shape_error_key` already treats a
+    blank value as *missing* rather than *invalid*, so a slot is never reported twice. This
+    is what the full-screen form's log of errors is built from (ADR 0032, decision 4); the
+    single problem :func:`first_shape_error` and :func:`missing_slots` report is what
+    ``action_submit`` still uses to choose where the focus goes.
+    """
+    errors: list[tuple[str, str]] = []
+    for spec in FIELD_SPECS:
+        value = getattr(draft, spec.key)
+        if not value.strip():
+            if spec.required:
+                errors.append((spec.key, _REQUIRED_ERROR_KEY))
+            continue
+        ui_key = _UI_SHAPE_ERROR_KEYS.get(spec.key)
+        if ui_key is not None and shape_error_key(spec.key, value) is not None:
+            errors.append((spec.key, ui_key))
+    if not password_set:
+        errors.append((CREDENTIAL_SLOT, _REQUIRED_ERROR_KEY))
+    return tuple(errors)
+
+
+#: Which slots belong to each of the three steps of ADR 0032, decision 4. Every field the
+#: form asks for - the credential included - sits in exactly one group, so the stepper can
+#: always say which step holds the focus: host, port and database are where the connection
+#: goes; user and the credential are who signs in; mode, the security level and the CA
+#: bundle are the policy confirmed right before saving.
+STEP_GROUPS: Final[tuple[tuple[str, ...], ...]] = (
+    ("host", "port", "database"),
+    ("user", CREDENTIAL_SLOT),
+    ("mode", "security_level", "ca_certs"),
+)
+
+#: i18n key of each step's label, in the same order as :data:`STEP_GROUPS`.
+STEP_LABEL_KEYS: Final[tuple[str, ...]] = (
+    "CLI.WIZARD_UI_STEP_CONNECTION",
+    "CLI.WIZARD_UI_STEP_CREDENTIALS",
+    "CLI.WIZARD_UI_STEP_CONFIRM",
+)
+
+
+def step_of(slot: str) -> int:
+    """Index into :data:`STEP_GROUPS` of the step ``slot`` belongs to, ``0`` when unknown."""
+    for index, group in enumerate(STEP_GROUPS):
+        if slot in group:
+            return index
+    return 0
+
+
 def as_previous(draft: DraftFields) -> dict[str, object]:
     """Render the draft in the shape the chained-questions wizard uses for its defaults.
 

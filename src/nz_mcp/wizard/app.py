@@ -58,13 +58,16 @@ from nz_mcp.wizard.fields import (
     FIELD_SPECS,
     MIN_HEIGHT,
     MIN_WIDTH,
+    STEP_LABEL_KEYS,
     CredentialSink,
     DraftFields,
     WizardResult,
     WizardStatus,
+    field_errors,
     first_shape_error,
     label_key,
     missing_slots,
+    step_of,
 )
 from nz_mcp.wizard.secret_field import SecretField
 
@@ -144,6 +147,14 @@ class ProfileWizardApp(ThemedApp[WizardResult]):
                 id="title",
                 markup=False,
             )
+            # ADR 0032, decision 4: three steps, filled in ``_refresh_stepper`` and never
+            # here - the marker and the bold are recomputed every time the focus moves, so
+            # the row starts empty like every other dynamic one on this screen.
+            with Horizontal(id="stepper"):
+                for index in range(len(STEP_LABEL_KEYS)):
+                    if index:
+                        yield Static(" · ", classes="step-sep", markup=False)
+                    yield Static("", id=f"step-{index}", classes="step", markup=False)
             for spec in FIELD_SPECS:
                 with Horizontal(classes="row"):
                     yield Label(t(spec.label_key, self._locale), classes="label", markup=False)
@@ -168,14 +179,13 @@ class ProfileWizardApp(ThemedApp[WizardResult]):
                 # is a counter. See ``secret_field`` for what that buys and what it costs.
                 yield SecretField(credential=self._credential, locale=self._locale)
             yield Static("", id="explain", markup=False)
-            yield Static("", id="status", markup=False)
             yield Static(t("CLI.WIZARD_UI_KEYS", self._locale), id="keys", markup=False)
 
     def on_mount(self) -> None:
         """Focus the first field and say what is missing before anything is typed."""
         self.query_one(f"#{_FIELD_ID_PREFIX}{FIELD_SPECS[0].key}", Input).focus()
         self._mounted = True
-        self._update_state()
+        self._refresh_dynamic()
 
     # --- events --------------------------------------------------------------
 
@@ -195,12 +205,12 @@ class ProfileWizardApp(ThemedApp[WizardResult]):
 
     def on_input_changed(self, event: Input.Changed) -> None:
         del event  # the whole form is re-read; which field changed does not matter
-        self._update_state()
+        self._refresh_dynamic()
 
     def on_secret_field_changed(self, event: SecretField.Changed) -> None:
         """The credential row says *whether* there is one. That is all it ever says."""
         self._password_set = event.held
-        self._update_state()
+        self._refresh_dynamic()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Enter means "I am done": continue, or point at what is still missing."""
@@ -209,7 +219,7 @@ class ProfileWizardApp(ThemedApp[WizardResult]):
 
     def on_descendant_focus(self, event: events.DescendantFocus) -> None:
         del event  # the focused widget is read back from the screen
-        self._refresh_explanation()
+        self._refresh_dynamic()
 
     # --- actions -------------------------------------------------------------
 
@@ -219,7 +229,7 @@ class ProfileWizardApp(ThemedApp[WizardResult]):
         shape = first_shape_error(draft)
         if shape is not None:
             self._focus_slot(shape[0])
-            self._update_state()
+            self._refresh_dynamic()
             return
         missing = missing_slots(draft, password_set=self._password_set)
         if not missing:
@@ -230,10 +240,10 @@ class ProfileWizardApp(ThemedApp[WizardResult]):
             # row that is missing, exactly like every other field: that seam is the one
             # issue #224 exists to remove. Ctrl+P is still there for whoever wants it.
             self.query_one(SecretField).focus()
-            self._update_state()
+            self._refresh_dynamic()
             return
         self._focus_slot(missing[0])
-        self._update_state()
+        self._refresh_dynamic()
 
     def action_cancel(self) -> None:
         self._finish("cancelled")
@@ -266,7 +276,7 @@ class ProfileWizardApp(ThemedApp[WizardResult]):
             # ends up drawn on screen.
             self.query_one(SecretField).mark_held_elsewhere()
         self.refresh()
-        self._update_state()
+        self._refresh_dynamic()
 
     # --- state ---------------------------------------------------------------
 
@@ -288,6 +298,15 @@ class ProfileWizardApp(ThemedApp[WizardResult]):
         self.query_one(f"#{_FIELD_ID_PREFIX}{slot}", Input).focus()
 
     def _finish(self, status: WizardStatus) -> None:
+        if status == "completed":
+            # A toast, not a print: the detail this screen never showed - what was
+            # validated, where it was written - is still reprinted on the ordinary
+            # terminal by ``cli.py`` once this application exits (ADR 0028, risk 4, which
+            # this decision does not touch). This line says only that the form is done.
+            self.notify(
+                t("CLI.WIZARD_UI_TOAST_SAVED", self._locale, profile=self._profile),
+                markup=False,
+            )
         self.exit(
             WizardResult(
                 status=status,
@@ -296,45 +315,63 @@ class ProfileWizardApp(ThemedApp[WizardResult]):
             )
         )
 
-    def _update_state(self) -> None:
-        """Recompute the status line. The credential row repaints itself, from its counter."""
-        message, marker = self._status_line()
-        status = self.query_one("#status", Static)
-        status.set_classes(f"-{marker}")
-        status.update(message)
+    def _refresh_dynamic(self) -> None:
+        """Recompute everything that depends on the focus or on what was typed."""
+        self._refresh_stepper()
+        self._refresh_feedback()
 
-    def _status_line(self) -> tuple[str, str]:
-        """What the single status line says: the blocker first, the go-ahead last.
+    def _current_step(self) -> int:
+        """Index of the step the focused row belongs to (ADR 0032, decision 4)."""
+        focused = self.focused
+        if isinstance(focused, SecretField):
+            return step_of(CREDENTIAL_SLOT)
+        widget_id = "" if focused is None else (focused.id or "")
+        slot = widget_id.removeprefix(_FIELD_ID_PREFIX) if widget_id else ""
+        return step_of(slot)
 
-        Colour only underlines it. The sentence carries the whole meaning, so redirecting
-        the terminal or not seeing colour costs nothing (``cli-experience.md`` §6.5).
+    def _refresh_stepper(self) -> None:
+        """Redraw the three steps: a filled marker and bold for the one that has the focus.
+
+        Bold, not colour, is what says which step is current (issue #241's acceptance
+        criteria): a marker on its own is still a symbol next to a word, so a colour-blind
+        reading loses nothing.
+        """
+        current = self._current_step()
+        for index, key in enumerate(STEP_LABEL_KEYS):
+            marker = "●" if index == current else "○"
+            step = self.query_one(f"#step-{index}", Static)
+            step.update(f"{marker} {t(key, self._locale)}")
+            if index == current:
+                step.add_class("-current")
+            else:
+                step.remove_class("-current")
+
+    def _refresh_feedback(self) -> None:
+        """The area below the fields: every current error, or the focused field's hint.
+
+        Errors come first - they are actionable, the hint is not - and are drawn as a log,
+        one line per broken field, each naming the field the way ``Host: valor requerido``
+        does (ADR 0032, decision 4). With nothing blocking the form, the area falls back to
+        the didactic line the chained questions already print for the focused field, which
+        is the promise :func:`_current_step`'s predecessor kept before it (issue #221).
         """
         draft = self._read_draft()
-        shape = first_shape_error(draft)
-        if shape is not None:
-            slot, message_key = shape
-            return t(message_key, self._locale, value=getattr(draft, slot)), "invalid"
-        missing = missing_slots(draft, password_set=self._password_set)
-        if missing:
-            names = ", ".join(t(label_key(slot), self._locale) for slot in missing)
-            return t("CLI.WIZARD_UI_MISSING", self._locale, fields=names), "blocked"
-        return t("CLI.WIZARD_UI_READY", self._locale), "ready"
-
-    def _refresh_explanation(self) -> None:
-        """Show the didactic line of the focused field: explain *while* answering.
-
-        The chained questions print the explanation once, above the prompt, and it scrolls
-        away. Here it stays for as long as the answer is being written, which is the same
-        promise kept better - and it is the same catalog entry, not a second text to keep
-        in sync.
-        """
+        errors = field_errors(draft, password_set=self._password_set)
+        explain = self.query_one("#explain", Static)
+        if errors:
+            lines = (
+                f"{t(label_key(slot), self._locale)}: {t(message_key, self._locale)}"
+                for slot, message_key in errors
+            )
+            explain.update("\n".join(lines))
+            explain.add_class("-error")
+            return
+        explain.remove_class("-error")
         focused = self.focused
         if isinstance(focused, SecretField):
             # The credential row gets the same treatment as the rest: the sentence the
             # chained questions print before asking, shown while the answer is written.
-            self.query_one("#explain", Static).update(
-                t("CLI.WIZARD_PASSWORD_EXPLAIN", self._locale)
-            )
+            explain.update(t("CLI.WIZARD_PASSWORD_EXPLAIN", self._locale))
             return
         widget_id = "" if focused is None else (focused.id or "")
         slot = widget_id.removeprefix(_FIELD_ID_PREFIX) if widget_id else ""
@@ -342,4 +379,4 @@ class ProfileWizardApp(ThemedApp[WizardResult]):
         explanation = (
             "" if spec is None or spec.explain_key is None else t(spec.explain_key, self._locale)
         )
-        self.query_one("#explain", Static).update(explanation)
+        explain.update(explanation)
