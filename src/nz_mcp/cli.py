@@ -93,6 +93,9 @@ from nz_mcp.profile_check import (
     iter_checks,
     run_checks,
 )
+from nz_mcp.profiles_screen import MIN_HEIGHT as PROFILES_MIN_HEIGHT
+from nz_mcp.profiles_screen import MIN_WIDTH as PROFILES_MIN_WIDTH
+from nz_mcp.profiles_screen import ProfileAction, ProfileRow, ProfileStatus, choose_profile
 from nz_mcp.secret import Secret
 from nz_mcp.server import run_stdio_server
 from nz_mcp.tools.session import SwitchProfileInput, nz_switch_profile
@@ -422,6 +425,13 @@ def help_cmd(ctx: typer.Context) -> None:
 
 # --- nz-mcp with no arguments: the menu, or the help -------------------------
 
+#: Which task "Ver perfiles" is, in :data:`~nz_mcp.menu.TASKS`. Chosen from the menu, it
+#: does not launch ``list-profiles`` directly: it opens the screen of issue #240, which
+#: hands its own choice to :func:`_open_profiles_screen`. Typed on the command line,
+#: ``list-profiles`` is unaffected (acceptance criterion 10 of issue #240) - this constant
+#: only names the one task the menu treats differently, never the command itself.
+_PROFILES_TASK_COMMAND: Final[str] = "list-profiles"
+
 
 def _no_arguments(ctx: typer.Context) -> None:
     """Offer the menu, and fall back to the help screen whenever it cannot open.
@@ -431,20 +441,68 @@ def _no_arguments(ctx: typer.Context) -> None:
     eight triggers are decided by the gate before anything is built; the eighth - a window
     shrunk below the minimum mid-session - can only be seen from inside the running
     application, and comes back as ``degraded``.
+
+    The loop is what ADR 0032 adds: choosing "Ver perfiles" and then leaving it with Escape
+    is not the end of the session, it is the second of a two-step pick, so the six-task menu
+    reopens instead of falling through to the help (ADR 0032, amendment to ADR 0030 point 1).
     """
-    if out.interactive_ui_enabled(min_width=MENU_MIN_WIDTH, min_height=MENU_MIN_HEIGHT):
-        locale = resolve_locale()
+    if not out.interactive_ui_enabled(min_width=MENU_MIN_WIDTH, min_height=MENU_MIN_HEIGHT):
+        _print_help(ctx)
+        raise typer.Exit(code=_NO_ARGUMENTS_EXIT_CODE)
+    locale = resolve_locale()
+    while True:
         choice = choose_command(
             entries=_menu_entries(ctx, locale), locale=locale, context=_menu_context()
         )
-        if choice.status == "chosen" and choice.command is not None:
-            _launch(ctx, choice.command)
-            return
         if choice.status == "cancelled":
             # Leaving on purpose is not a usage error, so it is not the exit code of one.
             raise typer.Exit(code=0)
+        if choice.status != "chosen" or choice.command is None:
+            break
+        if choice.command == _PROFILES_TASK_COMMAND:
+            if _open_profiles_screen(ctx, locale):
+                continue
+            return
+        _launch(ctx, choice.command)
+        return
     _print_help(ctx)
     raise typer.Exit(code=_NO_ARGUMENTS_EXIT_CODE)
+
+
+def _open_profiles_screen(ctx: typer.Context, locale: Locale) -> bool:
+    """Show "Ver perfiles" (issue #240) and act on what it hands back.
+
+    Returns ``True`` when the six-task menu should reopen - Escape from the table, which
+    ADR 0032 spends the extra step on rather than treating as the end of the session.
+    Every other outcome ends the same way ``_launch`` already does: a command from the
+    group runs, on the ordinary terminal, and the process finishes with its exit code.
+
+    Degrades the same way the menu itself does: the gate is asked again, with this
+    screen's own minimum, because it opens strictly later than the menu's and a window can
+    have shrunk in between; a ``profiles.toml`` that fails to parse at all falls back the
+    same way, straight to the ``list-profiles`` message that already explains it.
+    """
+    if out.interactive_ui_enabled(min_width=PROFILES_MIN_WIDTH, min_height=PROFILES_MIN_HEIGHT):
+        try:
+            rows = _profile_rows()
+        except InvalidProfileError:
+            rows = None
+        if rows is not None:
+            choice = choose_profile(rows=rows, locale=locale)
+            if choice.status == "cancelled":
+                return True
+            if choice.status == "degraded":
+                _print_help(ctx)
+                raise typer.Exit(code=_NO_ARGUMENTS_EXIT_CODE)
+            if choice.status == "configure":
+                _launch(ctx, "init")
+                return False
+            if choice.action is None or choice.profile is None:  # pragma: no cover - defensive
+                raise RuntimeError("a chosen ProfilesChoice must carry both action and profile")
+            _run_profile_action(ctx, choice.action, choice.profile)
+            return False
+    _launch(ctx, _PROFILES_TASK_COMMAND)
+    return False
 
 
 def _print_help(ctx: typer.Context) -> None:
@@ -514,6 +572,102 @@ def _menu_context() -> MenuContext:
     )
 
 
+def _profile_rows() -> tuple[ProfileRow, ...]:
+    """Read every profile the way "Ver perfiles" shows it - no connection opened.
+
+    Local checks only (acceptance criterion 1 of issue #240): a section that fails to
+    parse is ``error``, same as :func:`_menu_context` decides for the single active
+    profile; one that parses but has no keyring entry yet is ``warning``, because that is
+    knowable without a socket and would otherwise fail the moment "probar" opens one; a
+    profile with both is ``ok``. None of the three levels of
+    :mod:`nz_mcp.profile_check` runs here - those need Netezza, and only "probar" is
+    allowed to ask.
+
+    Raises:
+        InvalidProfileError: ``profiles.toml`` itself does not parse. The caller falls
+            back to ``list-profiles``, which already turns that into the usual message.
+    """
+    file = load_profiles_file()
+    active = active_profile_name(file)
+    rows: list[ProfileRow] = []
+    for name in sorted(file.profiles):
+        try:
+            profile = get_profile(name)
+        except (ProfileNotFoundError, InvalidProfileError):
+            rows.append(
+                ProfileRow(
+                    name=name,
+                    host=None,
+                    database=None,
+                    mode=None,
+                    status="error",
+                    active=name == active,
+                )
+            )
+            continue
+        try:
+            get_password(name)
+            status: ProfileStatus = "ok"
+        except (CredentialNotFoundError, KeyringUnavailableError):
+            status = "warning"
+        rows.append(
+            ProfileRow(
+                name=name,
+                host=profile.host,
+                database=profile.database,
+                mode=profile.mode,
+                status=status,
+                active=name == active,
+            )
+        )
+    return tuple(rows)
+
+
+#: Command each of the four "Ver perfiles" actions hands off to, and how it builds the
+#: argv from the profile name the screen already chose (ADR 0032, decision 3). ``test``
+#: needs ``--profile`` because it is an option there, not the positional argument the
+#: other three take.
+_PROFILE_ACTION_COMMANDS: Final[dict[ProfileAction, tuple[str, Callable[[str], list[str]]]]] = {
+    "use": ("switch-profile", lambda name: [name]),
+    "test": ("test-connection", lambda name: ["--profile", name]),
+    "edit": ("edit-profile", lambda name: [name]),
+    "remove": ("remove-profile", lambda name: [name]),
+}
+
+
+def _run_profile_action(ctx: typer.Context, action: ProfileAction, profile: str) -> None:
+    """Dispatch one of the four "Ver perfiles" actions to the command that already exists.
+
+    None of the four is reimplemented (ADR 0032, decision 3): "borrar" in particular does
+    not ask its own confirmation here - ``remove-profile`` already names the profile and
+    refuses by default (acceptance criterion 4 of issue #240), on the ordinary terminal,
+    after this screen has closed.
+    """
+    command_name, argv_for = _PROFILE_ACTION_COMMANDS[action]
+    _run_registered_command(ctx, command_name, argv_for(profile))
+
+
+def _registered_command(ctx: typer.Context, name: str) -> TyperCommand | None:
+    """Look ``name`` up in the same group ``nz-mcp <command>`` goes through."""
+    group = cast(TyperGroup, ctx.command)
+    registered = group.get_command(ctx, name)
+    return cast(TyperCommand, registered) if registered is not None else None
+
+
+def _run_registered_command(ctx: typer.Context, name: str, argv: list[str]) -> None:
+    """Invoke ``name`` with ``argv``, parsed by the same code a typed invocation would use.
+
+    Shared by :func:`_launch`, which derives ``argv`` from what the command line cannot
+    leave out, and by :func:`_run_profile_action`, which already knows the one argument
+    "Ver perfiles" chose and has no question left to ask.
+    """
+    command = _registered_command(ctx, name)
+    if command is None:  # pragma: no cover - the name came from this same group
+        raise typer.Exit(code=_NO_ARGUMENTS_EXIT_CODE)
+    with command.make_context(name, argv, parent=ctx) as sub_ctx:
+        command.invoke(sub_ctx)
+
+
 def _launch(ctx: typer.Context, name: str) -> None:
     """Run the chosen command on the ordinary terminal, as if it had been typed.
 
@@ -526,13 +680,10 @@ def _launch(ctx: typer.Context, name: str) -> None:
     group ``nz-mcp <command>`` goes through, and it is parsed by the same code, so it gets
     the same defaults, the same type conversion and the same usage errors.
     """
-    group = cast(TyperGroup, ctx.command)
-    registered = group.get_command(ctx, name)
-    if registered is None:  # pragma: no cover - the name came from this same group
+    command = _registered_command(ctx, name)
+    if command is None:  # pragma: no cover - the name came from this same group
         raise typer.Exit(code=_NO_ARGUMENTS_EXIT_CODE)
-    command = cast(TyperCommand, registered)
-    with command.make_context(name, _required_arguments(command), parent=ctx) as sub_ctx:
-        command.invoke(sub_ctx)
+    _run_registered_command(ctx, name, _required_arguments(command))
 
 
 def _required_arguments(command: TyperCommand) -> list[str]:

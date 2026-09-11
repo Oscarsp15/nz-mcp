@@ -33,6 +33,7 @@ from textual.widgets import Static
 
 from nz_mcp.menu import MenuContext
 from nz_mcp.menu.app import CommandMenuApp
+from nz_mcp.profiles_screen.app import ProfilesApp
 from nz_mcp.tui import NZ_DARK, NZ_LIGHT, STYLESHEET, THEMES, ThemedApp
 from nz_mcp.wizard import DraftFields
 from nz_mcp.wizard.app import ProfileWizardApp
@@ -231,7 +232,7 @@ def test_the_sheet_ships_with_the_package() -> None:
 
 
 def test_both_screens_load_the_one_sheet() -> None:
-    for app in (CommandMenuApp, ProfileWizardApp):
+    for app in (CommandMenuApp, ProfileWizardApp, ProfilesApp):
         assert issubclass(app, ThemedApp)
         assert app.CSS_PATH == STYLESHEET
         assert "CSS" not in vars(app), f"{app.__name__} carries its own CSS"
@@ -240,7 +241,7 @@ def test_both_screens_load_the_one_sheet() -> None:
 # --- no widget decides a colour (structural) -----------------------------------------
 
 #: The packages whose modules draw a screen. ``tui`` is where the palette lives, on purpose.
-_SCREEN_PACKAGES: Final[tuple[str, ...]] = ("menu", "wizard")
+_SCREEN_PACKAGES: Final[tuple[str, ...]] = ("menu", "wizard", "profiles_screen")
 
 #: The class attributes through which Textual accepts a stylesheet from code, or a second
 #: sheet from a file: a screen inherits ``CSS_PATH`` and never declares its own.

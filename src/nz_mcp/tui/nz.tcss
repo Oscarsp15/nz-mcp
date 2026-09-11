@@ -185,3 +185,56 @@ SecretField:focus {
     background: $panel;
     padding: 1 2;
 }
+
+/* ------------------------------------------------------------- profiles --- */
+
+/* "Ver perfiles" (ADR 0032, decision 3, issue #240): the header and the row under the
+   cursor read from the same bands and the same $text-muted the menu's own list already
+   uses, so the two screens do not drift on what a highlighted row looks like. Textual's
+   own defaults for these three classes pull from variables this sheet does not declare
+   and this project has not measured (`$block-cursor-background`, `$secondary-muted`);
+   overriding them is the same move rule 1 of this sheet already made for `OptionList`. */
+#profiles {
+    height: 1fr;
+    background: $background;
+}
+
+DataTable > .datatable--header {
+    background: $panel;
+    color: $text-muted;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: $band-idle;
+    color: $foreground;
+    text-style: none;
+}
+
+DataTable:focus {
+    background-tint: transparent;
+}
+
+DataTable:focus > .datatable--cursor {
+    background: $band-focus;
+    color: $foreground;
+    text-style: bold;
+}
+
+#empty {
+    height: 3;
+    margin-top: 1;
+    color: $text-muted;
+}
+
+/* ----------------------------------------------------------- actions modal --- */
+
+/* The four actions of one profile (ADR 0032, decision 3). Same card shape as the help
+   modal: pushed over the screen it belongs to, not a fourth surface. */
+#actions-modal {
+    width: 40;
+    height: auto;
+    border: round $text-muted;
+    background: $panel;
+    padding: 1 2;
+}
