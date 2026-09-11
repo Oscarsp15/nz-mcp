@@ -7,6 +7,8 @@ fails, a higher level has leaked into the floor.
 
 from __future__ import annotations
 
+import atexit
+import contextlib
 import ctypes
 import io
 import os
@@ -412,6 +414,325 @@ def test_the_code_page_lookup_answers_about_the_real_console() -> None:
     """The stand-in above has to stand for something real: on Windows, an integer or None."""
     answer = cli_output._console_output_code_page()
     assert answer is None or isinstance(answer, int)
+
+
+# --- prepare_windows_console: ADR 0033, issue #255 ------------------------------
+
+
+class _FakeKernel32:
+    """A stand-in for ``kernel32`` with just enough state to prove what changed and back.
+
+    ``GetStdHandle`` hands back the ``nStdHandle`` constant itself as the "handle" - there
+    is nothing in this test that needs it to look like a real pointer, only that the same
+    value threads through ``GetConsoleMode``/``SetConsoleMode`` for the same stream.
+
+    Each Win32 name is a **plain function** assigned in ``__init__``, not a bound method:
+    ``_prepare_windows_console`` sets ``.restype``/``.argtypes`` on what it looks up, which
+    is exactly what a real ``ctypes`` function pointer allows and a bound method does not.
+    """
+
+    def __init__(self, *, output_cp: int = 850) -> None:
+        self.output_cp = output_cp
+        self.set_output_cp_calls: list[int] = []
+        self.set_mode_calls: list[tuple[int, int]] = []
+        self._modes: dict[int, int] = {
+            cli_output._STD_OUTPUT_HANDLE: 0x1,
+            cli_output._STD_ERROR_HANDLE: 0x1,
+        }
+
+        def get_console_output_cp() -> int:
+            return self.output_cp
+
+        def set_console_output_cp(code_page: int) -> int:
+            self.set_output_cp_calls.append(code_page)
+            self.output_cp = code_page
+            return 1
+
+        def get_std_handle(std_handle: int) -> int:
+            return std_handle
+
+        def get_console_mode(handle: int, mode_ptr: ctypes._Pointer[ctypes.c_uint32]) -> int:
+            mode_ptr.contents.value = self._modes[handle]
+            return 1
+
+        def set_console_mode(handle: int, mode: int) -> int:
+            self.set_mode_calls.append((handle, mode))
+            self._modes[handle] = mode
+            return 1
+
+        self.GetConsoleOutputCP = get_console_output_cp
+        self.SetConsoleOutputCP = set_console_output_cp
+        self.GetStdHandle = get_std_handle
+        self.GetConsoleMode = get_console_mode
+        self.SetConsoleMode = set_console_mode
+
+
+class _Windll:
+    def __init__(self, kernel32: object) -> None:
+        self.kernel32 = kernel32
+
+
+class _FakeReconfigurableStream:
+    """A stream whose ``isatty`` is controlled and whose ``reconfigure`` calls are recorded."""
+
+    def __init__(self, *, tty: bool) -> None:
+        self._tty = tty
+        self.reconfigure_calls: list[dict[str, object]] = []
+
+    def isatty(self) -> bool:
+        return self._tty
+
+    def reconfigure(self, **kwargs: object) -> None:
+        self.reconfigure_calls.append(kwargs)
+
+
+def _windows_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[_FakeKernel32, _FakeReconfigurableStream, _FakeReconfigurableStream]:
+    """A Windows process with a real console attached on both standard streams."""
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.delenv(cli_output.NO_CONSOLE_PREP_ENV, raising=False)
+    kernel32 = _FakeKernel32()
+    monkeypatch.setattr(ctypes, "windll", _Windll(kernel32), raising=False)
+    stdout = _FakeReconfigurableStream(tty=True)
+    stderr = _FakeReconfigurableStream(tty=True)
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr(sys, "stderr", stderr)
+    return kernel32, stdout, stderr
+
+
+def test_prepare_windows_console_is_a_noop_on_posix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """POSIX never asks ``_prepare_windows_console`` anything - and never imports ``ctypes``."""
+
+    def explode() -> Callable[[], None] | None:
+        raise AssertionError("the Windows console API was consulted on POSIX")
+
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(cli_output, "_prepare_windows_console", explode)
+    registered: list[Callable[[], None]] = []
+    monkeypatch.setattr(atexit, "register", registered.append)
+    cli_output.prepare_windows_console()
+    assert registered == []
+
+
+def test_prepare_windows_console_skips_a_redirected_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows, but neither stream is a real console: nothing is touched."""
+    kernel32, _, _ = _windows_terminal(monkeypatch)
+    monkeypatch.setattr(sys, "stdout", _FakeReconfigurableStream(tty=False))
+    monkeypatch.setattr(sys, "stderr", _FakeReconfigurableStream(tty=False))
+    registered: list[Callable[[], None]] = []
+    monkeypatch.setattr(atexit, "register", registered.append)
+    cli_output.prepare_windows_console()
+    assert kernel32.set_output_cp_calls == []
+    assert registered == []
+
+
+@pytest.mark.parametrize("value", ["1", "true", "yes", "anything"])
+def test_prepare_windows_console_respects_the_escape_hatch(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    kernel32, _, _ = _windows_terminal(monkeypatch)
+    monkeypatch.setenv(cli_output.NO_CONSOLE_PREP_ENV, value)
+    registered: list[Callable[[], None]] = []
+    monkeypatch.setattr(atexit, "register", registered.append)
+    cli_output.prepare_windows_console()
+    assert kernel32.set_output_cp_calls == []
+    assert registered == []
+
+
+@pytest.mark.parametrize("value", ["0", "false", "False", " "])
+def test_the_escape_hatch_spellings_that_do_not_opt_out(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """Same convention as ``NZ_MCP_NO_TUI``: only these two spellings mean "no"."""
+    kernel32, _, _ = _windows_terminal(monkeypatch)
+    monkeypatch.setenv(cli_output.NO_CONSOLE_PREP_ENV, value)
+    cli_output.prepare_windows_console()
+    assert kernel32.set_output_cp_calls == [cli_output._UTF8_CODE_PAGE]
+
+
+def test_prepare_windows_console_swallows_a_console_api_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Permissions, a console that vanished mid-call: caught, never raised, level 0 stands."""
+    kernel32, stdout, stderr = _windows_terminal(monkeypatch)
+
+    def refuse(_code_page: int) -> int:
+        raise OSError("no console attached")
+
+    kernel32.SetConsoleOutputCP = refuse  # type: ignore[assignment]
+    registered: list[Callable[[], None]] = []
+    monkeypatch.setattr(atexit, "register", registered.append)
+    cli_output.prepare_windows_console()  # must not raise
+    assert registered == []
+    assert stdout.reconfigure_calls == []
+    assert stderr.reconfigure_calls == []
+
+
+def test_prepare_windows_console_tolerates_a_missing_function(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An older ``kernel32`` build without one of the five calls: nothing raises either."""
+    kernel32, _, _ = _windows_terminal(monkeypatch)
+    kernel32.SetConsoleMode = None  # type: ignore[assignment]
+    registered: list[Callable[[], None]] = []
+    monkeypatch.setattr(atexit, "register", registered.append)
+    cli_output.prepare_windows_console()
+    assert registered == []
+
+
+def test_prepare_windows_console_tolerates_a_missing_kernel32(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``ctypes.windll`` with no ``kernel32`` at all - nothing raises."""
+    _windows_terminal(monkeypatch)
+    monkeypatch.setattr(ctypes, "windll", object(), raising=False)
+    registered: list[Callable[[], None]] = []
+    monkeypatch.setattr(atexit, "register", registered.append)
+    cli_output.prepare_windows_console()
+    assert registered == []
+
+
+def test_prepare_windows_console_returns_none_when_the_code_page_write_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``SetConsoleOutputCP`` can fail by returning falsy, not only by raising."""
+    kernel32, _, _ = _windows_terminal(monkeypatch)
+    kernel32.SetConsoleOutputCP = lambda code_page: 0
+    registered: list[Callable[[], None]] = []
+    monkeypatch.setattr(atexit, "register", registered.append)
+    cli_output.prepare_windows_console()
+    assert registered == []
+
+
+def test_prepare_windows_console_continues_past_a_mode_read_failure_on_one_handle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One handle refuses ``GetConsoleMode``: the other is still prepared, nothing raises."""
+    kernel32, _, _ = _windows_terminal(monkeypatch)
+    real_get_mode = kernel32.GetConsoleMode
+
+    def flaky_get_mode(handle: int, mode_ptr: ctypes._Pointer[ctypes.c_uint32]) -> int:
+        if handle == cli_output._STD_ERROR_HANDLE:
+            return 0
+        return real_get_mode(handle, mode_ptr)
+
+    kernel32.GetConsoleMode = flaky_get_mode
+    registered: list[Callable[[], None]] = []
+    monkeypatch.setattr(atexit, "register", registered.append)
+
+    cli_output.prepare_windows_console()
+
+    touched_handles = {handle for handle, _mode in kernel32.set_mode_calls}
+    assert touched_handles == {cli_output._STD_OUTPUT_HANDLE}
+    assert len(registered) == 1
+
+
+def test_prepare_windows_console_does_not_restore_a_mode_it_never_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``SetConsoleMode`` refusing one handle is not remembered as "changed"."""
+    kernel32, _, _ = _windows_terminal(monkeypatch)
+    real_set_mode = kernel32.SetConsoleMode
+
+    def flaky_set_mode(handle: int, mode: int) -> int:
+        if handle == cli_output._STD_ERROR_HANDLE:
+            return 0
+        return real_set_mode(handle, mode)
+
+    kernel32.SetConsoleMode = flaky_set_mode
+    registered: list[Callable[[], None]] = []
+    monkeypatch.setattr(atexit, "register", registered.append)
+
+    cli_output.prepare_windows_console()
+    (restore,) = registered
+    calls_before_restore = len(kernel32.set_mode_calls)
+    restore()
+
+    # Only the handle that was actually changed gets a restoring ``SetConsoleMode`` call.
+    assert len(kernel32.set_mode_calls) == calls_before_restore + 1
+
+
+def test_prepare_windows_console_enables_vt_and_utf8_and_reconfigures_the_streams(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel32, stdout, stderr = _windows_terminal(monkeypatch)
+    registered: list[Callable[[], None]] = []
+    monkeypatch.setattr(atexit, "register", registered.append)
+
+    cli_output.prepare_windows_console()
+
+    assert kernel32.set_output_cp_calls == [cli_output._UTF8_CODE_PAGE]
+    touched_handles = {handle for handle, _mode in kernel32.set_mode_calls}
+    assert touched_handles == {cli_output._STD_OUTPUT_HANDLE, cli_output._STD_ERROR_HANDLE}
+    for _handle, mode in kernel32.set_mode_calls:
+        assert mode & cli_output._ENABLE_VIRTUAL_TERMINAL_PROCESSING
+    assert stdout.reconfigure_calls == [{"encoding": "utf-8"}]
+    assert stderr.reconfigure_calls == [{"encoding": "utf-8"}]
+    assert len(registered) == 1
+
+
+def test_prepare_windows_console_restore_undoes_exactly_what_changed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The callable handed to ``atexit`` puts the code page and both modes back.
+
+    Called directly, standing in for the interpreter shutdown that would otherwise call
+    it - the same technique the rest of this suite uses to test a callback without
+    opening a real terminal or a real process exit.
+    """
+    kernel32, _, _ = _windows_terminal(monkeypatch)
+    registered: list[Callable[[], None]] = []
+    monkeypatch.setattr(atexit, "register", registered.append)
+
+    cli_output.prepare_windows_console()
+    assert kernel32.output_cp == cli_output._UTF8_CODE_PAGE
+    (restore,) = registered
+
+    restore()
+
+    assert kernel32.output_cp == 850
+    assert kernel32.set_mode_calls[-2:] == [
+        (cli_output._STD_OUTPUT_HANDLE, 0x1),
+        (cli_output._STD_ERROR_HANDLE, 0x1),
+    ]
+
+
+def test_restoration_does_not_depend_on_the_command_finishing_cleanly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The restore callback is captured before the command runs, so a raised exception -
+    or a ``Ctrl+C`` that becomes an uncaught ``KeyboardInterrupt`` - cannot prevent it from
+    existing. This does not open a real interpreter shutdown; it proves the callback was
+    registered *before* the command had a chance to fail, and that calling it afterwards
+    still restores everything.
+    """
+    kernel32, _, _ = _windows_terminal(monkeypatch)
+    registered: list[Callable[[], None]] = []
+    monkeypatch.setattr(atexit, "register", registered.append)
+    cli_output.prepare_windows_console()
+    (restore,) = registered
+
+    with contextlib.suppress(RuntimeError):
+        try:
+            raise RuntimeError("the command blew up")
+        finally:
+            pass  # the command's own cleanup, not this function's - restore is atexit's job
+
+    restore()
+    assert kernel32.output_cp == 850
+
+
+# Deliberately no test here calls ``prepare_windows_console()`` against the real console.
+# Unlike ``_console_output_code_page()``, which only reads, a successful real call writes
+# process-wide state - the console code page, both console modes, and ``sys.stdout`` /
+# ``sys.stderr`` themselves - and registers a real ``atexit`` callback nothing in this test
+# session would trigger. On a Windows runner whose own stdout is a real console, doing that
+# from inside the suite corrupts every test that runs afterwards in the same process; this
+# was caught by the pre-merge full-suite run, not by the file in isolation, which is exactly
+# why it is written down here instead of tried again differently.
 
 
 # --- NZ_MCP_UI_LEVEL: the escape hatch, in both directions ---------------------
