@@ -40,6 +40,7 @@ _EXPECTED_ORDER: Final[tuple[str, ...]] = (
     "probe-catalog",
     "version",
     "serve",
+    "help",
 )
 
 #: Console code pages still shipped by default on Windows: 437 on an en-US install, 850 on a
@@ -73,7 +74,7 @@ def test_commands_are_listed_in_the_order_they_are_used() -> None:
 
 
 def test_the_top_of_the_help_names_the_command_to_start_with() -> None:
-    """A list of eleven commands with no entry point leaves the reader to guess."""
+    """A list of twelve commands with no entry point leaves the reader to guess."""
     top = app.info.help or ""
     assert "nz-mcp init" in top
 

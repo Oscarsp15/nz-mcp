@@ -12,12 +12,27 @@ from typing import Final
 
 import pytest
 
-from nz_mcp.menu import MIN_HEIGHT, MIN_WIDTH, MenuChoice, MenuEntry, choose_command
+from nz_mcp.menu import (
+    MIN_HEIGHT,
+    MIN_WIDTH,
+    TASKS,
+    MenuChoice,
+    MenuContext,
+    MenuEntry,
+    choose_command,
+    command_line,
+)
 from nz_mcp.menu import app as menu_app
 
+_CONTEXT: Final[MenuContext] = MenuContext(
+    profile=None, host=None, database=None, mode=None, status="warning"
+)
+
 _ENTRIES: Final[tuple[MenuEntry, ...]] = (
-    MenuEntry(command="init", description="Crea tu primer perfil"),
-    MenuEntry(command="version", description="Muestra la version instalada"),
+    MenuEntry(command="init", label="Configurar una conexión", description="Crea tu primer perfil"),
+    MenuEntry(
+        command="version", label="Ver la versión", description="Muestra la version instalada"
+    ),
 )
 
 
@@ -35,10 +50,11 @@ def test_the_border_hands_the_entries_over_and_the_choice_back(
             return MenuChoice(status="chosen", command="version")
 
     monkeypatch.setattr(menu_app, "CommandMenuApp", _Stub)
-    choice = choose_command(entries=_ENTRIES, locale="es")
+    choice = choose_command(entries=_ENTRIES, locale="es", context=_CONTEXT)
 
     assert built["entries"] == _ENTRIES
     assert built["locale"] == "es"
+    assert built["context"] == _CONTEXT
     assert choice == MenuChoice(status="chosen", command="version")
 
 
@@ -56,14 +72,16 @@ def test_a_window_closed_without_an_answer_counts_as_cancelled(
 
     monkeypatch.setattr(menu_app, "CommandMenuApp", _Stub)
 
-    assert choose_command(entries=_ENTRIES, locale="en") == MenuChoice(status="cancelled")
+    assert choose_command(entries=_ENTRIES, locale="en", context=_CONTEXT) == MenuChoice(
+        status="cancelled"
+    )
 
 
-def test_the_minimum_is_smaller_than_the_wizard_because_the_screen_holds_less() -> None:
+def test_the_minimum_is_at_most_the_wizards_because_the_screen_holds_less() -> None:
     """Two screens, two minimums. Copying the other one's would refuse usable windows.
 
     The wizard carries eight editable rows, a six-line explanation and a status line; this
-    one carries eleven short names, one sentence and a line of keys.
+    one carries six tasks, one sentence, a five-row context panel and a line of keys.
     """
     from nz_mcp.wizard import MIN_HEIGHT as WIZARD_HEIGHT
     from nz_mcp.wizard import MIN_WIDTH as WIZARD_WIDTH
@@ -72,15 +90,40 @@ def test_the_minimum_is_smaller_than_the_wizard_because_the_screen_holds_less() 
     assert MIN_HEIGHT <= WIZARD_HEIGHT
 
 
-def test_the_package_holds_no_list_of_commands() -> None:
-    """The entries are built from what typer registered, so this file cannot disagree with it.
+def test_the_six_tasks_are_the_fixed_order_of_adr_0032() -> None:
+    """ADR 0032, decision 1: the order someone needs the tasks in, written by hand.
 
-    A hand-written list here would be a second source for the same thing, and the first one
-    to go stale the day a command is added.
+    Not derived from typer's registration order any more - that derivation is exactly what
+    this decision spends (ADR 0030, point 4).
     """
-    from pathlib import Path
+    assert [task.id for task in TASKS] == [
+        "connect",
+        "profiles",
+        "test",
+        "serve",
+        "doctor",
+        "tools",
+    ]
+    assert [task.command for task in TASKS] == [
+        "init",
+        "list-profiles",
+        "test-connection",
+        "serve",
+        "doctor",
+        "probe-catalog",
+    ]
 
-    source = Path(str(menu_app.__file__)).parent / "entries.py"
-    text = source.read_text(encoding="utf-8")
-    for command in ("init", "list-profiles", "probe-catalog", "serve"):
-        assert command not in text
+
+def test_command_line_shows_the_target_when_it_is_registered() -> None:
+    entry = MenuEntry(command="init", label="Configurar una conexión", description="")
+    line = command_line(entry, unavailable="no disponible")
+    assert line == "Configurar una conexión -> nz-mcp init"
+
+
+def test_command_line_shows_the_break_when_the_command_is_not_registered() -> None:
+    """ADR 0032, risk 1: a renamed or removed command breaks visibly, not silently."""
+    entry = MenuEntry(
+        command="gone", label="Configurar una conexión", description="", command_available=False
+    )
+    line = command_line(entry, unavailable="no disponible")
+    assert line == "Configurar una conexión -> no disponible"

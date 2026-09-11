@@ -41,6 +41,39 @@ Screen {
 
 /* ---------------------------------------------------------------------- menu --- */
 
+/* Tasks on the left, the context panel on the right (ADR 0032, decision 1: "panel
+   derecho"). 1fr on the body and on the task column: both grow with the window instead of
+   the panel eating space the task list needs. */
+#body {
+    height: 1fr;
+}
+
+#tasks {
+    width: 1fr;
+}
+
+#context {
+    width: 26;
+    margin-left: 2;
+}
+
+#context-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#context-status.-ok {
+    color: $success;
+}
+
+#context-status.-warning {
+    color: $warning;
+}
+
+#context-status.-error {
+    color: $error;
+}
+
 /* 1fr and not auto: if this list ever outgrows the window it scrolls, instead of
    pushing the description and the keys off the bottom. */
 OptionList {
@@ -126,4 +159,16 @@ SecretField:focus {
 
 #status.-ready {
     color: $success;
+}
+
+/* ---------------------------------------------------------------- help modal --- */
+
+/* The one place a CLI command is written (ADR 0032, decision 2). A card over the
+   screen it was pushed on, not a fourth surface: same sheet, same two themes. */
+#help-modal {
+    width: 56;
+    height: auto;
+    border: round $text-muted;
+    background: $panel;
+    padding: 1 2;
 }
