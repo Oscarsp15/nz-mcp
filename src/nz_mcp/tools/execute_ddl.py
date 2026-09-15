@@ -22,12 +22,13 @@ class ExecuteDdlInput(BaseModel):
     dry_run: bool = True
     confirm: bool = False
     allow_prod_reads: bool = False
+    echo_sql: bool = True
 
 
 class ExecuteDdlOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     dry_run: bool
-    sql_to_execute: str
+    sql_to_execute: str | None = None
     executed: bool
     duration_ms: int
 
@@ -36,11 +37,11 @@ class ExecuteDdlOutput(BaseModel):
     name="nz_execute_ddl",
     description=(
         "Compile a full CREATE [OR REPLACE] PROCEDURE (NZPLSQL) or VIEW from sql or input_path "
-        "against the active profile database. Requires mode admin. dry_run=true (default) "
-        "returns the SQL without executing; dry_run=false + confirm=true compiles. Rejects "
-        "PROD_ refs from a non-production database; allow_prod_reads=true skips that check when "
-        "you certify all writes were flipped to the active DB and remaining PROD_ refs are "
-        "read-only. Procedures/views only — not tables nor CALL (nz_call_procedure)."
+        "against the active DB. Admin mode. dry_run=true (default) returns the SQL without "
+        "executing; dry_run=false + confirm=true compiles. Rejects PROD_ refs from non-production "
+        "DBs; allow_prod_reads=true skips that check when all writes target the active DB and "
+        "remaining PROD_ refs are read-only. echo_sql=false omits the DDL when compiling. "
+        "Procedures/views only — not tables nor CALL (nz_call_procedure)."
     ),
     mode="admin",
     input_model=ExecuteDdlInput,
@@ -66,10 +67,11 @@ def nz_execute_ddl(
         dry_run=params.dry_run,
         confirm=params.confirm,
         allow_prod_reads=params.allow_prod_reads,
+        echo_sql=params.echo_sql,
     )
     return ExecuteDdlOutput(
         dry_run=bool(raw["dry_run"]),
-        sql_to_execute=str(raw["sql_to_execute"]),
+        sql_to_execute=raw["sql_to_execute"],
         executed=bool(raw["executed"]),
         duration_ms=int(raw["duration_ms"]),
     )

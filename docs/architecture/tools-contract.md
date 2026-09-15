@@ -835,6 +835,7 @@ Compila un `CREATE [OR REPLACE] PROCEDURE` (NZPLSQL) **completo** o un `CREATE [
 | `dry_run` | bool (default **true**) | Si `true`, valida y devuelve `sql_to_execute` sin ejecutar. |
 | `confirm` | bool (**required if** `dry_run=false`) | |
 | `allow_prod_reads` | bool (default **false**) | Si `true`, **omite solo** la guarda `PROD_REF_IN_NONPROD`. El caller certifica que ya volteó todas las **escrituras** a la BD activa y que los `PROD_*` restantes son **solo lecturas**. Aplica igual en `dry_run` y en compilación real. El resto de validaciones (statement único, cabecera, modo admin, `statement_type`) siguen vigentes. |
+| `echo_sql` | bool (default **true**) | Si `false`, la respuesta de ejecución real omite `sql_to_execute` (queda `null`); en `dry_run` siempre se devuelve el SQL como preview. |
 
 **Output**:
 ```json
@@ -846,9 +847,20 @@ Compila un `CREATE [OR REPLACE] PROCEDURE` (NZPLSQL) **completo** o un `CREATE [
 }
 ```
 
+**Output** (ejecución real con `echo_sql=false`):
+```json
+{
+  "dry_run": false,
+  "sql_to_execute": null,
+  "executed": true,
+  "duration_ms": 42
+}
+```
+
 **Reglas**:
 - Guarda de entorno (`assert_env_safe`): si la BD del perfil activo **no** empieza con `PROD_`, cualquier identificador `PROD_*` en el SQL → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD`. Evita compilar en desarrollo código que apunta a producción. Es un escaneo conservador (un literal con `PROD_` también dispara; falla cerrado).
 - `allow_prod_reads=true` desactiva **únicamente** esa guarda: compilar un `CREATE` es inerte (las escrituras reales solo ocurren en `CALL`), así que el flag relaja el escaneo textual de compilación, no el comportamiento en ejecución. El default `false` conserva el bloqueo (falla cerrado). No se intenta distinguir lecturas de escrituras: el flag es la certificación explícita del caller.
+- `echo_sql` controla **solo** la ejecución real: con `false`, `sql_to_execute` queda `null` y la respuesta se reduce a metadatos (`executed`, `duration_ms`), para compilar en lote sin arrastrar el DDL completo al contexto. En `dry_run` el SQL se devuelve **siempre**, porque el preview es el objetivo de ese modo.
 - Todo el SQL pasa por `sql_guard.validate(mode="admin")`; se exige `CREATE`.
 - Ejecuta contra la BD del perfil activo (no acepta `database` cross-DB).
 - No usar para tablas (`nz_create_table`) ni para ejecutar un procedimiento (`nz_call_procedure`).

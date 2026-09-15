@@ -89,8 +89,14 @@ def execute_ddl(
     dry_run: bool,
     confirm: bool,
     allow_prod_reads: bool = False,
+    echo_sql: bool = True,
 ) -> dict[str, Any]:
     """Validate and (optionally) compile a procedure/view DDL against the active DB.
+
+    When ``echo_sql`` is false the real-execution branch omits the full DDL from the
+    response (``sql_to_execute`` becomes ``None``), so callers can compile in batch
+    without the whole statement being echoed back into their context. The ``dry_run``
+    branch always returns the SQL regardless of ``echo_sql``: the preview is its point.
 
     When ``allow_prod_reads`` is true the ``PROD_REF_IN_NONPROD`` environment guard
     is skipped: the caller certifies it has already flipped every write target to the
@@ -148,7 +154,7 @@ def execute_ddl(
     duration_ms = int((time.monotonic() - start) * 1000)
     return {
         "dry_run": False,
-        "sql_to_execute": parsed.raw,
+        "sql_to_execute": parsed.raw if echo_sql else None,
         "executed": True,
         "duration_ms": duration_ms,
     }
