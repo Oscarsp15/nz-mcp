@@ -410,22 +410,28 @@ def _assert_alter_column_is_default_only(action: exp.Expr) -> None:
     """Allow only ``SET DEFAULT`` / ``DROP DEFAULT`` on an existing column.
 
     sqlglot collapses several ``ALTER COLUMN`` sub-forms into ``exp.AlterColumn``; the
-    node args are what tell them apart (verified against sqlglot 30.6.0, postgres dialect):
+    node args are what tell them apart (verified against sqlglot 30.6.0 and 30.18.0,
+    postgres dialect). Newer sqlglot adds a non-semantic ``"exists"`` key (always ``None``
+    here), so detection keys off the semantic args rather than an exact arg set:
 
-    * ``SET DEFAULT <expr>`` -> ``{"this": ..., "default": <expr>}``
-    * ``DROP DEFAULT``       -> ``{"this": ..., "drop": True}``
-    * ``TYPE <type>``        -> ``{"this": ..., "dtype": ..., "collate": ..., "using": ...}``
-    * ``SET NOT NULL``       -> ``{"this": ..., "allow_null": False}``
-    * ``DROP NOT NULL``      -> ``{"this": ..., "drop": True, "allow_null": True}``
+    * ``SET DEFAULT <expr>`` -> ``default`` is set to a value
+    * ``DROP DEFAULT``       -> ``drop`` is truthy and there is no ``default`` value
+    * ``TYPE <type>``        -> ``dtype`` is set
+    * ``SET NOT NULL``       -> ``allow_null`` is set
+    * ``DROP NOT NULL``      -> ``drop`` truthy **and** ``allow_null`` is set
 
-    Positive identification only: besides ``this`` the args must be exactly ``default``
-    (with a value) or exactly ``drop=True``. Note that ``DROP NOT NULL`` also carries
-    ``drop=True``, so the ``allow_null`` key must be absent for a ``DROP DEFAULT``.
-    Anything else — including a bare ``SET DEFAULT`` with no expression — is rejected.
+    Positive identification only: a TYPE change (``dtype``) or a NOT NULL change
+    (``allow_null``) is rejected outright; otherwise the action is accepted only when it
+    is a ``SET DEFAULT`` with an expression or a ``DROP DEFAULT``. A bare ``SET DEFAULT``
+    with no expression and any unknown shape are rejected (default-deny).
     """
-    extra = {key for key in action.args if key != "this"}
-    is_set_default = extra == {"default"} and action.args["default"] is not None
-    is_drop_default = extra == {"drop"} and action.args["drop"] is True
+    if action.args.get("dtype") is not None or action.args.get("allow_null") is not None:
+        raise GuardRejectedError(
+            code="ALTER_ACTION_NOT_ALLOWED",
+            action=type(action).__name__,
+        )
+    is_set_default = action.args.get("default") is not None
+    is_drop_default = bool(action.args.get("drop")) and not is_set_default
     if not (is_set_default or is_drop_default):
         raise GuardRejectedError(
             code="ALTER_ACTION_NOT_ALLOWED",

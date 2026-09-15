@@ -405,6 +405,15 @@ def test_alter_table_drop_default_allowed_in_admin() -> None:
 
 
 @pytest.mark.adversarial
+def test_alter_table_set_default_without_expression_blocked_in_admin() -> None:
+    """A bare ``SET DEFAULT`` has no value: not positively identified, so default-deny."""
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("ALTER TABLE t ALTER COLUMN c SET DEFAULT", mode="admin")
+    assert exc.value.code == "ALTER_ACTION_NOT_ALLOWED"
+    assert exc.value.context["action"] == "AlterColumn"
+
+
+@pytest.mark.adversarial
 def test_alter_table_drop_column_blocked_in_admin() -> None:
     with pytest.raises(GuardRejectedError) as exc:
         validate("ALTER TABLE t DROP COLUMN c", mode="admin")
