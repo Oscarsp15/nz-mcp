@@ -33,6 +33,7 @@ class StatementKind(StrEnum):
     CREATE = "CREATE"
     TRUNCATE = "TRUNCATE"
     DROP = "DROP"
+    ALTER = "ALTER"
     CALL = "CALL"
     UNKNOWN = "UNKNOWN"
 
@@ -47,7 +48,12 @@ _WRITE_KINDS: Final[frozenset[StatementKind]] = frozenset(
 )
 # DDL kinds permitted only in admin mode.
 _DDL_KINDS: Final[frozenset[StatementKind]] = frozenset(
-    {StatementKind.CREATE, StatementKind.TRUNCATE, StatementKind.DROP}
+    {
+        StatementKind.CREATE,
+        StatementKind.TRUNCATE,
+        StatementKind.DROP,
+        StatementKind.ALTER,
+    }
 )
 # Kinds whose WHERE clause must both exist and actually restrict rows.
 _WHERE_REQUIRED_KINDS: Final[frozenset[StatementKind]] = frozenset(
@@ -163,6 +169,7 @@ def validate(
     # at all must be told that, not invited to retry with ``confirm_full_table``.
     _enforce(kind=kind, has_where=has_where, mode=mode)
     _assert_selective_where(expr, kind=kind, confirm_full_table=confirm_full_table)
+    _assert_safe_alter(expr, kind=kind)
 
     return ParsedStatement(kind=kind, has_where=has_where, raw=sql)
 
@@ -328,8 +335,18 @@ _SIMPLE_KIND_MAP: Final[tuple[tuple[type[exp.Expr], StatementKind], ...]] = (
     (exp.Delete, StatementKind.DELETE),
     (exp.Create, StatementKind.CREATE),
     (exp.Drop, StatementKind.DROP),
+    (exp.Alter, StatementKind.ALTER),
     (exp.TruncateTable, StatementKind.TRUNCATE),
     (exp.Show, StatementKind.SHOW),
+)
+
+# ``ALTER`` action nodes accepted by the safe-additive validator. Anything outside this
+# tuple is default-denied: ``DROP COLUMN`` parses as ``exp.Drop``, ``RENAME TO`` (table or
+# view) as ``exp.AlterRename``, ``ADD CONSTRAINT`` as ``exp.AddConstraint``, and so on.
+_ALTER_SAFE_ACTIONS: Final[tuple[type[exp.Expr], ...]] = (
+    exp.ColumnDef,
+    exp.AlterColumn,
+    exp.RenameColumn,
 )
 
 
@@ -360,6 +377,60 @@ def _classify(expr: exp.Expr) -> StatementKind:
 def _has_where(expr: exp.Expr) -> bool:
     where = expr.args.get("where") if hasattr(expr, "args") else None
     return where is not None
+
+
+def _assert_safe_alter(expr: exp.Expr, *, kind: StatementKind) -> None:
+    """Reject any ``ALTER`` that is not a safe, additive ``ALTER TABLE``.
+
+    Only ``ALTER TABLE`` is considered: the target kind is read from
+    ``expr.args["kind"]`` (``"TABLE"`` for ``ALTER TABLE``, ``"VIEW"`` for
+    ``ALTER VIEW``); any other target is rejected with ``ALTER_VIEW``-style context.
+    The action allowlist is ``_ALTER_SAFE_ACTIONS``; column type changes and NOT NULL
+    changes are rejected inside :func:`_assert_alter_column_is_default_only`.
+    """
+    if kind is not StatementKind.ALTER:
+        return
+    target = expr.args.get("kind")
+    if target != "TABLE":
+        raise GuardRejectedError(
+            code="ALTER_ACTION_NOT_ALLOWED",
+            action=f"ALTER_{target}",
+        )
+    for action in expr.args.get("actions") or []:
+        if not isinstance(action, _ALTER_SAFE_ACTIONS):
+            raise GuardRejectedError(
+                code="ALTER_ACTION_NOT_ALLOWED",
+                action=type(action).__name__,
+            )
+        if isinstance(action, exp.AlterColumn):
+            _assert_alter_column_is_default_only(action)
+
+
+def _assert_alter_column_is_default_only(action: exp.Expr) -> None:
+    """Allow only ``SET DEFAULT`` / ``DROP DEFAULT`` on an existing column.
+
+    sqlglot collapses several ``ALTER COLUMN`` sub-forms into ``exp.AlterColumn``; the
+    node args are what tell them apart (verified against sqlglot 30.6.0, postgres dialect):
+
+    * ``SET DEFAULT <expr>`` -> ``{"this": ..., "default": <expr>}``
+    * ``DROP DEFAULT``       -> ``{"this": ..., "drop": True}``
+    * ``TYPE <type>``        -> ``{"this": ..., "dtype": ..., "collate": ..., "using": ...}``
+    * ``SET NOT NULL``       -> ``{"this": ..., "allow_null": False}``
+    * ``DROP NOT NULL``      -> ``{"this": ..., "drop": True, "allow_null": True}``
+
+    Positive identification only: besides ``this`` the args must be exactly ``default``
+    (with a value) or exactly ``drop=True``. Note that ``DROP NOT NULL`` also carries
+    ``drop=True``, so the ``allow_null`` key must be absent for a ``DROP DEFAULT``.
+    Anything else — including a bare ``SET DEFAULT`` with no expression — is rejected.
+    """
+    extra = {key for key in action.args if key != "this"}
+    is_set_default = extra == {"default"} and action.args["default"] is not None
+    is_drop_default = extra == {"drop"} and action.args["drop"] is True
+    if not (is_set_default or is_drop_default):
+        raise GuardRejectedError(
+            code="ALTER_ACTION_NOT_ALLOWED",
+            action=type(action).__name__,
+        )
 
 
 # --- Tautological WHERE detection ---------------------------------------------

@@ -14,6 +14,7 @@ from nz_mcp.server import call_tool, list_tools
 from nz_mcp.tools.registry import TOOLS
 
 EXPECTED_V010A0: set[str] = {
+    "nz_alter_table",
     "nz_call_procedure",
     "nz_clone_procedure",
     "nz_create_table",
@@ -74,6 +75,29 @@ def test_listings_have_json_schemas() -> None:
     assert len(listings) >= len(EXPECTED_V010A0)
     for listing in listings:
         assert listing.input_schema.get("type") == "object"
+
+
+@pytest.mark.contract
+def test_nz_alter_table_schema_and_annotations() -> None:
+    spec = TOOLS["nz_alter_table"]
+    props = spec.input_model.model_json_schema()["properties"]
+    assert set(props) == {
+        "database",
+        "schema",
+        "table",
+        "add_columns",
+        "set_defaults",
+        "drop_defaults",
+        "rename_columns",
+        "dry_run",
+        "confirm",
+    }
+    assert spec.annotations == {
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    }
 
 
 @pytest.mark.contract

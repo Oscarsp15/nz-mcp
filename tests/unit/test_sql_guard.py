@@ -92,6 +92,11 @@ def test_truncate_passes_in_admin() -> None:
     assert parsed.kind is StatementKind.TRUNCATE
 
 
+def test_alter_table_add_column_passes_in_admin() -> None:
+    parsed = validate("ALTER TABLE T ADD COLUMN C INT", mode="admin")
+    assert parsed.kind is StatementKind.ALTER
+
+
 def test_empty_string_rejected() -> None:
     with pytest.raises(GuardRejectedError) as exc:
         validate("", mode="read")
@@ -315,3 +320,31 @@ def test_number_literal_that_is_not_a_decimal_stays_undecided() -> None:
         expression=exp.Literal.number(1),
     )
     assert sql_guard._static_truth(node) is None
+
+
+# --- Coverage closure for the guard-only test subset ---------------------------
+# ``assert_env_safe`` and the ``CALL`` happy path also live in ``sql_guard`` and have their
+# own test modules; these minimal cases keep the module at 100 % when only the guard test
+# files are collected.
+
+
+def test_assert_env_safe_allows_a_prod_database() -> None:
+    sql_guard.assert_env_safe("DROP TABLE PROD_X..T", active_database="PROD_MODELOS")
+
+
+def test_assert_env_safe_allows_a_nonprod_statement_without_prod_refs() -> None:
+    sql_guard.assert_env_safe("DROP TABLE DEV_X..T", active_database="DESA_MODELOS")
+
+
+def test_assert_env_safe_rejects_prod_refs_from_a_nonprod_database() -> None:
+    with pytest.raises(GuardRejectedError) as exc:
+        sql_guard.assert_env_safe(
+            "SELECT * FROM PROD_ANALITICA..T",
+            active_database="DESA_MODELOS",
+        )
+    assert exc.value.code == "PROD_REF_IN_NONPROD"
+
+
+def test_call_with_placeholders_passes_in_admin() -> None:
+    parsed = validate("CALL DBO.P(?)", mode="admin")
+    assert parsed.kind is StatementKind.CALL

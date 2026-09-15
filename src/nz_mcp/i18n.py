@@ -152,6 +152,16 @@ MESSAGES: Final[dict[str, Message]] = {
             "Rejected to prevent cross-environment operations."
         ),
     },
+    "GUARD_REJECTED.ALTER_ACTION_NOT_ALLOWED": {
+        "es": (
+            "La tool ALTER TABLE recibió una acción no permitida ({action}); solo se "
+            "permiten ADD COLUMN, SET/DROP DEFAULT y RENAME COLUMN."
+        ),
+        "en": (
+            "The ALTER TABLE tool received a disallowed action ({action}); only "
+            "ADD COLUMN, SET/DROP DEFAULT and RENAME COLUMN are allowed."
+        ),
+    },
     # Permissions
     "PERMISSION_DENIED.MODE_TOO_LOW": {
         "es": "La operación requiere modo '{required}' pero el perfil tiene '{actual}'.",

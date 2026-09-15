@@ -27,7 +27,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (31 tools registradas)
+## Catálogo v0.1 (36 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -928,6 +928,60 @@ Cambia la **base de datos de trabajo del perfil activo** reutilizando sus creden
 
 ---
 
+#### 36. `nz_alter_table`
+
+Aplica `ALTER TABLE` **aditivos** sobre una tabla existente (modo `admin`): `ADD COLUMN`, `SET DEFAULT`, `DROP DEFAULT` y `RENAME COLUMN`. Recibe la operación como **input estructurado** (no SQL crudo) y construye cada sentencia con identificadores y tipos validados. Pensado para el arranque de un pase de REN/batch (`ALTER TABLE ... ADD COLUMN`), que Netezza no permite dentro de un SP y que `nz_execute_ddl` no cubre (solo compila procedure/view). Ver `docs/adr/0034-tool-alter-table.md`.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | Debe coincidir con la BD del perfil activo. |
+| `schema` | string (required) | |
+| `table` | string (required) | Tabla existente a modificar. |
+| `add_columns` | array (optional) | `{name, type, nullable, default}`; mismo esquema que `nz_create_table`. Cada entrada se emite como `ADD COLUMN`. |
+| `set_defaults` | array (optional) | `{column, default}`; se emite `ALTER COLUMN <col> SET DEFAULT <valor>`. |
+| `drop_defaults` | array of string (optional) | Nombres de columna; se emite `ALTER COLUMN <col> DROP DEFAULT`. |
+| `rename_columns` | array (optional) | `{from, to}`; se emite `RENAME COLUMN <from> TO <to>`. |
+| `dry_run` | bool (default **true**) | Si `true`, devuelve `statements_to_execute` sin ejecutar y sin abrir conexión. |
+| `confirm` | bool (**required if** `dry_run=false`) | Debe ser `true` para ejecutar cuando `dry_run=false`. |
+
+Al menos una de las cuatro listas de operaciones debe venir no vacía; si no → `INVALID_INPUT`. El orden canónico de las sentencias es `ADD COLUMN` → `SET DEFAULT` → `DROP DEFAULT` → `RENAME COLUMN`.
+
+**Output** (dry-run `true`):
+```json
+{
+  "dry_run": true,
+  "statements_to_execute": [
+    "ALTER TABLE DBO.CLIENTES ADD COLUMN SEGMENTO CHARACTER VARYING(20)",
+    "ALTER TABLE DBO.CLIENTES ALTER COLUMN SALDO SET DEFAULT 0"
+  ],
+  "executed": false,
+  "statements_executed": 0,
+  "duration_ms": 0
+}
+```
+
+**Output** (ejecución real):
+```json
+{
+  "dry_run": false,
+  "statements_to_execute": null,
+  "executed": true,
+  "statements_executed": 2,
+  "duration_ms": 37
+}
+```
+
+**Reglas**:
+- **Input estructurado**: el caller declara la operación como datos; la tool construye el SQL con el validador de identificadores de catálogo y el validador de fragmentos de tipo. No se acepta SQL crudo.
+- **Solo acciones aditivas/seguras**: `ADD COLUMN`, `SET DEFAULT`, `DROP DEFAULT`, `RENAME COLUMN`. `DROP COLUMN` y `ALTER VIEW` se **rechazan**; cualquier otra acción no listada también (default-deny).
+- Todo el SQL pasa por `sql_guard.validate(mode="admin")`, que exige kind `ALTER`, target `TABLE` y una acción de la allowlist; una violación devuelve `GUARD_REJECTED` con código **`ALTER_ACTION_NOT_ALLOWED`**.
+- Guarda de entorno `assert_env_safe`: si la BD del perfil activo **no** empieza con `PROD_`, cualquier identificador `PROD_*` en el SQL → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD`.
+- **Multi-sentencia en una sola conexión**: las N sentencias se ejecutan secuencialmente en la misma conexión. Netezza auto-commitea DDL, así que si una falla, **las anteriores ya quedaron aplicadas**; la respuesta no expone aplicación parcial (no hay `statements_applied`). El caller debe verificar el catálogo si importa.
+- **Solo metadatos en ejecución**: `statements_to_execute` vuelve `null`; el DDL solo se devuelve como preview en `dry_run`.
+- No usar para `CREATE` (`nz_create_table`) ni para `DROP` (`nz_drop_table`).
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -947,6 +1001,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 | `nz_call_procedure` | false | **true** | false |
 | `nz_truncate`, `nz_drop_table`, `nz_drop_procedure` | false | **true** | true |
 | `nz_switch_profile`, `nz_switch_database` | false | false | true |
+| `nz_alter_table` | false | true | false |
 
 ### Formato de errores
 

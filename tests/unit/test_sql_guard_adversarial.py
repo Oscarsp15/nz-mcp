@@ -359,6 +359,116 @@ def test_catalog_override_rejection_names_the_entry_without_echoing_the_sql() ->
     assert "SECRET_TABLE" not in str(exc.value)
 
 
+# --- ALTER TABLE allowlist (issue #259) ---------------------------------------
+# ``ALTER TABLE`` is admin-only DDL, and even in admin mode only additive actions are
+# allowed. Everything else stays rejected (default-deny).
+
+
+@pytest.mark.adversarial
+def test_alter_table_add_column_allowed_in_admin() -> None:
+    parsed = validate("ALTER TABLE t ADD COLUMN c INT", mode="admin")
+    assert parsed.kind is StatementKind.ALTER
+
+
+@pytest.mark.adversarial
+@pytest.mark.parametrize("mode", ["read", "write"])
+def test_alter_table_add_column_rejected_below_admin(mode: str) -> None:
+    """Mode rejection wins: a non-admin caller gets STATEMENT_NOT_ALLOWED."""
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("ALTER TABLE t ADD COLUMN c INT", mode=mode)  # type: ignore[arg-type]
+    assert exc.value.code == "STATEMENT_NOT_ALLOWED"
+
+
+@pytest.mark.adversarial
+def test_alter_table_add_column_with_default_and_not_null_allowed_in_admin() -> None:
+    """Constraints on an ADD COLUMN (DEFAULT / NOT NULL) are additive and allowed."""
+    parsed = validate("ALTER TABLE t ADD COLUMN c INT DEFAULT 0 NOT NULL", mode="admin")
+    assert parsed.kind is StatementKind.ALTER
+
+
+@pytest.mark.adversarial
+def test_alter_table_rename_column_allowed_in_admin() -> None:
+    parsed = validate("ALTER TABLE t RENAME COLUMN a TO b", mode="admin")
+    assert parsed.kind is StatementKind.ALTER
+
+
+@pytest.mark.adversarial
+def test_alter_table_set_default_allowed_in_admin() -> None:
+    parsed = validate("ALTER TABLE t ALTER COLUMN c SET DEFAULT 0", mode="admin")
+    assert parsed.kind is StatementKind.ALTER
+
+
+@pytest.mark.adversarial
+def test_alter_table_drop_default_allowed_in_admin() -> None:
+    parsed = validate("ALTER TABLE t ALTER COLUMN c DROP DEFAULT", mode="admin")
+    assert parsed.kind is StatementKind.ALTER
+
+
+@pytest.mark.adversarial
+def test_alter_table_drop_column_blocked_in_admin() -> None:
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("ALTER TABLE t DROP COLUMN c", mode="admin")
+    assert exc.value.code == "ALTER_ACTION_NOT_ALLOWED"
+    assert exc.value.context["action"] == "Drop"
+
+
+@pytest.mark.adversarial
+def test_alter_table_rename_to_blocked_in_admin() -> None:
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("ALTER TABLE t RENAME TO t2", mode="admin")
+    assert exc.value.code == "ALTER_ACTION_NOT_ALLOWED"
+    assert exc.value.context["action"] == "AlterRename"
+
+
+@pytest.mark.adversarial
+def test_alter_table_add_constraint_blocked_in_admin() -> None:
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("ALTER TABLE t ADD CONSTRAINT ck CHECK (c > 0)", mode="admin")
+    assert exc.value.code == "ALTER_ACTION_NOT_ALLOWED"
+    assert exc.value.context["action"] == "AddConstraint"
+
+
+@pytest.mark.adversarial
+def test_alter_table_alter_column_type_blocked_in_admin() -> None:
+    """A column TYPE change is not additive: reject it."""
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("ALTER TABLE t ALTER COLUMN c TYPE VARCHAR(20)", mode="admin")
+    assert exc.value.code == "ALTER_ACTION_NOT_ALLOWED"
+    assert exc.value.context["action"] == "AlterColumn"
+
+
+@pytest.mark.adversarial
+def test_alter_table_set_not_null_blocked_in_admin() -> None:
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("ALTER TABLE t ALTER COLUMN c SET NOT NULL", mode="admin")
+    assert exc.value.code == "ALTER_ACTION_NOT_ALLOWED"
+
+
+@pytest.mark.adversarial
+def test_alter_table_drop_not_null_blocked_in_admin() -> None:
+    """``DROP NOT NULL`` shares ``drop=True`` with ``DROP DEFAULT``; it must not slip in."""
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("ALTER TABLE t ALTER COLUMN c DROP NOT NULL", mode="admin")
+    assert exc.value.code == "ALTER_ACTION_NOT_ALLOWED"
+
+
+@pytest.mark.adversarial
+def test_alter_view_blocked_in_admin() -> None:
+    """Only ``ALTER TABLE`` is accepted; ``ALTER VIEW`` is rejected by target kind."""
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("ALTER VIEW v RENAME TO v2", mode="admin")
+    assert exc.value.code == "ALTER_ACTION_NOT_ALLOWED"
+    assert exc.value.context["action"] == "ALTER_VIEW"
+
+
+@pytest.mark.adversarial
+def test_alter_table_mixed_unsupported_actions_blocked_as_unknown() -> None:
+    """sqlglot falls back to ``Command`` for mixed ADD/DROP: classified as UNKNOWN."""
+    with pytest.raises(GuardRejectedError) as exc:
+        validate("ALTER TABLE t ADD COLUMN c INT, DROP COLUMN d", mode="admin")
+    assert exc.value.code == "UNKNOWN_STATEMENT"
+
+
 @pytest.mark.adversarial
 def test_catalog_override_accepts_a_legitimate_read() -> None:
     """A real override keeps working: cross-db marker, placeholders, CTE and UNION."""
