@@ -276,6 +276,53 @@ def test_execute_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert out["dry_run"] is False
 
 
+def test_dry_run_with_echo_sql_false_still_returns_sql() -> None:
+    out = execute_ddl(
+        _profile(),
+        sql=_VIEW,
+        input_path=None,
+        statement_type="view",
+        dry_run=True,
+        confirm=False,
+        echo_sql=False,
+    )
+    assert out["dry_run"] is True
+    assert out["executed"] is False
+    assert out["sql_to_execute"].startswith("CREATE OR REPLACE VIEW")
+
+
+def test_execute_with_echo_sql_false_omits_sql(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("nz_mcp.catalog.execute_ddl.open_connection", lambda _p, _w: _FakeConn())
+    monkeypatch.setattr("nz_mcp.catalog.execute_ddl.get_password", lambda _n: "pw")
+    out = execute_ddl(
+        _profile(),
+        sql=_VIEW,
+        input_path=None,
+        statement_type="view",
+        dry_run=False,
+        confirm=True,
+        echo_sql=False,
+    )
+    assert out["executed"] is True
+    assert out["sql_to_execute"] is None
+
+
+def test_execute_with_echo_sql_true_returns_sql(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("nz_mcp.catalog.execute_ddl.open_connection", lambda _p, _w: _FakeConn())
+    monkeypatch.setattr("nz_mcp.catalog.execute_ddl.get_password", lambda _n: "pw")
+    out = execute_ddl(
+        _profile(),
+        sql=_VIEW,
+        input_path=None,
+        statement_type="view",
+        dry_run=False,
+        confirm=True,
+        echo_sql=True,
+    )
+    assert out["executed"] is True
+    assert out["sql_to_execute"].startswith("CREATE OR REPLACE VIEW")
+
+
 def test_execute_failure_wrapped_as_netezza_error(monkeypatch: pytest.MonkeyPatch) -> None:
     class _BoomCursor:
         def execute(self, *_a: object, **_k: object) -> None:
@@ -346,4 +393,42 @@ def test_tool_handler_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert out.dry_run is True
     assert out.executed is False
+    assert out.sql_to_execute is not None
     assert out.sql_to_execute.startswith("CREATE OR REPLACE VIEW")
+
+
+def test_tool_handler_dry_run_echo_sql_false_still_echoes(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nz_mcp.tools.execute_ddl import ExecuteDdlInput, nz_execute_ddl
+
+    monkeypatch.setattr("nz_mcp.tools.execute_ddl.get_active_profile", lambda **_k: _profile())
+    out = nz_execute_ddl(
+        ExecuteDdlInput(
+            sql=_VIEW,
+            statement_type="view",
+            dry_run=True,
+            confirm=False,
+            echo_sql=False,
+        ),
+    )
+    assert out.dry_run is True
+    assert out.sql_to_execute is not None
+    assert out.sql_to_execute.startswith("CREATE OR REPLACE VIEW")
+
+
+def test_tool_handler_real_execution_echo_sql_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nz_mcp.tools.execute_ddl import ExecuteDdlInput, nz_execute_ddl
+
+    monkeypatch.setattr("nz_mcp.tools.execute_ddl.get_active_profile", lambda **_k: _profile())
+    monkeypatch.setattr("nz_mcp.catalog.execute_ddl.open_connection", lambda _p, _w: _FakeConn())
+    monkeypatch.setattr("nz_mcp.catalog.execute_ddl.get_password", lambda _n: "pw")
+    out = nz_execute_ddl(
+        ExecuteDdlInput(
+            sql=_VIEW,
+            statement_type="view",
+            dry_run=False,
+            confirm=True,
+            echo_sql=False,
+        ),
+    )
+    assert out.executed is True
+    assert out.sql_to_execute is None
