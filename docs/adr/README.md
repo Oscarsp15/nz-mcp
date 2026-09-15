@@ -69,5 +69,6 @@ Ver [tech-lead.md](../roles/tech-lead.md#plantilla-adr-para-copiar-a-docsadrnnnn
 | 0031 | [El CLI dibuja por niveles de capacidad, y el ASCII pasa de techo a piso](0031-mejora-progresiva-por-capacidad-del-terminal.md) | aceptado (enmienda el 0027), enmendado por el 0033 | 2026-09-10 |
 | 0032 | [Rediseñar el nivel 2 del CLI interactivo como un producto único](0032-rediseno-del-nivel-2-del-cli-interactivo.md) | aceptado (amplía el 0028 y el 0030) | 2026-09-09 |
 | 0033 | [El CLI prepara la consola de Windows antes de medir su capacidad](0033-preparar-consola-windows-antes-de-medir.md) | aceptado (enmienda el 0031) | 2026-09-11 |
+| 0034 | [`nz_alter_table` para `ALTER TABLE` aditivos y `StatementKind.ALTER` en `sql_guard`](0034-tool-alter-table.md) | aceptado | 2026-09-14 |
 
 > **Colisión de numeración**: dos ADR comparten el número `0014`. Las referencias en prosa a "ADR 0014" del CHANGELOG y de la ADR 0015 apuntan a [`0014-tool-execute-ddl.md`](0014-tool-execute-ddl.md). No se renumeran para no romper esos enlaces.

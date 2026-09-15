@@ -6,6 +6,7 @@ Importing this package registers every tool side-effect-free.
 from __future__ import annotations
 
 from nz_mcp.tools import (
+    alter_table,  # noqa: F401  (registers nz_alter_table)
     call_procedure,  # noqa: F401  (registers nz_call_procedure)
     clone_procedure,  # noqa: F401  (registers nz_clone_procedure)
     databases,  # noqa: F401  (registers database tools)

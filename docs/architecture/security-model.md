@@ -83,6 +83,21 @@ tras funciones (`ABS(1)=1`), predicados dependientes de datos (`id > -2147483648
 Alcance exacto y límites en
 [`../adr/0020-sql-guard-tautological-where.md`](../adr/0020-sql-guard-tautological-where.md).
 
+#### ``ALTER TABLE`` aditivo
+
+``sqlglot`` clasifica ``ALTER TABLE`` como ``exp.Alter``. El guard lo admite **solo en
+``admin``** y solo si es una alteración aditiva y segura: el destino debe ser una tabla
+(``ALTER VIEW`` y cualquier otro ``kind`` se rechazan) y **cada** acción debe estar en la
+allowlist ``ADD COLUMN`` (``exp.ColumnDef``, incluidos ``DEFAULT`` / ``NOT NULL``),
+``SET DEFAULT`` / ``DROP DEFAULT`` (``exp.AlterColumn``) y ``RENAME COLUMN``
+(``exp.RenameColumn``). Todo lo demás se rechaza con ``ALTER_ACTION_NOT_ALLOWED`` y contexto
+``action``: ``DROP COLUMN`` (``exp.Drop``), ``RENAME TO`` de tabla o vista
+(``exp.AlterRename``), ``ADD CONSTRAINT`` (``exp.AddConstraint``) y los cambios de tipo o de
+``NOT NULL`` sobre una columna (que ``sqlglot`` también modela como ``exp.AlterColumn``, por
+lo que se distinguen por sus argumentos y se rechazan por defecto). Las formas mixtas no
+soportadas caen a ``Command`` y quedan como ``UNKNOWN_STATEMENT``. Es **default-deny**: si
+una acción no se identifica positivamente como aditiva, se rechaza. Ver issue #259.
+
 #### ``CALL`` (ejecución de procedimientos)
 
 ``sqlglot`` no parsea ``CALL`` (cae a un ``Command`` genérico y emite warning a stderr). El guard lo intercepta con un patrón dedicado que **solo acepta placeholders ``?`` como argumentos**: ``CALL esquema.proc(?, …)``. Un argumento literal (``CALL P(1)``) **no** matchea y se rechaza como ``UNKNOWN_STATEMENT``, forzando la parametrización vía bind params del driver. Es una operación **EXECUTE** (el SP ejecuta código arbitrario) y se gatea a ``admin``, mismo tier que la DDL. Ver [`../adr/0015-sql-guard-call-statement.md`](../adr/0015-sql-guard-call-statement.md).
@@ -102,6 +117,8 @@ Alcance exacto y límites en
 | `CREATE TABLE` | ❌ | ❌ | ✅ |
 | `TRUNCATE` | ❌ | ❌ | ✅ |
 | `DROP TABLE` | ❌ | ❌ | ✅ |
+| `ALTER TABLE` aditivo (ADD COLUMN / SET DEFAULT / DROP DEFAULT / RENAME COLUMN) | ❌ | ❌ | ✅ |
+| `ALTER TABLE` no aditivo (DROP COLUMN, RENAME TO, cambio de tipo, ADD CONSTRAINT, …) y `ALTER VIEW` | ❌ | ❌ | ❌ |
 | `CALL schema.proc(?, …)` (EXECUTE; solo placeholders) | ❌ | ❌ | ✅ |
 | `DROP DATABASE`, `DROP USER`, `GRANT`, `REVOKE` | ❌ | ❌ | ❌ |
 | Stacked (`; ...;`) | ❌ | ❌ | ❌ |
