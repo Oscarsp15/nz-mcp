@@ -77,7 +77,7 @@ Netezza **auto-commitea DDL**: cada sentencia queda aplicada al terminar. Si una
 
 ## Aprobación humana
 
-Pendiente (@Oscarsp15). El cambio toca `sql_guard` (archivo de alta sensibilidad), así que requiere validación humana explícita antes del merge.
+Aprobado por @Oscarsp15 el 2026-09-15, tras la auditoría independiente pre-merge (`docs/standards/pr-audit.md`), que no encontró bloqueantes técnicos y dejó la firma humana como única condición. El cambio toca `sql_guard` (archivo de alta sensibilidad) y **amplía** el conjunto de sentencias admitidas en modo `admin` (antes `ALTER` era `UNKNOWN` y se rechazaba siempre); la firma cubre esa ampliación, que no relaja ninguna regla previa.
 
 ## Referencias
 
