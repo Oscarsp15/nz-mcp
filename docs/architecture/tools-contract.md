@@ -27,7 +27,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (39 tools registradas)
+## Catálogo v0.1 (40 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -1122,6 +1122,37 @@ Devuelve el estado actual de un job lanzado por `nz_call_procedure_async`. Modo 
 - `partial_notices` puede llegar vacío mientras el SP corre: nzpy entrega los `NOTICE` junto con el resultset al terminar, no de forma incremental. `messages` solo está completo cuando `status == "done"`.
 - `error` tiene forma `{code, detail, partial_notices}` cuando `status == "failed"`.
 - **El job store es en memoria**: si el servidor MCP reinicia, todos los jobs desaparecen. Guarda el `job_id` en otra parte si el SP es crítico.
+
+---
+
+#### 40. `nz_find_column`
+
+Busca columnas por patrón de nombre entre **tablas y vistas** de una base de datos (excluye vistas de sistema/gestión, tablas externas y secuencias). Modo `read`. Responde "¿dónde vive este dato?" sin tener que adivinar los nombres de columna de `_V_RELATION_COLUMN` (`NAME`/`ATTNAME`, no `TABLENAME`/`COLUMNNAME`).
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | BD a inspeccionar (identificador validado para interpolación `<BD>..`). |
+| `column_pattern` | string (required) | Filtro `LIKE` sobre el nombre de columna. Match case-insensitive. |
+| `schema_pattern` | string (optional) | Filtro `LIKE` sobre el esquema. Match case-insensitive. |
+| `table_pattern` | string (optional) | Filtro `LIKE` sobre la tabla/vista. Match case-insensitive. |
+| `max_rows` | int (default: perfil, cap `MAX_ROWS_CAP`) | Tope de coincidencias devueltas. |
+
+**Output**:
+```json
+{
+  "columns": [
+    {"schema": "DBO", "table": "EFE_MC_CREDITOS", "column": "NUMDOCUMENTO", "type": "CHARACTER VARYING(12)"}
+  ],
+  "truncated": false,
+  "hint": null,
+  "duration_ms": 58
+}
+```
+
+**Reglas**:
+- Sin coincidencias → `columns: []`, no es un error (mismo criterio que `nz_list_tables` / `nz_list_procedures`).
+- `truncated` + `hint` cuando hay más coincidencias que `max_rows` (mismo patrón que `nz_list_procedures`, ADR 0018).
+- Fuera de alcance: búsqueda por tipo de dato o por valor de columna.
 
 ---
 

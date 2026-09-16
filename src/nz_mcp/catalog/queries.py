@@ -205,6 +205,23 @@ GET_ALL_PROCEDURES_DDL: Final[CatalogQuery] = CatalogQuery(
     cross_database=True,
 )
 
+FIND_COLUMN: Final[CatalogQuery] = CatalogQuery(
+    id="find_column",
+    sql=(
+        "SELECT SCHEMA, NAME, ATTNAME, FORMAT_TYPE FROM <BD>.._V_RELATION_COLUMN "
+        "WHERE TYPE IN ('TABLE', 'VIEW') AND ATTNAME LIKE UPPER(?) "
+        "AND (? IS NULL OR SCHEMA LIKE UPPER(?)) AND (? IS NULL OR NAME LIKE UPPER(?)) "
+        "ORDER BY SCHEMA, NAME, ATTNAME"
+    ),
+    catalog_views=("_V_RELATION_COLUMN",),
+    description=(
+        "Finds columns by name pattern across base tables and views in a database, "
+        "with optional schema/table name filters."
+    ),
+    tested_versions=(NPS_112_IF1,),
+    cross_database=True,
+)
+
 ALL_QUERIES: Final[tuple[CatalogQuery, ...]] = (
     LIST_DATABASES,
     LIST_SCHEMAS,
@@ -220,6 +237,7 @@ ALL_QUERIES: Final[tuple[CatalogQuery, ...]] = (
     GET_PROCEDURE_DDL,
     GET_PROCEDURE_SECTION,
     GET_ALL_PROCEDURES_DDL,
+    FIND_COLUMN,
 )
 
 CATALOG_QUERY_MAP: Final[dict[str, CatalogQuery]] = {query.id: query for query in ALL_QUERIES}

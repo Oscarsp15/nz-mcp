@@ -45,7 +45,7 @@ Referencia obligatoria de SQL validado por versión:
 | `_v_schema` | `nz_list_schemas` |
 | `_v_table` | `nz_list_tables` (filtrar `OBJTYPE='TABLE'`) |
 | `_v_view` | views si `include_views=true` |
-| `_v_relation_column` | `nz_describe_table` (columnas, tipos, nullability) |
+| `_v_relation_column` | `nz_describe_table` (columnas, tipos, nullability); `nz_find_column` (búsqueda por patrón entre tablas/vistas) |
 | `_v_table_dist_map` | distribución (HASH/RANDOM, columnas) |
 | `_v_table_storage_stat` | tamaño físico, compresión |
 | `_v_statistic` | row count estimate, last update |

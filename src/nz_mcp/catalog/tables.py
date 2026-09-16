@@ -78,6 +78,22 @@ class _ConnectionLike(Protocol):
     def close(self) -> None: ...
 
 
+class _FindColumnCursorLike(Protocol):
+    def execute(
+        self,
+        sql: str,
+        params: tuple[str, str | None, str | None, str | None, str | None],
+    ) -> None: ...
+
+    def fetchall(self) -> list[Any]: ...
+    def close(self) -> None: ...
+
+
+class _FindColumnConnectionLike(Protocol):
+    def cursor(self) -> _FindColumnCursorLike: ...
+    def close(self) -> None: ...
+
+
 def table_exists(
     profile: Profile,
     database: str,
@@ -589,3 +605,76 @@ def get_table_ddl(
         "reconstructed": True,
         "notes": [],
     }
+
+
+_COLUMN_MATCH_MIN_ITEMS: Final[int] = 4
+
+
+def find_columns(
+    profile: Profile,
+    database: str,
+    column_pattern: str,
+    schema_pattern: str | None = None,
+    table_pattern: str | None = None,
+) -> list[dict[str, str]]:
+    """Return columns matching ``column_pattern`` across tables and views in ``database``.
+
+    Queries ``_v_relation_column`` restricted to ``TYPE IN ('TABLE', 'VIEW')``, excluding
+    system/management views and external tables/sequences that also expose columns there.
+    """
+    schema_like = schema_pattern if schema_pattern else None
+    table_like = table_pattern if table_pattern else None
+    params: tuple[str, str | None, str | None, str | None, str | None] = (
+        column_pattern,
+        schema_like,
+        schema_like,
+        table_like,
+        table_like,
+    )
+    password = get_password(profile.name)
+    base_sql = resolve_query("find_column", profile)
+    sql = render_cross_db(base_sql, database=database)
+
+    connection = cast(_FindColumnConnectionLike, open_connection(profile, password))
+    try:
+        with closing(connection.cursor()) as cursor:
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+    except Exception as exc:  # noqa: BLE001, RUF100
+        # Catalog/driver failures are not guaranteed to use a stable exception type.
+        raise NetezzaError(
+            operation="find_column",
+            database=database,
+            detail=sanitize(str(exc), known_secrets={password}),
+        ) from exc
+    finally:
+        connection.close()
+
+    return [_row_to_column_match(row) for row in rows]
+
+
+def _row_to_column_match(row: Any) -> dict[str, str]:
+    if isinstance(row, dict):
+        keys = {str(k).upper(): v for k, v in row.items()}
+        required = ("SCHEMA", "NAME", "ATTNAME", "FORMAT_TYPE")
+        if not all(k in keys for k in required):
+            raise NetezzaError(
+                operation="find_column",
+                detail="Catalog query must return SCHEMA, NAME, ATTNAME, FORMAT_TYPE columns.",
+            )
+        return {
+            "schema": str(keys["SCHEMA"]),
+            "table": str(keys["NAME"]),
+            "column": str(keys["ATTNAME"]),
+            "type": str(keys["FORMAT_TYPE"]),
+        }
+    if is_sequence_row(row, _COLUMN_MATCH_MIN_ITEMS):
+        return {
+            "schema": str(row[0]),
+            "table": str(row[1]),
+            "column": str(row[2]),
+            "type": str(row[3]),
+        }
+    raise NetezzaError(
+        operation="find_column", detail="Unexpected row shape from _v_relation_column"
+    )
