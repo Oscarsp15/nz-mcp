@@ -292,6 +292,10 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Job no encontrado: {detail}",
         "en": "Job not found: {detail}",
     },
+    "CANCEL_UNAVAILABLE": {
+        "es": "Cancelación no disponible: {detail}",
+        "en": "Cancel unavailable: {detail}",
+    },
     "RESPONSE_TOO_LARGE": {
         "es": (
             "La respuesta excede el límite ({size_kb} KB > {cap_kb} KB). "

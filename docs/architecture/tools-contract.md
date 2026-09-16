@@ -27,7 +27,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (39 tools registradas)
+## Catálogo v0.1 (40 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -1111,6 +1111,60 @@ Devuelve el estado actual de un job lanzado por `nz_call_procedure_async`. Modo 
 
 ---
 
+#### 40. `nz_job_cancel`
+
+Cancela un job en ejecución lanzado por `nz_call_procedure_async`. Modo `admin`, `confirm=true` obligatorio. Envía `ABORT SESSION <id>` vía una segunda conexión admin para interrumpir la sesión Netezza del hilo de fondo.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `job_id` | string (required) | UUID devuelto por `nz_call_procedure_async`. |
+| `confirm` | boolean (required) | Debe ser `true`; protección explícita contra llamadas accidentales. |
+
+**Output** (cancelación solicitada):
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "cancelling",
+  "session_id": 12345,
+  "abort_error": null,
+  "message_es": "ABORT SESSION enviado a la sesión 12345. El job pasará a 'cancelled' cuando el hilo confirme la interrupción.",
+  "message_en": "ABORT SESSION sent to session 12345. The job will transition to 'cancelled' once the thread confirms the interruption."
+}
+```
+
+**Output** (ABORT SESSION no disponible en el perfil):
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "cancelling",
+  "session_id": 12345,
+  "abort_error": "...",
+  "message_es": "ABORT SESSION 12345 falló: ... El job sigue en estado 'cancelling'. Pide a un DBA que ejecute: ABORT SESSION 12345",
+  "message_en": "ABORT SESSION 12345 failed: ... Job remains 'cancelling'. Ask a DBA to run: ABORT SESSION 12345"
+}
+```
+
+**Output** (job ya terminado):
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "already_done",
+  "previous_status": "done",
+  "session_id": 12345,
+  "abort_error": null,
+  "message_es": "El job ya terminó con estado 'done'; no hay nada que cancelar.",
+  "message_en": "Job already finished with status 'done'; nothing to cancel."
+}
+```
+
+**Reglas**:
+- Job no encontrado → `JOB_NOT_FOUND`.
+- Si `session_id` es `null` (hilo aún no abrió conexión) → `CANCEL_UNAVAILABLE`; esperar unos segundos y reintentar, o sondear hasta estado terminal.
+- `ABORT SESSION` puede no estar disponible en todos los perfiles SaaS; en ese caso `abort_error` lleva el error y el job permanece en `cancelling` hasta que el hilo concluya cooperativamente.
+- El hilo de fondo detecta el estado `cancelling` cuando su cursor raise una excepción y transiciona a `cancelled`.
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -1133,6 +1187,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 | `nz_alter_table` | false | true | false |
 | `nz_call_procedure_async` | false | **true** | false |
 | `nz_job_poll` | true | false | true |
+| `nz_job_cancel` | false | **true** | false |
 
 ### Formato de errores
 

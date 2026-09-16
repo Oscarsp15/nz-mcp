@@ -24,6 +24,7 @@ from nz_mcp.jobs import (
     create_job,
     get_job,
     mark_cancelled,
+    mark_cancelling,
     mark_done,
     mark_failed,
     set_session_id,
@@ -173,6 +174,105 @@ def launch_call_procedure(
         "hint_en": (
             f"Poll with nz_job_poll(job_id='{job_id}') every 30 s. "
             "Cancel with nz_job_cancel(job_id=...) if needed."
+        ),
+    }
+
+
+def cancel_job(job_id: str, *, profile: Profile, password: str) -> dict[str, Any]:
+    """Send ABORT SESSION for a running async job via a second admin connection."""
+    state = get_job(job_id)
+    if state is None:
+        raise InvalidInputError(
+            code="JOB_NOT_FOUND",
+            detail=f"No job with id={job_id!r} (may have expired or never existed).",
+        )
+
+    if state.status in ("done", "failed", "cancelled", "cancelling"):
+        return {
+            "job_id": job_id,
+            "status": "already_done",
+            "previous_status": state.status,
+            "session_id": state.session_id,
+            "abort_error": None,
+            "message_es": (
+                f"El job ya terminó con estado '{state.status}'; no hay nada que cancelar."
+            ),
+            "message_en": (
+                f"Job already finished with status '{state.status}'; nothing to cancel."
+            ),
+        }
+
+    if state.session_id is None:
+        raise InvalidInputError(
+            code="CANCEL_UNAVAILABLE",
+            detail=(
+                f"Job {job_id!r} has no captured session_id. "
+                "The background thread may not have opened a connection yet; "
+                "wait a moment and retry, or poll until it reaches a terminal state."
+            ),
+        )
+
+    session_id = state.session_id
+
+    # Transition to cancelling so _run_job treats the next exception as a cancel.
+    transitioned = mark_cancelling(job_id)
+    if not transitioned:
+        # Job reached a terminal state between our check and now.
+        current_state = get_job(job_id)
+        current_status = current_state.status if current_state else "unknown"
+        return {
+            "job_id": job_id,
+            "status": "already_done",
+            "previous_status": current_status,
+            "session_id": session_id,
+            "abort_error": None,
+            "message_es": (f"El job terminó justo antes de cancelar (estado: '{current_status}')."),
+            "message_en": (f"Job finished just before cancel (status: '{current_status}')."),
+        }
+
+    abort_error: str | None = None
+    connection: Any = None
+    try:
+        connection = cast(Any, open_connection(profile, password, timeout=30))
+        with closing(connection.cursor()) as cursor:
+            cursor.execute(f"ABORT SESSION {session_id}")
+    except Exception as exc:
+        abort_error = sanitize(str(exc), known_secrets={password})
+    finally:
+        if connection is not None:
+            with suppress(Exception):
+                connection.close()
+
+    if abort_error is not None:
+        return {
+            "job_id": job_id,
+            "status": "cancelling",
+            "session_id": session_id,
+            "abort_error": abort_error,
+            "message_es": (
+                f"ABORT SESSION {session_id} falló: {abort_error}. "
+                "El job sigue en estado 'cancelling'. "
+                f"Pide a un DBA que ejecute: ABORT SESSION {session_id}"
+            ),
+            "message_en": (
+                f"ABORT SESSION {session_id} failed: {abort_error}. "
+                "Job remains 'cancelling'. "
+                f"Ask a DBA to run: ABORT SESSION {session_id}"
+            ),
+        }
+
+    return {
+        "job_id": job_id,
+        "status": "cancelling",
+        "session_id": session_id,
+        "abort_error": None,
+        "message_es": (
+            f"ABORT SESSION enviado a la sesión {session_id}. "
+            "El job pasará a 'cancelled' cuando el hilo confirme la interrupción."
+        ),
+        "message_en": (
+            f"ABORT SESSION sent to session {session_id}. "
+            "The job will transition to 'cancelled' once the thread confirms the interruption."
         ),
     }
 

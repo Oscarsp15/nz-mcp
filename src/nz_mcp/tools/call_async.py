@@ -7,8 +7,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from nz_mcp.catalog.call_async import launch_call_procedure, poll_job
+from nz_mcp.auth import get_password
+from nz_mcp.catalog.call_async import cancel_job, launch_call_procedure, poll_job
 from nz_mcp.config import get_active_profile
+from nz_mcp.errors import InvalidInputError
 from nz_mcp.tools.registry import tool
 
 ScalarArg = str | int | float | bool | None
@@ -122,3 +124,61 @@ def nz_job_poll(
 ) -> JobPollOutput:
     raw = poll_job(params.job_id)
     return JobPollOutput(**raw)
+
+
+# ---------------------------------------------------------------------------
+# nz_job_cancel — abort a running job via ABORT SESSION
+# ---------------------------------------------------------------------------
+
+
+class JobCancelInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    job_id: str = Field(min_length=1)
+    confirm: bool = False
+
+
+class JobCancelOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    job_id: str
+    status: str
+    previous_status: str | None = None
+    session_id: int | None = None
+    abort_error: str | None = None
+    message_es: str
+    message_en: str
+
+
+@tool(
+    name="nz_job_cancel",
+    description=(
+        "Cancel a running async job by sending ABORT SESSION to Netezza via a second admin "
+        "connection. Requires confirm=true. "
+        "Returns status='cancelling' (ABORT sent) or 'already_done' (job already finished). "
+        "If ABORT fails (permissions), abort_error describes the problem and the session_id is "
+        "returned so a DBA can run ABORT SESSION <session_id> manually. "
+        "Only works for jobs launched by nz_call_procedure_async."
+    ),
+    mode="admin",
+    input_model=JobCancelInput,
+    output_model=JobCancelOutput,
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    },
+)
+def nz_job_cancel(
+    params: JobCancelInput,
+    *,
+    config_path: Path | None = None,
+) -> JobCancelOutput:
+    if not params.confirm:
+        raise InvalidInputError(
+            code="CONFIRM_REQUIRED",
+            detail="confirm=true is required for nz_job_cancel.",
+        )
+    profile = get_active_profile(path=config_path)
+    password = get_password(profile.name)
+    raw = cancel_job(params.job_id, profile=profile, password=password)
+    return JobCancelOutput(**raw)
