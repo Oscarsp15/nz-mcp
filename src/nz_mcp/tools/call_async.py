@@ -43,7 +43,9 @@ class CallProcedureAsyncOutput(BaseModel):
     description=(
         "Launch a stored procedure via CALL in a background thread and return a job_id "
         "immediately without blocking. Use when the SP runs longer than a few seconds. "
-        "Poll status with nz_job_poll(job_id) every 30 s; cancel with nz_job_cancel(job_id). "
+        "Poll status with nz_job_poll(job_id) every 30 s. "
+        "Cancellation is not available via MCP — a DBA can abort the session manually "
+        "with nzsession using the session_id exposed by nz_job_poll. "
         "Requires admin mode and confirm=true. "
         "Do not use for short SPs — use nz_call_procedure instead."
     ),
@@ -101,11 +103,14 @@ class JobPollOutput(BaseModel):
 @tool(
     name="nz_job_poll",
     description=(
-        "Poll the status of an async job started by nz_call_procedure_async. "
-        "Returns status (running/done/failed/cancelling/cancelled), partial_notices "
-        "while running, and the full result (return_value, messages, duration_ms) on done. "
+        "Polls an async job started by nz_call_procedure_async. "
+        "Returns status (running/done/failed/cancelling/cancelled) and the full result "
+        "(return_value, messages, duration_ms) when done. "
+        "partial_notices may be empty while running: nzpy delivers NOTICE messages "
+        "with the resultset at completion, not incrementally. "
+        "The job store is in-memory and lost on server restart. "
         "Do not poll more often than every 10 s. "
-        "Do not use for jobs started by nz_call_procedure (synchronous)."
+        "Not for jobs started by nz_call_procedure (synchronous)."
     ),
     mode="read",
     input_model=JobPollInput,

@@ -1093,7 +1093,7 @@ Devuelve el estado actual de un job lanzado por `nz_call_procedure_async`. Modo 
   "status": "running",
   "session_id": 12345,
   "elapsed_ms": 45200,
-  "partial_notices": ["NOTICE: paso 1 ok"],
+  "partial_notices": [],
   "return_value": null,
   "messages": [],
   "duration_ms": null,
@@ -1119,8 +1119,9 @@ Devuelve el estado actual de un job lanzado por `nz_call_procedure_async`. Modo 
 **Reglas**:
 - Job no encontrado (expirado o ID incorrecto) → `JOB_NOT_FOUND`.
 - No sondear más frecuentemente que cada **10 s**; para SPs de larga duración, cada **30 s** es suficiente.
-- `partial_notices` se actualiza cada vez que el hilo emite un `NOTICE` (captura periódica); `messages` solo está completo cuando `status == "done"`.
+- `partial_notices` puede llegar vacío mientras el SP corre: nzpy entrega los `NOTICE` junto con el resultset al terminar, no de forma incremental. `messages` solo está completo cuando `status == "done"`.
 - `error` tiene forma `{code, detail, partial_notices}` cuando `status == "failed"`.
+- **El job store es en memoria**: si el servidor MCP reinicia, todos los jobs desaparecen. Guarda el `job_id` en otra parte si el SP es crítico.
 
 ---
 

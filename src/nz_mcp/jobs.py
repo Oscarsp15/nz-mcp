@@ -99,7 +99,10 @@ def mark_failed(job_id: str, *, code: str, detail: str, partial_notices: list[st
 
 
 def mark_cancelling(job_id: str) -> bool:
-    """Transition a running job to 'cancelling'. Returns True if the transition happened."""
+    """Transition a running job to 'cancelling'. Returns True if the transition happened.
+
+    Reserved for #291 (nz_job_cancel). Not called from production code yet.
+    """
     with _lock:
         s = _store.get(job_id)
         if s is None or s.status != "running":
