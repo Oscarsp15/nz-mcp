@@ -22,6 +22,12 @@ FETCH_BATCH: Final[int] = 200
 RESPONSE_BYTES_CAP: Final[int] = 100 * 1024
 
 # Common PostgreSQL / Netezza type OIDs (driver may return OID ints in cursor.description).
+#
+# Entries below 1700 that also exist as a Netezza SQL type were cross-checked against
+# ``_V_DATATYPE.OBJID`` on a live NPS 11.2.1.11-IF1 instance (issue #268); the rest
+# (19, 25, 26) are PostgreSQL-heritage internal wire types Netezza still uses for system
+# catalog columns (``name``, ``text``, ``oid``) and are not listed in ``_V_DATATYPE``,
+# which only carries user-facing SQL types.
 _TYPE_OID_TO_NAME: Final[dict[int, str]] = {
     16: "bool",
     19: "name",
@@ -29,13 +35,26 @@ _TYPE_OID_TO_NAME: Final[dict[int, str]] = {
     21: "smallint",
     23: "integer",
     25: "text",
+    26: "oid",
     700: "real",
     701: "double precision",
     1042: "char",
     1043: "varchar",
     1082: "date",
+    1083: "time",
     1114: "timestamp",
+    1184: "timestamp",
+    1186: "interval",
+    1266: "timetz",
     1700: "numeric",
+    2500: "byteint",
+    2522: "nchar",
+    2530: "nvarchar",
+    2552: "st_geometry",
+    2568: "varbinary",
+    2652: "json",
+    2653: "jsonb",
+    2654: "jsonpath",
 }
 
 
