@@ -626,6 +626,9 @@ Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 
 Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 
+**Reglas**:
+- Guarda de entorno `assert_env_safe`: si la BD del perfil activo **no** empieza con `PROD_`, cualquier identificador `PROD_*` en el DDL (incluido en `dry_run`) → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD` (issue #278).
+
 ---
 
 #### 24. `nz_truncate`
@@ -638,6 +641,9 @@ Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 | `confirm` | bool (**required**, no default) | Debe venir `true` explícitamente. |
 
 **Output**: `{ "truncated": true, "duration_ms": T }`
+
+**Reglas**:
+- Guarda de entorno `assert_env_safe`: si la BD del perfil activo **no** empieza con `PROD_`, cualquier identificador `PROD_*` en el statement → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD` (issue #278).
 
 ---
 
@@ -652,6 +658,9 @@ Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 | `if_exists` | bool (default true) | Emite sintaxis Netezza ``DROP TABLE schema.table IF EXISTS`` (sufijo). |
 
 **Output**: `{ "dropped": true }`
+
+**Reglas**:
+- Guarda de entorno `assert_env_safe`: si la BD del perfil activo **no** empieza con `PROD_`, cualquier identificador `PROD_*` en el statement → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD` (issue #278).
 
 ---
 
@@ -821,6 +830,9 @@ El header sólo contiene metadata segura (BD, schema, objeto, timestamp UTC, nom
 
 **Output (ejecución)**: `dry_run: false`, `ddl_to_execute`, `executed: true`, `duration_ms`.
 
+**Reglas**:
+- Guarda de entorno `assert_env_safe`: si la BD del perfil activo **no** empieza con `PROD_`, cualquier identificador `PROD_*` en el DDL final (incluye el `select_sql` embebido) → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD`, incluso en `dry_run` (issue #278). A diferencia de `nz_execute_ddl`, esta tool **no** tiene un `allow_prod_reads`: un `SELECT ... FROM PROD_x` legítimo (leer de producción para poblar una tabla de desarrollo) también se rechaza.
+
 ---
 
 #### 32. `nz_execute_ddl`
@@ -921,6 +933,7 @@ Elimina un overload de procedimiento vía `DROP PROCEDURE schema.proc(tipos)` (m
 
 **Reglas**:
 - `sql_guard.validate(mode="admin")` clasifica el statement como `DROP`.
+- Guarda de entorno `assert_env_safe`: eliminar un overload `PROD_*` desde un perfil no productivo → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD`, incluso con `if_exists=true` (dispara antes del chequeo de catálogo) (issue #278).
 - No usar para tablas (`nz_drop_table`) ni para crear/ejecutar procedimientos (`nz_execute_ddl` / `nz_call_procedure`).
 
 ---
@@ -1012,6 +1025,7 @@ Elimina una vista vía `DROP VIEW schema.view` (modo `admin`, `confirm` obligato
 
 **Reglas**:
 - `sql_guard.validate(mode="admin")` clasifica el statement como `DROP`.
+- Guarda de entorno `assert_env_safe`: eliminar una vista `PROD_*` desde un perfil no productivo → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD`, incluso con `if_exists=true` (dispara antes del chequeo de catálogo) (issue #278).
 - No usar para tablas (`nz_drop_table`) ni para procedimientos (`nz_drop_procedure`).
 
 ---

@@ -268,6 +268,25 @@ def test_ctas_target_already_exists_rejected(monkeypatch: pytest.MonkeyPatch) ->
     assert "already exists" in str(exc.value).lower()
 
 
+def test_ctas_rejects_prod_ref_in_nonprod(monkeypatch: pytest.MonkeyPatch) -> None:
+    """assert_env_safe coverage (issue #278) — a non-prod profile can't CTAS into/from PROD_*."""
+    p = _admin_profile()
+    monkeypatch.setattr("nz_mcp.catalog.ddl.table_exists", lambda *_a, **_k: False)
+    with pytest.raises(GuardRejectedError) as excinfo:
+        execute_create_table_as(
+            p,
+            database="DEV",
+            schema="PUBLIC",
+            table="X",
+            select_sql="SELECT 1 FROM PROD_ANALITICA.DBO.T",
+            distribution=None,
+            organized_on=None,
+            dry_run=True,
+            confirm=False,
+        )
+    assert excinfo.value.code == "PROD_REF_IN_NONPROD"
+
+
 def test_ctas_confirm_required(monkeypatch: pytest.MonkeyPatch) -> None:
     p = _admin_profile()
     monkeypatch.setattr("nz_mcp.catalog.ddl.table_exists", lambda *_a, **_k: False)
