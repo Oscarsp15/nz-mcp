@@ -8,7 +8,7 @@ import pytest
 
 from nz_mcp.catalog.ddl import _validate_signature_types, execute_drop_procedure
 from nz_mcp.config import Profile
-from nz_mcp.errors import InvalidInputError, NetezzaError
+from nz_mcp.errors import GuardRejectedError, InvalidInputError, NetezzaError
 
 
 def _profile(*, database: str = "DESA_MODELOS", mode: Literal["admin"] = "admin") -> Profile:
@@ -68,6 +68,13 @@ def test_if_exists_noop_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert out["dropped"] is False
     assert out["duration_ms"] == 0
+
+
+def test_execute_drop_procedure_rejects_prod_ref_in_nonprod() -> None:
+    """assert_env_safe coverage (issue #278) — a non-prod profile can't drop a PROD_* SP."""
+    with pytest.raises(GuardRejectedError) as excinfo:
+        execute_drop_procedure(_profile(), "DESA_MODELOS", "PROD_DBO", "P", "INT4", if_exists=True)
+    assert excinfo.value.code == "PROD_REF_IN_NONPROD"
 
 
 def test_execute_success(monkeypatch: pytest.MonkeyPatch) -> None:

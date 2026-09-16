@@ -6,8 +6,10 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from nz_mcp.catalog.ddl import execute_drop_view
 from nz_mcp.catalog.views import get_view_ddl, list_views
 from nz_mcp.config import get_active_profile
+from nz_mcp.errors import InvalidInputError
 from nz_mcp.tools.registry import tool
 from nz_mcp.tools.timing import monotonic_duration_ms, monotonic_start
 
@@ -50,6 +52,21 @@ class GetViewDdlOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ddl: str
     duration_ms: int = Field(ge=0, description="Wall time to fetch DDL (milliseconds).")
+
+
+class DropViewInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    database: str = Field(min_length=1, max_length=128)
+    view_schema: str = Field(alias="schema", min_length=1, max_length=128)
+    view: str = Field(min_length=1, max_length=128)
+    confirm: bool
+    if_exists: bool = True
+
+
+class DropViewOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    dropped: bool
+    duration_ms: int = Field(ge=0, description="Wall time to run the DROP (milliseconds).")
 
 
 @tool(
@@ -109,3 +126,47 @@ def nz_get_view_ddl(
         view=params.view,
     )
     return GetViewDdlOutput(ddl=ddl, duration_ms=monotonic_duration_ms(start))
+
+
+@tool(
+    name="nz_drop_view",
+    description=(
+        "Drop a view via DROP VIEW schema.view. Requires profile mode admin and "
+        "confirm=true. Database must match the active profile. With if_exists=true "
+        "(default) a missing view is a no-op instead of an error, checked against the "
+        "catalog because NPS does not parse an IF EXISTS clause on DROP VIEW in any form. "
+        "Destructive — use only when intended. Do not use for tables (nz_drop_table) or "
+        "procedures (nz_drop_procedure)."
+    ),
+    mode="admin",
+    input_model=DropViewInput,
+    output_model=DropViewOutput,
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+def nz_drop_view(
+    params: DropViewInput,
+    *,
+    config_path: Path | None = None,
+) -> DropViewOutput:
+    if params.confirm is not True:
+        raise InvalidInputError(
+            code="CONFIRM_REQUIRED",
+            detail="confirm=true is required for nz_drop_view.",
+        )
+    profile = get_active_profile(path=config_path)
+    raw = execute_drop_view(
+        profile,
+        database=params.database,
+        schema=params.view_schema,
+        view=params.view,
+        if_exists=params.if_exists,
+    )
+    return DropViewOutput(
+        dropped=bool(raw["dropped"]),
+        duration_ms=int(raw["duration_ms"]),
+    )

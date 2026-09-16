@@ -6,9 +6,14 @@ from typing import Any
 
 import pytest
 
-from nz_mcp.catalog.ddl import execute_create_table, execute_drop_table, execute_truncate
+from nz_mcp.catalog.ddl import (
+    execute_create_table,
+    execute_drop_table,
+    execute_drop_view,
+    execute_truncate,
+)
 from nz_mcp.config import Profile
-from nz_mcp.errors import InvalidInputError, NetezzaError
+from nz_mcp.errors import GuardRejectedError, InvalidInputError, NetezzaError
 from nz_mcp.sql_guard import StatementKind
 from nz_mcp.sql_guard import validate as guard_validate
 
@@ -167,6 +172,102 @@ def test_execute_drop_table_if_not_exists_false(monkeypatch: pytest.MonkeyPatch)
     prof = _admin_profile()
     execute_drop_table(prof, "DEV", "PUBLIC", "T", if_exists=False)
     assert fake.cursor_obj.executed[0][0] == "DROP TABLE PUBLIC.T"
+
+
+# assert_env_safe coverage (issue #278): a non-production profile must not be able to
+# touch a PROD_-prefixed object via any write/DDL path in this module.
+
+
+def test_execute_create_table_rejects_prod_ref_in_nonprod() -> None:
+    prof = _admin_profile()
+    with pytest.raises(GuardRejectedError) as excinfo:
+        execute_create_table(
+            prof,
+            database="DEV",
+            schema="PROD_PUBLIC",
+            table="T",
+            columns=[{"name": "ID", "type": "INTEGER"}],
+            distribution=None,
+            organized_on=None,
+            if_not_exists=True,
+            dry_run=True,
+        )
+    assert excinfo.value.code == "PROD_REF_IN_NONPROD"
+
+
+def test_execute_truncate_rejects_prod_ref_in_nonprod() -> None:
+    prof = _admin_profile()
+    with pytest.raises(GuardRejectedError) as excinfo:
+        execute_truncate(prof, "DEV", "PROD_PUBLIC", "T")
+    assert excinfo.value.code == "PROD_REF_IN_NONPROD"
+
+
+def test_execute_drop_table_rejects_prod_ref_in_nonprod() -> None:
+    prof = _admin_profile()
+    with pytest.raises(GuardRejectedError) as excinfo:
+        execute_drop_table(prof, "DEV", "PROD_PUBLIC", "T", if_exists=True)
+    assert excinfo.value.code == "PROD_REF_IN_NONPROD"
+
+
+def test_execute_drop_view_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """NPS parses no IF EXISTS on DROP VIEW in any form — verified live (issue #273)."""
+    fake = _FakeConn()
+    monkeypatch.setattr("nz_mcp.catalog.ddl.open_connection", lambda _p, _w: fake)
+    monkeypatch.setattr("nz_mcp.catalog.ddl.get_password", lambda _n: "pw")
+    monkeypatch.setattr(
+        "nz_mcp.catalog.ddl.list_views", lambda *_a, **_k: [{"name": "V", "owner": "U"}]
+    )
+    prof = _admin_profile()
+    out = execute_drop_view(prof, "DEV", "PUBLIC", "V", if_exists=True)
+    assert out["dropped"] is True
+    assert fake.cursor_obj.executed[-1][0] == "DROP VIEW PUBLIC.V"
+
+
+def test_execute_drop_view_if_exists_noop_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("nz_mcp.catalog.ddl.list_views", lambda *_a, **_k: [])
+    prof = _admin_profile()
+    out = execute_drop_view(prof, "DEV", "PUBLIC", "MISSING", if_exists=True)
+    assert out["dropped"] is False
+    assert out["duration_ms"] == 0
+
+
+def test_execute_drop_view_without_if_exists_skips_catalog_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeConn()
+    monkeypatch.setattr("nz_mcp.catalog.ddl.open_connection", lambda _p, _w: fake)
+    monkeypatch.setattr("nz_mcp.catalog.ddl.get_password", lambda _n: "pw")
+
+    def _boom(*_a: object, **_k: object) -> list[dict[str, str]]:
+        raise AssertionError("list_views must not be called when if_exists=False")
+
+    monkeypatch.setattr("nz_mcp.catalog.ddl.list_views", _boom)
+    prof = _admin_profile()
+    out = execute_drop_view(prof, "DEV", "PUBLIC", "V", if_exists=False)
+    assert out["dropped"] is True
+    assert fake.cursor_obj.executed[0][0] == "DROP VIEW PUBLIC.V"
+
+
+def test_execute_drop_view_database_mismatch_rejected() -> None:
+    prof = _admin_profile()
+    with pytest.raises(InvalidInputError, match="active profile database"):
+        execute_drop_view(prof, "OTHER_DB", "PUBLIC", "V", if_exists=True)
+
+
+def test_execute_drop_view_failure_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("nz_mcp.catalog.ddl.list_views", lambda *_a, **_k: [{"name": "V"}])
+    monkeypatch.setattr("nz_mcp.catalog.ddl.open_connection", lambda _p, _w: _BoomConn())
+    monkeypatch.setattr("nz_mcp.catalog.ddl.get_password", lambda _n: "pw")
+    prof = _admin_profile()
+    with pytest.raises(NetezzaError):
+        execute_drop_view(prof, "DEV", "PUBLIC", "V", if_exists=False)
+
+
+def test_execute_drop_view_rejects_prod_ref_in_nonprod() -> None:
+    prof = _admin_profile()
+    with pytest.raises(GuardRejectedError) as excinfo:
+        execute_drop_view(prof, "DEV", "PROD_PUBLIC", "V", if_exists=True)
+    assert excinfo.value.code == "PROD_REF_IN_NONPROD"
 
 
 class _BoomCursor:

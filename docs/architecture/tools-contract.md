@@ -626,6 +626,9 @@ Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 
 Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 
+**Reglas**:
+- Guarda de entorno `assert_env_safe`: si la BD del perfil activo **no** empieza con `PROD_`, cualquier identificador `PROD_*` en el DDL (incluido en `dry_run`) → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD` (issue #278).
+
 ---
 
 #### 24. `nz_truncate`
@@ -638,6 +641,9 @@ Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 | `confirm` | bool (**required**, no default) | Debe venir `true` explícitamente. |
 
 **Output**: `{ "truncated": true, "duration_ms": T }`
+
+**Reglas**:
+- Guarda de entorno `assert_env_safe`: si la BD del perfil activo **no** empieza con `PROD_`, cualquier identificador `PROD_*` en el statement → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD` (issue #278).
 
 ---
 
@@ -652,6 +658,9 @@ Si `dry_run=false` sin `confirm=true` → código estable `CONFIRM_REQUIRED`.
 | `if_exists` | bool (default true) | Emite sintaxis Netezza ``DROP TABLE schema.table IF EXISTS`` (sufijo). |
 
 **Output**: `{ "dropped": true }`
+
+**Reglas**:
+- Guarda de entorno `assert_env_safe`: si la BD del perfil activo **no** empieza con `PROD_`, cualquier identificador `PROD_*` en el statement → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD` (issue #278).
 
 ---
 
@@ -821,6 +830,9 @@ El header sólo contiene metadata segura (BD, schema, objeto, timestamp UTC, nom
 
 **Output (ejecución)**: `dry_run: false`, `ddl_to_execute`, `executed: true`, `duration_ms`.
 
+**Reglas**:
+- Guarda de entorno `assert_env_safe`: si la BD del perfil activo **no** empieza con `PROD_`, cualquier identificador `PROD_*` en el DDL final (incluye el `select_sql` embebido) → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD`, incluso en `dry_run` (issue #278). A diferencia de `nz_execute_ddl`, esta tool **no** tiene un `allow_prod_reads`: un `SELECT ... FROM PROD_x` legítimo (leer de producción para poblar una tabla de desarrollo) también se rechaza.
+
 ---
 
 #### 32. `nz_execute_ddl`
@@ -880,7 +892,7 @@ Ejecuta un procedimiento almacenado vía `CALL schema.proc(args)` y devuelve el 
 | `signature` | string (optional) | Firma de tipos `(TIPO, …)` del overload; si se da, se valida que el nº de args coincida. |
 | `dry_run` | bool (default **true**) | Si `true`, devuelve `call_sql` sin ejecutar. |
 | `confirm` | bool (**required if** `dry_run=false`) | |
-| `timeout_s` | int (optional, 1..300) | Timeout de la conexión efímera; default el del perfil. |
+| `timeout_s` | int (optional, 1..300) | Sin valor: bloquea sin límite hasta que el SP devuelve (adecuado para procedimientos de 10–20 min). Con valor: aplica `min(timeout_s, 300)` al socket. |
 
 **Output**:
 ```json
@@ -898,6 +910,8 @@ Ejecuta un procedimiento almacenado vía `CALL schema.proc(args)` y devuelve el 
 - `sql_guard` clasifica `CALL` (kind `CALL`) y lo permite **solo en `admin`** (rechazo `STATEMENT_NOT_ALLOWED` en read/write). Ruta dedicada de regex que **solo acepta placeholders `?`**: un argumento literal se rechaza (`UNKNOWN_STATEMENT`), forzando parametrización.
 - Guarda de entorno `assert_env_safe`: un `CALL` a un SP `PROD_*` desde un perfil no productivo → `PROD_REF_IN_NONPROD`.
 - `return_value` es el valor devuelto por el SP (o `null` si no hay result set); `messages` son los `NOTICE`/`RAISE` capturados de `cursor.notices`.
+- Si el SP falla tras emitir NOTICEs, los mensajes previos al fallo se devuelven en `error.context["partial_notices"]` (el campo `messages` del output feliz sigue siendo la lista completa).
+- Un timeout de socket lanza `QueryTimeoutError` (código `QUERY_TIMEOUT`) con `context["orphan_session_risk"]=true` y `context["partial_notices"]`; el servidor puede seguir ejecutando el SP (nzpy no expone `cancel()`).
 - No usar para crear un SP (`nz_execute_ddl`) ni para leer su DDL (`nz_get_procedure_ddl`).
 
 ---
@@ -919,6 +933,7 @@ Elimina un overload de procedimiento vía `DROP PROCEDURE schema.proc(tipos)` (m
 
 **Reglas**:
 - `sql_guard.validate(mode="admin")` clasifica el statement como `DROP`.
+- Guarda de entorno `assert_env_safe`: eliminar un overload `PROD_*` desde un perfil no productivo → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD`, incluso con `if_exists=true` (dispara antes del chequeo de catálogo) (issue #278).
 - No usar para tablas (`nz_drop_table`) ni para crear/ejecutar procedimientos (`nz_execute_ddl` / `nz_call_procedure`).
 
 ---
@@ -994,6 +1009,27 @@ Al menos una de las cuatro listas de operaciones debe venir no vacía; si no →
 
 ---
 
+#### 37. `nz_drop_view`
+
+Elimina una vista vía `DROP VIEW schema.view` (modo `admin`, `confirm` obligatorio). Cierra el hueco de que `nz_execute_ddl` compila vistas pero ninguna tool las borra, lo que bloqueaba limpiar objetos de prueba (issue #273).
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | Debe coincidir con la BD del perfil activo. |
+| `schema` | string (required) | |
+| `view` | string (required) | |
+| `confirm` | bool (**required**, debe ser `true`) | Sin `dry_run`, igual que `nz_drop_table`. |
+| `if_exists` | bool (default `true`) | Si `true` y la vista no existe, es un no-op (`dropped=false`). NPS no parsea `IF EXISTS` en `DROP VIEW` en ninguna forma (ni prefijo ni sufijo, a diferencia de `DROP TABLE`) — verificado en vivo contra NPS 11.2.1.11-IF1 — así que se resuelve en la capa Python (chequeo de catálogo, igual que `nz_drop_procedure`). |
+
+**Output**: `{ "dropped": true, "duration_ms": 8 }` — `dropped=false` cuando `if_exists=true` y no existía.
+
+**Reglas**:
+- `sql_guard.validate(mode="admin")` clasifica el statement como `DROP`.
+- Guarda de entorno `assert_env_safe`: eliminar una vista `PROD_*` desde un perfil no productivo → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD`, incluso con `if_exists=true` (dispara antes del chequeo de catálogo) (issue #278).
+- No usar para tablas (`nz_drop_table`) ni para procedimientos (`nz_drop_procedure`).
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -1011,7 +1047,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 | `nz_clone_procedure` | false | false | true |
 | `nz_execute_ddl` | false | false | true |
 | `nz_call_procedure` | false | **true** | false |
-| `nz_truncate`, `nz_drop_table`, `nz_drop_procedure` | false | **true** | true |
+| `nz_truncate`, `nz_drop_table`, `nz_drop_procedure`, `nz_drop_view` | false | **true** | true |
 | `nz_switch_profile`, `nz_switch_database` | false | false | true |
 | `nz_alter_table` | false | true | false |
 

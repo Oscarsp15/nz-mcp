@@ -206,17 +206,37 @@ def _connection_failure(
     )
 
 
-def open_connection(profile: Profile, password: str) -> object:
-    """Open a Netezza connection with bounded timeout and fixed app name.
+class _TimeoutSentinel:
+    """Singleton sentinel: use ``profile.timeout_s_default`` as the socket timeout."""
+
+
+_PROFILE_TIMEOUT: Final[_TimeoutSentinel] = _TimeoutSentinel()
+
+
+def open_connection(
+    profile: Profile,
+    password: str,
+    *,
+    timeout: int | None | _TimeoutSentinel = _PROFILE_TIMEOUT,
+) -> object:
+    """Open a Netezza connection with configurable timeout and fixed app name.
 
     ``password`` may be any ``str``; it is re-bound to a ``Secret`` before anything else
     happens, so a caller that still holds a plain ``str`` cannot leak it from here down.
+
+    ``timeout`` controls the socket read timeout passed to nzpy:
+    - omitted / ``_PROFILE_TIMEOUT``: use ``profile.timeout_s_default``
+    - ``None``: no socket timeout (block until the server replies)
+    - ``int``: limit to that many seconds
     """
     # Re-binding the *argument name* is the point, not making a copy: traceback
     # renderers print the current value of each frame argument, so the plain str must
     # not survive in this frame nor in the nzpy frames it is handed to. Structural by
     # construction: it cannot be forgotten at a call site because there is none.
     password = Secret(password)
+    effective_timeout: int | None = (
+        profile.timeout_s_default if isinstance(timeout, _TimeoutSentinel) else timeout
+    )
     # nzpy >=1.17.7 aborts the SSL handshake unless a CA bundle is given via
     # ``ssl={"ca_certs": ...}`` or ``skipCertVerification=True`` is passed (a top-level
     # connect kwarg, not an ``ssl`` key). Verification is opt-in per profile; see
@@ -234,7 +254,7 @@ def open_connection(profile: Profile, password: str) -> object:
                 port=profile.port,
                 database=profile.database,
                 password=password,
-                timeout=profile.timeout_s_default,
+                timeout=effective_timeout,
                 application_name=APPLICATION_NAME,
                 # SSL negotiation per profile (default 2 = preferred-secured). See config.Profile
                 # and docs/adr/0017-connection-security-level.md.
