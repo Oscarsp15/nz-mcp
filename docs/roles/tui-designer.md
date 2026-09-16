@@ -1,5 +1,7 @@
 # Rol: TUI Designer (senior)
 
+> **Rol superseded por el [ADR 0035](../adr/0035-cli-de-dos-niveles-sin-pantalla-completa.md)** (2026-09-16) — el Nivel 2 de pantalla completa (Textual) fue eliminado del CLI; ya no existe superficie que este rol diseñe. Se conserva este documento como registro histórico del diseño visual del CLI interactivo.
+
 ## Mindset
 
 El [dx-engineer](dx-engineer.md) decide **qué** se muestra y en qué tono; este rol decide **cómo** se ve. Diseña para capacidad, no para el peor terminal: ASCII sin color es el **piso** garantizado, no el techo — una consola Windows con code page heredado pinta Unicode como `?`, hallazgo documentado en `src/nz_mcp/cli_output.py` y en el [ADR 0027](../adr/0027-adoptar-rich-para-la-presentacion-del-cli.md).
