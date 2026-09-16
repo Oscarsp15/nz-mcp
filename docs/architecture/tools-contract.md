@@ -880,7 +880,7 @@ Ejecuta un procedimiento almacenado vía `CALL schema.proc(args)` y devuelve el 
 | `signature` | string (optional) | Firma de tipos `(TIPO, …)` del overload; si se da, se valida que el nº de args coincida. |
 | `dry_run` | bool (default **true**) | Si `true`, devuelve `call_sql` sin ejecutar. |
 | `confirm` | bool (**required if** `dry_run=false`) | |
-| `timeout_s` | int (optional, 1..300) | Timeout de la conexión efímera; default el del perfil. |
+| `timeout_s` | int (optional, 1..300) | Sin valor: bloquea sin límite hasta que el SP devuelve (adecuado para procedimientos de 10–20 min). Con valor: aplica `min(timeout_s, 300)` al socket. |
 
 **Output**:
 ```json
@@ -898,6 +898,8 @@ Ejecuta un procedimiento almacenado vía `CALL schema.proc(args)` y devuelve el 
 - `sql_guard` clasifica `CALL` (kind `CALL`) y lo permite **solo en `admin`** (rechazo `STATEMENT_NOT_ALLOWED` en read/write). Ruta dedicada de regex que **solo acepta placeholders `?`**: un argumento literal se rechaza (`UNKNOWN_STATEMENT`), forzando parametrización.
 - Guarda de entorno `assert_env_safe`: un `CALL` a un SP `PROD_*` desde un perfil no productivo → `PROD_REF_IN_NONPROD`.
 - `return_value` es el valor devuelto por el SP (o `null` si no hay result set); `messages` son los `NOTICE`/`RAISE` capturados de `cursor.notices`.
+- Si el SP falla tras emitir NOTICEs, los mensajes previos al fallo se devuelven en `error.context["partial_notices"]` (el campo `messages` del output feliz sigue siendo la lista completa).
+- Un timeout de socket lanza `QueryTimeoutError` (código `QUERY_TIMEOUT`) con `context["orphan_session_risk"]=true` y `context["partial_notices"]`; el servidor puede seguir ejecutando el SP (nzpy no expone `cancel()`).
 - No usar para crear un SP (`nz_execute_ddl`) ni para leer su DDL (`nz_get_procedure_ddl`).
 
 ---
