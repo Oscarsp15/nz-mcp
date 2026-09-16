@@ -155,14 +155,14 @@ def call_procedure(
             detail="confirm=true is required when dry_run=false for nz_call_procedure.",
         )
 
-    exec_profile = profile
-    if timeout_s is not None:
-        exec_profile = profile.model_copy(
-            update={"timeout_s_default": min(timeout_s, TIMEOUT_S_CAP)},
-        )
+    # None → no socket timeout; block until the SP returns (for long-running procedures).
+    # Explicit timeout_s → cap at TIMEOUT_S_CAP and pass to the socket layer.
+    effective_timeout: int | None = min(timeout_s, TIMEOUT_S_CAP) if timeout_s is not None else None
 
     password = get_password(profile.name)
-    connection = cast(_ConnectionLike, open_connection(exec_profile, password))
+    connection = cast(
+        _ConnectionLike, open_connection(profile, password, timeout=effective_timeout)
+    )
     start = time.monotonic()
     # Declared here so the except block can read any notices emitted before the failure.
     partial_notices: list[str] = []

@@ -155,7 +155,9 @@ def test_confirm_required_when_not_dry_run() -> None:
 
 def test_execute_captures_return_value_and_messages(monkeypatch: pytest.MonkeyPatch) -> None:
     cursor = _FakeCursor(row=("42",), notices=["NOTICE: step 1 done", "NOTICE: step 2 done"])
-    monkeypatch.setattr("nz_mcp.catalog.call.open_connection", lambda _p, _w: _FakeConn(cursor))
+    monkeypatch.setattr(
+        "nz_mcp.catalog.call.open_connection", lambda _p, _w, **_kw: _FakeConn(cursor)
+    )
     monkeypatch.setattr("nz_mcp.catalog.call.get_password", lambda _n: "pw")
     out = call_procedure(
         _profile(),
@@ -180,7 +182,9 @@ def test_execute_no_result_set_returns_none(monkeypatch: pytest.MonkeyPatch) -> 
             raise ProgrammingError("no result set")
 
     cursor = _NoResultCursor(notices=[])
-    monkeypatch.setattr("nz_mcp.catalog.call.open_connection", lambda _p, _w: _FakeConn(cursor))
+    monkeypatch.setattr(
+        "nz_mcp.catalog.call.open_connection", lambda _p, _w, **_kw: _FakeConn(cursor)
+    )
     monkeypatch.setattr("nz_mcp.catalog.call.get_password", lambda _n: "pw")
     out = call_procedure(
         _profile(),
@@ -213,7 +217,7 @@ def test_execute_failure_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
         def close(self) -> None:
             pass
 
-    monkeypatch.setattr("nz_mcp.catalog.call.open_connection", lambda _p, _w: _BoomConn())
+    monkeypatch.setattr("nz_mcp.catalog.call.open_connection", lambda _p, _w, **_kw: _BoomConn())
     monkeypatch.setattr("nz_mcp.catalog.call.get_password", lambda _n: "pw")
     with pytest.raises(NetezzaError):
         call_procedure(
@@ -269,7 +273,9 @@ def test_notices_preserved_in_error_context_when_execute_raises(
             raise RuntimeError("mid-proc error")
 
     cursor = _PartialCursor()
-    monkeypatch.setattr("nz_mcp.catalog.call.open_connection", lambda _p, _w: _FakeConn(cursor))
+    monkeypatch.setattr(
+        "nz_mcp.catalog.call.open_connection", lambda _p, _w, **_kw: _FakeConn(cursor)
+    )
     monkeypatch.setattr("nz_mcp.catalog.call.get_password", lambda _n: "pw")
     with pytest.raises(NetezzaError) as ei:
         call_procedure(
@@ -305,7 +311,7 @@ def test_notices_empty_in_error_context_when_cursor_has_none(
         def close(self) -> None:
             pass
 
-    monkeypatch.setattr("nz_mcp.catalog.call.open_connection", lambda _p, _w: _BoomConn())
+    monkeypatch.setattr("nz_mcp.catalog.call.open_connection", lambda _p, _w, **_kw: _BoomConn())
     monkeypatch.setattr("nz_mcp.catalog.call.get_password", lambda _n: "pw")
     with pytest.raises(NetezzaError) as ei:
         call_procedure(
@@ -331,7 +337,9 @@ def test_timeout_raises_query_timeout_error(monkeypatch: pytest.MonkeyPatch) -> 
             raise TimeoutError("The read operation timed out")
 
     cursor = _TimeoutCursor()
-    monkeypatch.setattr("nz_mcp.catalog.call.open_connection", lambda _p, _w: _FakeConn(cursor))
+    monkeypatch.setattr(
+        "nz_mcp.catalog.call.open_connection", lambda _p, _w, **_kw: _FakeConn(cursor)
+    )
     monkeypatch.setattr("nz_mcp.catalog.call.get_password", lambda _n: "pw")
     with pytest.raises(QueryTimeoutError) as ei:
         call_procedure(
@@ -357,7 +365,9 @@ def test_timeout_oserror_raises_query_timeout_error(monkeypatch: pytest.MonkeyPa
             raise OSError("The read operation timed out")
 
     cursor = _OsTimeoutCursor()
-    monkeypatch.setattr("nz_mcp.catalog.call.open_connection", lambda _p, _w: _FakeConn(cursor))
+    monkeypatch.setattr(
+        "nz_mcp.catalog.call.open_connection", lambda _p, _w, **_kw: _FakeConn(cursor)
+    )
     monkeypatch.setattr("nz_mcp.catalog.call.get_password", lambda _n: "pw")
     with pytest.raises(QueryTimeoutError):
         call_procedure(
@@ -371,6 +381,54 @@ def test_timeout_oserror_raises_query_timeout_error(monkeypatch: pytest.MonkeyPa
             confirm=True,
             timeout_s=30,
         )
+
+
+def test_no_timeout_passes_none_when_timeout_s_omitted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When timeout_s=None, open_connection must receive timeout=None (no socket limit)."""
+    received_timeout: list[int | None] = []
+
+    def _capture(_p: object, _w: object, *, timeout: int | None = -1, **_kw: object) -> _FakeConn:
+        received_timeout.append(timeout)
+        return _FakeConn(_FakeCursor())
+
+    monkeypatch.setattr("nz_mcp.catalog.call.open_connection", _capture)
+    monkeypatch.setattr("nz_mcp.catalog.call.get_password", lambda _n: "pw")
+    call_procedure(
+        _profile(),
+        database="DESA_MODELOS",
+        schema="DBO",
+        procedure="P",
+        args=None,
+        signature=None,
+        dry_run=False,
+        confirm=True,
+        timeout_s=None,
+    )
+    assert received_timeout == [None]
+
+
+def test_explicit_timeout_s_is_forwarded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When timeout_s is given, open_connection must receive that value as timeout."""
+    received_timeout: list[int | None] = []
+
+    def _capture(_p: object, _w: object, *, timeout: int | None = -1, **_kw: object) -> _FakeConn:
+        received_timeout.append(timeout)
+        return _FakeConn(_FakeCursor())
+
+    monkeypatch.setattr("nz_mcp.catalog.call.open_connection", _capture)
+    monkeypatch.setattr("nz_mcp.catalog.call.get_password", lambda _n: "pw")
+    call_procedure(
+        _profile(),
+        database="DESA_MODELOS",
+        schema="DBO",
+        procedure="P",
+        args=None,
+        signature=None,
+        dry_run=False,
+        confirm=True,
+        timeout_s=45,
+    )
+    assert received_timeout == [45]
 
 
 def test_tool_handler_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
