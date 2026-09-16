@@ -23,6 +23,7 @@ class ExecuteDdlInput(BaseModel):
     confirm: bool = False
     allow_prod_reads: bool = False
     echo_sql: bool = True
+    validate_compile: bool = False
 
 
 class ExecuteDdlOutput(BaseModel):
@@ -31,17 +32,21 @@ class ExecuteDdlOutput(BaseModel):
     sql_to_execute: str | None = None
     executed: bool
     duration_ms: int
+    compile_warning: str | None = None
+    compile_error: str | None = None
+    compiled: bool | None = None
 
 
 @tool(
     name="nz_execute_ddl",
     description=(
-        "Compile a full CREATE [OR REPLACE] PROCEDURE (NZPLSQL) or VIEW from sql or input_path "
-        "against the active DB. Admin mode. dry_run=true (default) returns the SQL without "
-        "executing; dry_run=false + confirm=true compiles. Rejects PROD_ refs from non-production "
-        "DBs; allow_prod_reads=true skips that check when all writes target the active DB and "
-        "remaining PROD_ refs are read-only. echo_sql=false omits the DDL when compiling. "
-        "Procedures/views only — not tables nor CALL (nz_call_procedure)."
+        "Compile a CREATE PROCEDURE (NZPLSQL) or VIEW from sql or input_path. "
+        "Admin mode. dry_run=true previews; dry_run=false+confirm=true compiles. "
+        "NZPLSQL bodies compile lazily: executed=true means DDL accepted, not body valid; "
+        "compile_warning is always set for procedures. "
+        "validate_compile=true forces a compile check after CREATE. "
+        "Rejects PROD_ refs unless allow_prod_reads=true. echo_sql=false omits DDL. "
+        "Procedures/views only — not tables nor CALL."
     ),
     mode="admin",
     input_model=ExecuteDdlInput,
@@ -68,10 +73,14 @@ def nz_execute_ddl(
         confirm=params.confirm,
         allow_prod_reads=params.allow_prod_reads,
         echo_sql=params.echo_sql,
+        validate_compile=params.validate_compile,
     )
     return ExecuteDdlOutput(
         dry_run=bool(raw["dry_run"]),
         sql_to_execute=raw["sql_to_execute"],
         executed=bool(raw["executed"]),
         duration_ms=int(raw["duration_ms"]),
+        compile_warning=raw.get("compile_warning"),
+        compile_error=raw.get("compile_error"),
+        compiled=raw.get("compiled"),
     )
