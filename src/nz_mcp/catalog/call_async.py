@@ -51,9 +51,11 @@ def _run_job(
     try:
         connection = cast(Any, open_connection(profile, password, timeout=None))
 
-        # Capture Netezza session ID immediately so nz_job_cancel can ABORT it.
+        # Capture Netezza session ID so nz_job_cancel can identify the session to abort.
+        # SELECT CURRENT_SID is a Netezza scalar that returns this connection's own session ID.
+        # It is safe under concurrent use: each session always returns its own ID, never another's.
         with closing(connection.cursor()) as sid_cur:
-            sid_cur.execute("SELECT CURRENT_SESSION")
+            sid_cur.execute("SELECT CURRENT_SID")
             row = sid_cur.fetchone()
         if row is not None:
             raw_sid = row[0] if isinstance(row, (tuple, list)) else row
@@ -69,7 +71,7 @@ def _run_job(
     except Exception as exc:
         # cursor may be in scope (if execute raised) or not (if connection failed).
         with suppress(Exception):
-            partial_notices = _read_notices(cursor)  # noqa: F821  (cursor may be unbound)
+            partial_notices = _read_notices(cursor)
         detail = sanitize(str(exc), known_secrets={password})
         state = get_job(job_id)
         if state is not None and state.status == "cancelling":

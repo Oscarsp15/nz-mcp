@@ -27,7 +27,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (38 tools registradas)
+## Catálogo v0.1 (39 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -1058,7 +1058,7 @@ Lanza un SP vía `CALL schema.proc(args)` en un **hilo daemon** y devuelve un `j
 
 **Reglas**:
 - Máx **5 jobs simultáneos** en memoria; superar el límite → `JOB_LIMIT_REACHED`.
-- Captura `SELECT CURRENT_SESSION` inmediatamente al abrir la conexión para que `nz_job_cancel` pueda emitir `ABORT SESSION <id>`.
+- Captura `SELECT CURRENT_SID` inmediatamente al abrir la conexión (escalar seguro bajo concurrencia: cada sesión devuelve siempre su propio ID) para que `nz_job_cancel` pueda identificar la sesión a abortar.
 - Mismo conjunto de guardas que `nz_call_procedure`: `sql_guard` (kind `CALL`), `assert_env_safe` (`PROD_REF_IN_NONPROD`), solo placeholders `?`.
 - Los jobs expiran y se borran del store **1 hora** después de completar (estado `done`/`failed`/`cancelled`).
 - No usar para SPs cortos (< 30 s): `nz_call_procedure` es más simple y devuelve el resultado en el mismo llamado.

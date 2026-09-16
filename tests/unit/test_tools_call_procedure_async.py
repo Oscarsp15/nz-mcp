@@ -47,7 +47,7 @@ class _FakeCursor:
         self.executed.append(sql)
 
     def fetchone(self) -> Any:
-        if "CURRENT_SESSION" in (self.executed[-1] if self.executed else ""):
+        if "CURRENT_SID" in (self.executed[-1] if self.executed else ""):
             return (self._sid,)
         return self._row
 
@@ -284,3 +284,71 @@ def test_poll_done_job_includes_result() -> None:
 def test_poll_unknown_job_raises() -> None:
     with pytest.raises(InvalidInputError, match="JOB_NOT_FOUND"):
         poll_job("does-not-exist")
+
+
+# ---------------------------------------------------------------------------
+# Session-ID capture SQL guard — prevents silent regression to broken query
+# ---------------------------------------------------------------------------
+
+
+def test_background_thread_session_id_uses_current_sid() -> None:
+    """_run_job must query SELECT CURRENT_SID — not CURRENT_SESSION (which doesn't exist
+    on Netezza SaaS and would silently fail, leaving session_id=None for nz_job_cancel)."""
+    executed_sqls: list[str] = []
+    done_event = threading.Event()
+    original_mark_done = __import__("nz_mcp.jobs", fromlist=["mark_done"]).mark_done
+
+    def _patched_mark_done(job_id: str, result: dict[str, Any]) -> None:
+        original_mark_done(job_id, result)
+        done_event.set()
+
+    class _RecordingCursor:
+        def __init__(self) -> None:
+            self.notices: list[str] = []
+            self.description: Any = None
+
+        def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
+            executed_sqls.append(sql)
+
+        def fetchone(self) -> Any:
+            if executed_sqls and "CURRENT_SID" in executed_sqls[-1]:
+                return (12345,)
+            return None
+
+        def close(self) -> None:
+            pass
+
+    class _RecordingConn:
+        closed = False
+
+        def cursor(self) -> _RecordingCursor:
+            return _RecordingCursor()
+
+        def close(self) -> None:
+            self.closed = True
+
+    with (
+        patch(
+            "nz_mcp.catalog.call_async.open_connection",
+            side_effect=lambda *a, **kw: _RecordingConn(),
+        ),
+        patch("nz_mcp.catalog.call_async.get_password", return_value="pw"),
+        patch("nz_mcp.catalog.call_async.mark_done", side_effect=_patched_mark_done),
+    ):
+        launch_call_procedure(
+            _profile(),
+            database="DESA_MODELOS",
+            schema="PUBLIC",
+            procedure="MYPROC",
+            args=None,
+            signature=None,
+            confirm=True,
+        )
+    assert done_event.wait(timeout=5), "background thread did not complete in time"
+
+    assert any("CURRENT_SID" in sql for sql in executed_sqls), (
+        f"Expected 'SELECT CURRENT_SID' in executed SQL; got: {executed_sqls}"
+    )
+    assert not any("CURRENT_SESSION" in sql for sql in executed_sqls), (
+        "Found 'CURRENT_SESSION' in executed SQL — this query does not work on Netezza SaaS"
+    )
