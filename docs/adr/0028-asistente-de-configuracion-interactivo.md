@@ -1,11 +1,18 @@
 # ADR 0028 — El asistente de configuración es la única excepción al ADR 0005
 
 - **Fecha**: 2026-09-06
-- **Estado**: aceptado — **enmienda el [ADR 0005](0005-sin-frontend.md)**, que sigue vigente en todo lo demás
+- **Estado**: aceptado — **enmienda el [ADR 0005](0005-sin-frontend.md)**, que sigue vigente en todo lo demás; **enmendado por el [ADR 0035](0035-cli-de-dos-niveles-sin-pantalla-completa.md) (2026-09-16)**, que le retira la rama de pantalla completa
 - **Decidido por**: DX Engineer (IA) + validación humana (auditor: Security Engineer)
 - **Issue**: [#221](https://github.com/Oscarsp15/nz-mcp/issues/221)
 - **Alcance**: **qué** se permite y bajo qué condiciones. Con **qué librería** lo decide el
   [ADR 0029](0029-adoptar-textual-para-el-asistente-de-configuracion.md).
+
+> **Enmendado por el [ADR 0035](0035-cli-de-dos-niveles-sin-pantalla-completa.md) (2026-09-16).**
+> Oscar decidió reducir el CLI de tres niveles a dos: el asistente pierde su rama de pantalla
+> completa (Textual) y usa siempre la cadena de `out.ask`/`out.confirm` secuenciales que este mismo
+> ADR ya describe como degradación — deja de ser una degradación y pasa a ser el único camino. La
+> excepción al ADR 0005 que abrió este documento queda retirada junto con el ADR 0030; lo que sigue
+> se conserva como registro de qué preguntas hace el asistente y en qué orden, que no cambia.
 
 > **Ampliado por el [ADR 0032](0032-rediseno-del-nivel-2-del-cli-interactivo.md) (2026-09-09).**
 > Tres puntos, y solo tres: (1) la **tercera excepción** al ADR 0005 es la pantalla "Ver perfiles",
