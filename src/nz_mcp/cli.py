@@ -16,7 +16,7 @@ rarely type by hand.
 - ``probe-catalog``      execute every catalog query with dummy parameters (validates overrides).
 - ``version``            print the package version.
 - ``serve``              run the MCP server over stdio.
-- ``help``               print the menu's six tasks and the command each one runs.
+- ``help``               print the six curated onboarding tasks and the command each runs.
 
 Every user-facing string here — help texts included — comes from the i18n catalog. Help is
 resolved once at import time into ``_HELP_LOCALE``: typer reads ``help=`` while the module is
@@ -41,7 +41,7 @@ import typer
 # ``typer`` is the declared dependency and ``click`` is its own; these two are typer's
 # public classes for "the group of commands" and "a command", so the launcher can be typed
 # without this project importing click directly.
-from typer.core import TyperCommand, TyperGroup
+from typer.core import TyperGroup
 
 from nz_mcp import __version__
 from nz_mcp import cli_output as out
@@ -82,9 +82,7 @@ from nz_mcp.errors import (
 from nz_mcp.i18n import MESSAGES, Locale, resolve_locale, t
 from nz_mcp.logging_config import configure_logging_for_stdio
 from nz_mcp.logging_utils import sanitize
-from nz_mcp.menu import MIN_HEIGHT as MENU_MIN_HEIGHT
-from nz_mcp.menu import MIN_WIDTH as MENU_MIN_WIDTH
-from nz_mcp.menu import TASKS, MenuContext, MenuEntry, choose_command, command_line
+from nz_mcp.menu import TASKS, MenuEntry, command_line
 from nz_mcp.profile_check import (
     CHECK_LEVELS,
     CheckLevel,
@@ -93,9 +91,6 @@ from nz_mcp.profile_check import (
     iter_checks,
     run_checks,
 )
-from nz_mcp.profiles_screen import MIN_HEIGHT as PROFILES_MIN_HEIGHT
-from nz_mcp.profiles_screen import MIN_WIDTH as PROFILES_MIN_WIDTH
-from nz_mcp.profiles_screen import ProfileAction, ProfileRow, ProfileStatus, choose_profile
 from nz_mcp.secret import Secret
 from nz_mcp.server import run_stdio_server
 from nz_mcp.tools.session import SwitchProfileInput, nz_switch_profile
@@ -126,9 +121,9 @@ app = typer.Typer(
     name="nz-mcp",
     help=_help("CLI.HELP.APP"),
     # Off, and handled in the callback instead: with it on, ``click`` prints the help and
-    # exits before any code of ours runs, so there would be no moment at which to offer the
-    # menu. The callback reproduces exactly what it used to do - same help, same stream,
-    # same exit code 2 - whenever the menu cannot open.
+    # exits before any code of ours runs, so there would be no moment at which to first
+    # prepare the console (ADR 0033). The callback reproduces exactly what click's own
+    # ``no_args_is_help`` did - same help, same stream, same exit code 2.
     no_args_is_help=False,
     add_completion=False,
 )
@@ -138,7 +133,7 @@ app = typer.Typer(
 #: commands into boxes buys structure the ordering already provides.
 _COMMANDS_PANEL: Final[str] = _help("CLI.HELP.COMMANDS_PANEL")
 
-#: Exit code of ``nz-mcp`` with no arguments and no menu. It is what ``click`` returns for
+#: Exit code of ``nz-mcp`` with no arguments. It is what ``click`` returns for
 #: ``no_args_is_help`` - a usage error - and it is preserved to the number, because anyone
 #: scripting around this today is scripting around a 2.
 _NO_ARGUMENTS_EXIT_CODE: Final[int] = 2
@@ -146,7 +141,7 @@ _NO_ARGUMENTS_EXIT_CODE: Final[int] = 2
 
 @app.callback(invoke_without_command=True)
 def entry_point(ctx: typer.Context) -> None:
-    """Prepare the console, then open the menu when ``nz-mcp`` is run with nothing after it.
+    """Prepare the console, then print the help when ``nz-mcp`` runs with nothing after it.
 
     Two independent things happen here, in order, and each is documented where it lives:
 
@@ -155,16 +150,18 @@ def entry_point(ctx: typer.Context) -> None:
        the console is never touched on the one path whose stdout is about to become the MCP
        protocol channel. ``ctx.invoked_subcommand`` already names the resolved subcommand at
        this point, because ``click`` sets it before invoking this callback.
-    2. The menu opens when there is nothing after ``nz-mcp`` (issue #226, ADR 0030); with a
-       subcommand, this callback gets out of the way immediately, so ``nz-mcp <command>`` and
-       ``nz-mcp --help`` behave exactly as they did, which is what whoever pipes the output or
-       reads the documentation depends on.
+    2. With nothing after ``nz-mcp``, this prints the help and exits 2 (ADR 0035 — the CLI
+       has two levels, never a third full-screen one); with a subcommand, this callback gets
+       out of the way immediately, so ``nz-mcp <command>`` and ``nz-mcp --help`` behave
+       exactly as they did, which is what whoever pipes the output or reads the documentation
+       depends on.
     """
     if ctx.invoked_subcommand != "serve":
         out.prepare_windows_console()
     if ctx.invoked_subcommand is not None:
         return
-    _no_arguments(ctx)
+    _print_help(ctx)
+    raise typer.Exit(code=_NO_ARGUMENTS_EXIT_CODE)
 
 
 @app.command("init", help=_help("CLI.HELP.INIT"), rich_help_panel=_COMMANDS_PANEL)
@@ -355,7 +352,9 @@ def remove_profile_cmd(
 @app.command("doctor", help=_help("CLI.HELP.DOCTOR"), rich_help_panel=_COMMANDS_PANEL)
 def doctor_cmd() -> None:
     """Print local diagnostics (package, Python, profiles metadata, keyring) — no Netezza."""
-    report = collect_diagnostic(min_width=MENU_MIN_WIDTH, min_height=MENU_MIN_HEIGHT)
+    # The wizard's minimum, not a menu one (ADR 0035 removed the menu): it is the only
+    # full-screen surface this diagnostic still has anything to report on.
+    report = collect_diagnostic(min_width=MIN_WIDTH, min_height=MIN_HEIGHT)
     locale = resolve_locale()
     out.emit(format_diagnostic_report(report, locale=locale))
     raise typer.Exit(code=0 if report.is_healthy else 1)
@@ -423,12 +422,12 @@ def serve_cmd() -> None:
 
 @app.command("help", help=_help("CLI.HELP.HELP"), rich_help_panel=_COMMANDS_PANEL)
 def help_cmd(ctx: typer.Context) -> None:
-    """The menu's own tasks, in plain text (ADR 0032, decision 2).
+    """The six curated onboarding tasks, in plain text: which command does what.
 
-    The non-interactive equivalent of ``?``: same list, same one-line-per-task format,
-    built the same way from what typer has registered. Works on any terminal, including one
-    that could never open the menu - ``--help`` is the reference for the program, this is
-    the translation from a task to the command that does it.
+    ``--help`` lists all eleven commands; this is a shorter, task-first read for someone who
+    just installed the package and does not yet know what any of them are called. Not tied
+    to any full-screen surface (ADR 0035 removed the last one) - it is, and always was, a
+    plain command like any other.
     """
     locale = resolve_locale()
     out.heading(t("CLI.MENU_HELP_MODAL.TITLE", locale))
@@ -437,86 +436,7 @@ def help_cmd(ctx: typer.Context) -> None:
         out.emit(command_line(entry, unavailable=unavailable))
 
 
-# --- nz-mcp with no arguments: the menu, or the help -------------------------
-
-#: Which task "Ver perfiles" is, in :data:`~nz_mcp.menu.TASKS`. Chosen from the menu, it
-#: does not launch ``list-profiles`` directly: it opens the screen of issue #240, which
-#: hands its own choice to :func:`_open_profiles_screen`. Typed on the command line,
-#: ``list-profiles`` is unaffected (acceptance criterion 10 of issue #240) - this constant
-#: only names the one task the menu treats differently, never the command itself.
-_PROFILES_TASK_COMMAND: Final[str] = "list-profiles"
-
-
-def _no_arguments(ctx: typer.Context) -> None:
-    """Offer the menu, and fall back to the help screen whenever it cannot open.
-
-    The fallback is not a courtesy: **nobody may be left unable to use the CLI because an
-    interface would not start** (ADR 0028, condition 1, inherited by ADR 0030). Seven of the
-    eight triggers are decided by the gate before anything is built; the eighth - a window
-    shrunk below the minimum mid-session - can only be seen from inside the running
-    application, and comes back as ``degraded``.
-
-    The loop is what ADR 0032 adds: choosing "Ver perfiles" and then leaving it with Escape
-    is not the end of the session, it is the second of a two-step pick, so the six-task menu
-    reopens instead of falling through to the help (ADR 0032, amendment to ADR 0030 point 1).
-    """
-    if not out.interactive_ui_enabled(min_width=MENU_MIN_WIDTH, min_height=MENU_MIN_HEIGHT):
-        _print_help(ctx)
-        raise typer.Exit(code=_NO_ARGUMENTS_EXIT_CODE)
-    locale = resolve_locale()
-    while True:
-        choice = choose_command(
-            entries=_menu_entries(ctx, locale), locale=locale, context=_menu_context()
-        )
-        if choice.status == "cancelled":
-            # Leaving on purpose is not a usage error, so it is not the exit code of one.
-            raise typer.Exit(code=0)
-        if choice.status != "chosen" or choice.command is None:
-            break
-        if choice.command == _PROFILES_TASK_COMMAND:
-            if _open_profiles_screen(ctx, locale):
-                continue
-            return
-        _launch(ctx, choice.command)
-        return
-    _print_help(ctx)
-    raise typer.Exit(code=_NO_ARGUMENTS_EXIT_CODE)
-
-
-def _open_profiles_screen(ctx: typer.Context, locale: Locale) -> bool:
-    """Show "Ver perfiles" (issue #240) and act on what it hands back.
-
-    Returns ``True`` when the six-task menu should reopen - Escape from the table, which
-    ADR 0032 spends the extra step on rather than treating as the end of the session.
-    Every other outcome ends the same way ``_launch`` already does: a command from the
-    group runs, on the ordinary terminal, and the process finishes with its exit code.
-
-    Degrades the same way the menu itself does: the gate is asked again, with this
-    screen's own minimum, because it opens strictly later than the menu's and a window can
-    have shrunk in between; a ``profiles.toml`` that fails to parse at all falls back the
-    same way, straight to the ``list-profiles`` message that already explains it.
-    """
-    if out.interactive_ui_enabled(min_width=PROFILES_MIN_WIDTH, min_height=PROFILES_MIN_HEIGHT):
-        try:
-            rows = _profile_rows()
-        except InvalidProfileError:
-            rows = None
-        if rows is not None:
-            choice = choose_profile(rows=rows, locale=locale)
-            if choice.status == "cancelled":
-                return True
-            if choice.status == "degraded":
-                _print_help(ctx)
-                raise typer.Exit(code=_NO_ARGUMENTS_EXIT_CODE)
-            if choice.status == "configure":
-                _launch(ctx, "init")
-                return False
-            if choice.action is None or choice.profile is None:  # pragma: no cover - defensive
-                raise RuntimeError("a chosen ProfilesChoice must carry both action and profile")
-            _run_profile_action(ctx, choice.action, choice.profile)
-            return False
-    _launch(ctx, _PROFILES_TASK_COMMAND)
-    return False
+# --- nz-mcp with no arguments: the help, always ------------------------------
 
 
 def _print_help(ctx: typer.Context) -> None:
@@ -561,168 +481,6 @@ def _menu_entries(ctx: typer.Context, locale: Locale) -> tuple[MenuEntry, ...]:
             )
         )
     return tuple(entries)
-
-
-def _menu_context() -> MenuContext:
-    """Read the active profile the way the context panel shows it (ADR 0032, decision 1).
-
-    A configuration reading, not a live one: the menu opens before any command runs, so
-    ``status`` says whether the active profile loads, never whether Netezza answers. That
-    is exactly what "Probar la conexión" is for.
-    """
-    try:
-        profiles_file = load_profiles_file()
-    except InvalidProfileError:
-        return MenuContext(profile=None, host=None, database=None, mode=None, status="error")
-    name = active_profile_name(profiles_file)
-    if name is None:
-        return MenuContext(profile=None, host=None, database=None, mode=None, status="warning")
-    try:
-        profile = get_profile(name)
-    except (ProfileNotFoundError, InvalidProfileError):
-        return MenuContext(profile=name, host=None, database=None, mode=None, status="error")
-    return MenuContext(
-        profile=name, host=profile.host, database=profile.database, mode=profile.mode, status="ok"
-    )
-
-
-def _profile_rows() -> tuple[ProfileRow, ...]:
-    """Read every profile the way "Ver perfiles" shows it - no connection opened.
-
-    Local checks only (acceptance criterion 1 of issue #240): a section that fails to
-    parse is ``error``, same as :func:`_menu_context` decides for the single active
-    profile; one that parses but has no keyring entry yet is ``warning``, because that is
-    knowable without a socket and would otherwise fail the moment "probar" opens one; a
-    profile with both is ``ok``. None of the three levels of
-    :mod:`nz_mcp.profile_check` runs here - those need Netezza, and only "probar" is
-    allowed to ask.
-
-    Raises:
-        InvalidProfileError: ``profiles.toml`` itself does not parse. The caller falls
-            back to ``list-profiles``, which already turns that into the usual message.
-    """
-    file = load_profiles_file()
-    active = active_profile_name(file)
-    rows: list[ProfileRow] = []
-    for name in sorted(file.profiles):
-        try:
-            profile = get_profile(name)
-        except (ProfileNotFoundError, InvalidProfileError):
-            rows.append(
-                ProfileRow(
-                    name=name,
-                    host=None,
-                    database=None,
-                    mode=None,
-                    status="error",
-                    active=name == active,
-                )
-            )
-            continue
-        try:
-            get_password(name)
-            status: ProfileStatus = "ok"
-        except (CredentialNotFoundError, KeyringUnavailableError):
-            status = "warning"
-        rows.append(
-            ProfileRow(
-                name=name,
-                host=profile.host,
-                database=profile.database,
-                mode=profile.mode,
-                status=status,
-                active=name == active,
-            )
-        )
-    return tuple(rows)
-
-
-#: Command each of the four "Ver perfiles" actions hands off to, and how it builds the
-#: argv from the profile name the screen already chose (ADR 0032, decision 3). ``test``
-#: needs ``--profile`` because it is an option there, not the positional argument the
-#: other three take.
-_PROFILE_ACTION_COMMANDS: Final[dict[ProfileAction, tuple[str, Callable[[str], list[str]]]]] = {
-    "use": ("switch-profile", lambda name: [name]),
-    "test": ("test-connection", lambda name: ["--profile", name]),
-    "edit": ("edit-profile", lambda name: [name]),
-    "remove": ("remove-profile", lambda name: [name]),
-}
-
-
-def _run_profile_action(ctx: typer.Context, action: ProfileAction, profile: str) -> None:
-    """Dispatch one of the four "Ver perfiles" actions to the command that already exists.
-
-    None of the four is reimplemented (ADR 0032, decision 3): "borrar" in particular does
-    not ask its own confirmation here - ``remove-profile`` already names the profile and
-    refuses by default (acceptance criterion 4 of issue #240), on the ordinary terminal,
-    after this screen has closed.
-    """
-    command_name, argv_for = _PROFILE_ACTION_COMMANDS[action]
-    _run_registered_command(ctx, command_name, argv_for(profile))
-
-
-def _registered_command(ctx: typer.Context, name: str) -> TyperCommand | None:
-    """Look ``name`` up in the same group ``nz-mcp <command>`` goes through."""
-    group = cast(TyperGroup, ctx.command)
-    registered = group.get_command(ctx, name)
-    return cast(TyperCommand, registered) if registered is not None else None
-
-
-def _run_registered_command(ctx: typer.Context, name: str, argv: list[str]) -> None:
-    """Invoke ``name`` with ``argv``, parsed by the same code a typed invocation would use.
-
-    Shared by :func:`_launch`, which derives ``argv`` from what the command line cannot
-    leave out, and by :func:`_run_profile_action`, which already knows the one argument
-    "Ver perfiles" chose and has no question left to ask.
-    """
-    command = _registered_command(ctx, name)
-    if command is None:  # pragma: no cover - the name came from this same group
-        raise typer.Exit(code=_NO_ARGUMENTS_EXIT_CODE)
-    with command.make_context(name, argv, parent=ctx) as sub_ctx:
-        command.invoke(sub_ctx)
-
-
-def _launch(ctx: typer.Context, name: str) -> None:
-    """Run the chosen command on the ordinary terminal, as if it had been typed.
-
-    The screen is already gone by the time this runs, and that is the design: a command's
-    output belongs in the scroll of the terminal, where it can be read, copied and pasted
-    into an issue. Repainting a menu over it would be ADR 0028's risk 4 - an interface that
-    takes the diagnosis with it when it closes - committed on purpose.
-
-    Nothing is invoked by name from a list of our own: the command comes out of the same
-    group ``nz-mcp <command>`` goes through, and it is parsed by the same code, so it gets
-    the same defaults, the same type conversion and the same usage errors.
-    """
-    command = _registered_command(ctx, name)
-    if command is None:  # pragma: no cover - the name came from this same group
-        raise typer.Exit(code=_NO_ARGUMENTS_EXIT_CODE)
-    _run_registered_command(ctx, name, _required_arguments(command))
-
-
-def _required_arguments(command: TyperCommand) -> list[str]:
-    """Ask, in plain text, for what the command line cannot leave out.
-
-    Four commands take the name of a profile and would fail with a usage error if launched
-    bare, so a menu that could not offer them would be a menu missing the very things one is
-    for. What this does **not** do is give any command a screen: the question is asked after
-    the menu has closed, by the same ``cli_output`` prompt the chained wizard uses, and the
-    text of the question is the parameter's own help - already written, already translated
-    (issue #217), not duplicated here.
-
-    Driven by what ``click`` knows about each parameter rather than by a table of command
-    names: a parameter that stops being required disappears from here on its own, and one
-    that becomes required is asked for without anybody remembering to come back.
-    """
-    answers: list[str] = []
-    for parameter in command.params:
-        if not parameter.required:
-            continue
-        question = str(getattr(parameter, "help", "") or parameter.name)
-        if parameter.param_type_name == "option":  # pragma: no cover - none exist today
-            answers.append(parameter.opts[0])
-        answers.append(out.ask(question))
-    return answers
 
 
 # --- list-profiles rendering --------------------------------------------------

@@ -31,9 +31,6 @@ from textual.color import Color, ColorParseError
 from textual.theme import Theme
 from textual.widgets import Static
 
-from nz_mcp.menu import MenuContext
-from nz_mcp.menu.app import CommandMenuApp
-from nz_mcp.profiles_screen.app import ProfilesApp
 from nz_mcp.tui import NZ_DARK, NZ_LIGHT, STYLESHEET, THEMES, ThemedApp
 from nz_mcp.wizard import DraftFields
 from nz_mcp.wizard.app import ProfileWizardApp
@@ -231,17 +228,17 @@ def test_the_sheet_ships_with_the_package() -> None:
     assert packaged.read_text(encoding="utf-8") == STYLESHEET.read_text(encoding="utf-8")
 
 
-def test_both_screens_load_the_one_sheet() -> None:
-    for app in (CommandMenuApp, ProfileWizardApp, ProfilesApp):
-        assert issubclass(app, ThemedApp)
-        assert app.CSS_PATH == STYLESHEET
-        assert "CSS" not in vars(app), f"{app.__name__} carries its own CSS"
+def test_the_screen_loads_the_one_sheet() -> None:
+    assert issubclass(ProfileWizardApp, ThemedApp)
+    assert ProfileWizardApp.CSS_PATH == STYLESHEET
+    assert "CSS" not in vars(ProfileWizardApp), "ProfileWizardApp carries its own CSS"
 
 
 # --- no widget decides a colour (structural) -----------------------------------------
 
 #: The packages whose modules draw a screen. ``tui`` is where the palette lives, on purpose.
-_SCREEN_PACKAGES: Final[tuple[str, ...]] = ("menu", "wizard", "profiles_screen")
+#: ADR 0035 removed the menu and "Ver perfiles"; the wizard is the only screen left.
+_SCREEN_PACKAGES: Final[tuple[str, ...]] = ("wizard",)
 
 #: The class attributes through which Textual accepts a stylesheet from code, or a second
 #: sheet from a file: a screen inherits ``CSS_PATH`` and never declares its own.
@@ -406,12 +403,7 @@ def test_the_structural_check_lets_the_ordinary_shapes_through(source: str) -> N
     assert collect_colour_violations(source) == []
 
 
-# --- F2 across screens ------------------------------------------------------------
-
-
-def _menu() -> CommandMenuApp:
-    context = MenuContext(profile=None, host=None, database=None, mode=None, status="warning")
-    return CommandMenuApp(entries=(), locale="es", context=context)
+# --- F2 persists on the one screen left --------------------------------------------
 
 
 def _wizard() -> ProfileWizardApp:
@@ -437,19 +429,13 @@ class _Sink:
 
 
 @pytest.mark.asyncio
-async def test_the_theme_chosen_on_one_screen_is_the_one_the_next_screen_opens_with() -> None:
-    """The menu closes before the wizard opens (ADR 0030); F2 has to survive that."""
-    menu = _menu()
-    async with menu.run_test(size=(100, 30)) as pilot:
-        await pilot.pause()
-        assert menu.theme == NZ_DARK.name
-        await pilot.press("f2")
-        await pilot.pause()
-        assert menu.theme == NZ_LIGHT.name
-        await pilot.press("escape")
-
+async def test_the_theme_chosen_with_f2_is_the_one_the_screen_keeps() -> None:
+    """ADR 0035 left the wizard as the one full-screen surface; F2 still has to hold."""
     wizard = _wizard()
     async with wizard.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        assert wizard.theme == NZ_DARK.name
+        await pilot.press("f2")
         await pilot.pause()
         assert wizard.theme == NZ_LIGHT.name
         assert wizard.screen.styles.background == Color.parse(NZ_LIGHT.background or "")
