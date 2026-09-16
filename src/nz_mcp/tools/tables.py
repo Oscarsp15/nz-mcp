@@ -26,12 +26,20 @@ class ListTablesInput(BaseModel):
         max_length=128,
     )
     pattern: str | None = Field(default=None, min_length=1, max_length=128)
+    object_type: Literal["TABLE", "EXTERNAL TABLE", "ALL"] = Field(
+        default="TABLE",
+        description=(
+            "Filter by catalog OBJTYPE. TABLE (default) lists base tables only; "
+            "EXTERNAL TABLE lists external tables only; ALL lists both. Views are "
+            "not included in any case — use nz_list_views."
+        ),
+    )
 
 
 class TableItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str
-    kind: Literal["TABLE"] = "TABLE"
+    kind: Literal["TABLE", "EXTERNAL TABLE"]
 
 
 class ListTablesOutput(BaseModel):
@@ -114,9 +122,10 @@ class GetTableDdlOutput(BaseModel):
 @tool(
     name="nz_list_tables",
     description=(
-        "List Netezza base tables in a schema (not views). "
+        "List Netezza tables in a schema (base tables and/or external tables, not views). "
+        "object_type filters by catalog OBJTYPE: TABLE (default), EXTERNAL TABLE, or ALL. "
         "Use before describing columns or sampling. "
-        "Do not use for views, procedures, or stats."
+        "Do not use for views (nz_list_views) or procedures (nz_list_procedures)."
     ),
     mode="read",
     input_model=ListTablesInput,
@@ -135,9 +144,10 @@ def nz_list_tables(
         database=params.database,
         schema=params.table_schema,
         pattern=params.pattern,
+        object_type=params.object_type,
     )
     return ListTablesOutput(
-        tables=[TableItem(name=row["name"], kind="TABLE") for row in rows],
+        tables=[TableItem.model_validate(row) for row in rows],
         duration_ms=monotonic_duration_ms(start),
     )
 

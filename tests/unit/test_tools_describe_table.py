@@ -53,6 +53,65 @@ def test_nz_describe_table_happy_path(monkeypatch: pytest.MonkeyPatch, two_profi
     assert out.columns[0].sql_type == "INTEGER"
 
 
+def test_nz_describe_table_view_kind_omits_distribution(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """Issue #295: a view's kind is VIEW and distribution is absent, not a fake RANDOM."""
+    payload: dict[str, object] = {
+        "name": "V_MODELOVERSION",
+        "kind": "VIEW",
+        "columns": [
+            {"name": "ID", "type": "INTEGER", "nullable": False, "default": None},
+        ],
+        "organized_on": [],
+        "primary_key": [],
+        "foreign_keys": [],
+    }
+
+    monkeypatch.setattr(
+        "nz_mcp.tools.describe_table.describe_table",
+        lambda *_a, **_kw: payload,
+    )
+
+    out = nz_describe_table(
+        DescribeTableInput(database="DEV", table_schema="DBO", table="V_MODELOVERSION"),
+        config_path=two_profiles,
+    )
+
+    assert out.kind == "VIEW"
+    assert out.distribution is None
+
+
+def test_nz_describe_table_external_table_kind(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    payload: dict[str, object] = {
+        "name": "STG_S3_ORDERS",
+        "kind": "EXTERNAL TABLE",
+        "columns": [
+            {"name": "ID", "type": "INTEGER", "nullable": False, "default": None},
+        ],
+        "distribution": {"type": "RANDOM", "columns": []},
+        "organized_on": [],
+        "primary_key": [],
+        "foreign_keys": [],
+    }
+
+    monkeypatch.setattr(
+        "nz_mcp.tools.describe_table.describe_table",
+        lambda *_a, **_kw: payload,
+    )
+
+    out = nz_describe_table(
+        DescribeTableInput(database="DEV", table_schema="DBO", table="STG_S3_ORDERS"),
+        config_path=two_profiles,
+    )
+
+    assert out.kind == "EXTERNAL TABLE"
+    assert out.distribution is not None
+    assert out.distribution.dist_type == "RANDOM"
+
+
 def test_nz_describe_table_propagates_not_found(
     monkeypatch: pytest.MonkeyPatch, two_profiles: Path
 ) -> None:

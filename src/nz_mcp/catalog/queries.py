@@ -47,12 +47,27 @@ LIST_SCHEMAS: Final[CatalogQuery] = CatalogQuery(
 LIST_TABLES: Final[CatalogQuery] = CatalogQuery(
     id="list_tables",
     sql=(
-        "SELECT TABLENAME AS NAME, OWNER FROM <BD>.._V_TABLE "
-        "WHERE SCHEMA = UPPER(?) AND OBJTYPE='TABLE' "
+        "SELECT TABLENAME AS NAME, OWNER, OBJTYPE FROM <BD>.._V_TABLE "
+        "WHERE SCHEMA = UPPER(?) AND (? IS NULL OR OBJTYPE = UPPER(?)) "
         "AND (? IS NULL OR TABLENAME LIKE UPPER(?)) ORDER BY TABLENAME"
     ),
     catalog_views=("_V_TABLE",),
-    description="Lists tables for a schema with an optional case-insensitive name filter.",
+    description=(
+        "Lists tables for a schema with an optional case-insensitive name filter. "
+        "OBJTYPE filter is optional (NULL means both TABLE and EXTERNAL TABLE)."
+    ),
+    tested_versions=(NPS_112_IF1,),
+    cross_database=True,
+)
+
+DESCRIBE_TABLE_OBJTYPE: Final[CatalogQuery] = CatalogQuery(
+    id="describe_table_objtype",
+    sql=("SELECT OBJTYPE FROM <BD>.._V_TABLE WHERE SCHEMA = UPPER(?) AND TABLENAME = UPPER(?)"),
+    catalog_views=("_V_TABLE",),
+    description=(
+        "Resolves the real OBJTYPE (TABLE or EXTERNAL TABLE) for describe_table. "
+        "No row means the relation is a view, not a table."
+    ),
     tested_versions=(NPS_112_IF1,),
     cross_database=True,
 )
@@ -212,6 +227,7 @@ ALL_QUERIES: Final[tuple[CatalogQuery, ...]] = (
     LIST_VIEWS,
     GET_VIEW_DDL,
     DESCRIBE_TABLE_COLUMNS,
+    DESCRIBE_TABLE_OBJTYPE,
     DESCRIBE_TABLE_DISTRIBUTION,
     DESCRIBE_TABLE_PK,
     DESCRIBE_TABLE_FK,

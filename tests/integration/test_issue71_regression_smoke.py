@@ -28,6 +28,8 @@ def test_describe_ddl_section_smoke() -> None:
     dt = nz_describe_table(
         DescribeTableInput(database=db, table_schema=schema, table=table),
     )
+    assert dt.kind == "TABLE"
+    assert dt.distribution is not None
     assert dt.distribution.dist_type in ("HASH", "RANDOM")
     if dt.distribution.dist_type == "HASH":
         assert len(dt.distribution.columns) >= 1
