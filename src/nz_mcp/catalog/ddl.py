@@ -15,7 +15,7 @@ from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
 from nz_mcp.errors import GuardRejectedError, InvalidInputError, NetezzaError
 from nz_mcp.logging_utils import sanitize
-from nz_mcp.sql_guard import StatementKind
+from nz_mcp.sql_guard import StatementKind, assert_env_safe
 from nz_mcp.sql_guard import validate as guard_validate
 
 # Netezza ``DISTRIBUTE ON`` / ``ORGANIZE ON`` are not parsed by sqlglot; we validate the
@@ -190,6 +190,7 @@ def execute_create_table(
         distribution=distribution,
         organized_on=organized_on,
     )
+    assert_env_safe(full_sql, active_database=profile.database)
 
     if dry_run:
         return {
@@ -307,6 +308,7 @@ def execute_create_table_as(
         distribution=distribution,
         organized_on=organized_on,
     )
+    assert_env_safe(full_sql, active_database=profile.database)
 
     if dry_run:
         duration_ms = 0
@@ -385,6 +387,7 @@ def execute_truncate(
             operation="execute_truncate",
             detail=f"Unexpected statement kind after validation: {parsed.kind}",
         )
+    assert_env_safe(parsed.raw, active_database=profile.database)
     password = get_password(profile.name)
     connection = cast(_ConnectionLike, open_connection(profile, password))
     start = time.monotonic()
@@ -423,6 +426,7 @@ def execute_drop_table(
             operation="execute_drop_table",
             detail=f"Unexpected statement kind after validation: {parsed.kind}",
         )
+    assert_env_safe(parsed.raw, active_database=profile.database)
     password = get_password(profile.name)
     connection = cast(_ConnectionLike, open_connection(profile, password))
     try:
@@ -510,6 +514,7 @@ def execute_drop_procedure(
             operation="execute_drop_procedure",
             detail=f"Unexpected statement kind after validation: {parsed.kind}",
         )
+    assert_env_safe(parsed.raw, active_database=profile.database)
 
     if if_exists and not _procedure_named_exists(profile, database, sch, proc):
         return {"dropped": False, "duration_ms": 0}

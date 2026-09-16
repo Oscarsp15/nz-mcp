@@ -8,7 +8,7 @@ import pytest
 
 from nz_mcp.catalog.ddl import execute_create_table, execute_drop_table, execute_truncate
 from nz_mcp.config import Profile
-from nz_mcp.errors import InvalidInputError, NetezzaError
+from nz_mcp.errors import GuardRejectedError, InvalidInputError, NetezzaError
 from nz_mcp.sql_guard import StatementKind
 from nz_mcp.sql_guard import validate as guard_validate
 
@@ -167,6 +167,41 @@ def test_execute_drop_table_if_not_exists_false(monkeypatch: pytest.MonkeyPatch)
     prof = _admin_profile()
     execute_drop_table(prof, "DEV", "PUBLIC", "T", if_exists=False)
     assert fake.cursor_obj.executed[0][0] == "DROP TABLE PUBLIC.T"
+
+
+# assert_env_safe coverage (issue #278): a non-production profile must not be able to
+# touch a PROD_-prefixed object via any write/DDL path in this module.
+
+
+def test_execute_create_table_rejects_prod_ref_in_nonprod() -> None:
+    prof = _admin_profile()
+    with pytest.raises(GuardRejectedError) as excinfo:
+        execute_create_table(
+            prof,
+            database="DEV",
+            schema="PROD_PUBLIC",
+            table="T",
+            columns=[{"name": "ID", "type": "INTEGER"}],
+            distribution=None,
+            organized_on=None,
+            if_not_exists=True,
+            dry_run=True,
+        )
+    assert excinfo.value.code == "PROD_REF_IN_NONPROD"
+
+
+def test_execute_truncate_rejects_prod_ref_in_nonprod() -> None:
+    prof = _admin_profile()
+    with pytest.raises(GuardRejectedError) as excinfo:
+        execute_truncate(prof, "DEV", "PROD_PUBLIC", "T")
+    assert excinfo.value.code == "PROD_REF_IN_NONPROD"
+
+
+def test_execute_drop_table_rejects_prod_ref_in_nonprod() -> None:
+    prof = _admin_profile()
+    with pytest.raises(GuardRejectedError) as excinfo:
+        execute_drop_table(prof, "DEV", "PROD_PUBLIC", "T", if_exists=True)
+    assert excinfo.value.code == "PROD_REF_IN_NONPROD"
 
 
 class _BoomCursor:
