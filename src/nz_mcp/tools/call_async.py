@@ -103,14 +103,14 @@ class JobPollOutput(BaseModel):
 @tool(
     name="nz_job_poll",
     description=(
-        "Poll the status of an async job started by nz_call_procedure_async. "
+        "Polls an async job started by nz_call_procedure_async. "
         "Returns status (running/done/failed/cancelling/cancelled) and the full result "
         "(return_value, messages, duration_ms) when done. "
-        "partial_notices may be empty while the SP is running — nzpy delivers NOTICE "
-        "messages with the resultset at completion, not incrementally. "
-        "The job store is in-memory: all jobs are lost if the MCP server restarts. "
+        "partial_notices may be empty while running: nzpy delivers NOTICE messages "
+        "with the resultset at completion, not incrementally. "
+        "The job store is in-memory and lost on server restart. "
         "Do not poll more often than every 10 s. "
-        "Do not use for jobs started by nz_call_procedure (synchronous)."
+        "Not for jobs started by nz_call_procedure (synchronous)."
     ),
     mode="read",
     input_model=JobPollInput,
