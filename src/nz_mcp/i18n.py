@@ -278,6 +278,20 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Se requiere confirm=true para ejecutar la mutación con dry_run=false.",
         "en": "confirm=true is required to run the mutation with dry_run=false.",
     },
+    "JOB_LIMIT_REACHED": {
+        "es": (
+            "Se alcanzó el máximo de jobs asíncronos simultáneos ({detail}). "
+            "Espera a que termine uno antes de lanzar otro."
+        ),
+        "en": (
+            "Maximum concurrent async jobs reached ({detail}). "
+            "Wait for one to finish before launching another."
+        ),
+    },
+    "JOB_NOT_FOUND": {
+        "es": "Job no encontrado: {detail}",
+        "en": "Job not found: {detail}",
+    },
     "RESPONSE_TOO_LARGE": {
         "es": (
             "La respuesta excede el límite ({size_kb} KB > {cap_kb} KB). "

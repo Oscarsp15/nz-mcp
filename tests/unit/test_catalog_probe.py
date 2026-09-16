@@ -222,6 +222,6 @@ def test_probe_one_row_direct() -> None:
             return [(1,)]
 
     cq = ALL_QUERIES[0]
-    row = probe_one_row(Cursor(), prof, cq, password="unit-test-password")  # noqa: S106
+    row = probe_one_row(Cursor(), prof, cq, password="unit-test-password")
     assert row.status == "ok"
     assert row.row_count == 1
