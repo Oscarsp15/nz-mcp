@@ -302,7 +302,7 @@ Metadata de un SP sin devolver el cuerpo completo.
 | `database` | string (required) | |
 | `schema` | string (required) | |
 | `procedure` | string (required) | |
-| `signature` | string (optional) | Si hay overloads, firma exacta tipo `(VARCHAR, INTEGER)`. |
+| `signature` | string (optional) | Si hay overloads, firma de tipos exacta: `(VARCHAR, INTEGER)` o `PROCNAME(VARCHAR,INTEGER)` (el string que imprime `OVERLOAD_AMBIGUOUS`) — issue #267. |
 
 **Output**:
 ```json
@@ -329,7 +329,7 @@ Extrae las métricas de tamaño (bytes y líneas, en sus variantes `raw` y `clea
 | `database` | string (required) | |
 | `schema` | string (required) | |
 | `procedure` | string (required) | |
-| `signature` | string (optional) | |
+| `signature` | string (optional) | Firma de tipos del overload; ver formatos aceptados en `nz_describe_procedure`. |
 
 **Output**:
 ```json
@@ -356,7 +356,7 @@ Devuelve el DDL completo (`CREATE OR REPLACE PROCEDURE ...`).
 | `database` | string (required) | |
 | `schema` | string (required) | |
 | `procedure` | string (required) | |
-| `signature` | string (optional) | Para overloads. |
+| `signature` | string (optional) | Para overloads; ver formatos aceptados en `nz_describe_procedure`. |
 | `max_bytes` | int (optional, 1024..204800, default 102400) | Tope duro en bytes UTF-8 del `ddl` devuelto. Se corta en frontera de línea. |
 | `variant` | `"raw"` \| `"clean"` (default `"raw"`) | `raw` devuelve el source tal como vive en `_v_procedure` (comentarios incluidos). `clean` elimina comentarios de línea (`--`) y de bloque (`/* … */`) fuera de literales de cadena y de identificadores entrecomillados — optimiza tokens para razonamiento IA. Default `raw` preserva back-compat. |
 
@@ -395,7 +395,7 @@ Extrae una sección específica de un SP (útil para evitar gastar tokens en SPs
 | `database` | string (required) | |
 | `schema` | string (required) | |
 | `procedure` | string (required) | |
-| `signature` | string (optional) | |
+| `signature` | string (optional) | Firma de tipos del overload; ver formatos aceptados en `nz_describe_procedure`. |
 | `section` | enum: `header` \| `declare` \| `body` \| `exception` \| `range` (required) | |
 | `from_line` | int (required if `section: range`) | 1-indexed. |
 | `to_line` | int (required if `section: range`) | inclusive, cap 500 líneas. |
@@ -424,7 +424,7 @@ Aísla la lógica de **una** tabla intermedia dentro de un SP: devuelve los `CRE
 | `database` | string (required) | |
 | `schema` | string (required) | |
 | `procedure` | string (required) | |
-| `signature` | string (optional) | Para overloads. |
+| `signature` | string (optional) | Para overloads; ver formatos aceptados en `nz_describe_procedure`. |
 | `table` | string (required) | Nombre simple de la tabla (case-insensitive). No se aceptan `schema.table` — la lógica es interna al SP. |
 | `kinds` | array of `"create"` \| `"insert"` \| `"drop"` \| `"truncate"` \| `"update"` \| `"delete"` \| `"merge"` (default `["create", "insert"]`) | Filtra los tipos de statement a incluir. El default mantiene la cobertura v1 (CREATE/INSERT) por back-compat; los cinco verbos extra (`drop`/`truncate`/`update`/`delete`/`merge`) son opt-in y reflejan los mismos writes que cuenta `nz_find_table_references` (issue #120). |
 
@@ -664,7 +664,7 @@ Clona un procedimiento almacenado de un origen a un destino (otro database/schem
 | `source_database` | string (required) | |
 | `source_schema` | string (required) | |
 | `source_procedure` | string (required) | |
-| `source_signature` | string (optional) | Para overloads. |
+| `source_signature` | string (optional) | Para overloads; ver formatos aceptados en `nz_describe_procedure`. |
 | `target_database` | string (required) | Puede coincidir con `source_database`. |
 | `target_schema` | string (required) | |
 | `target_procedure` | string (optional) | Si se omite, conserva nombre del origen. |
@@ -739,7 +739,7 @@ Opcionalmente persiste el DDL al filesystem del servidor MCP cuando se pasa `out
 | `database` | string (required) | |
 | `schema` | string (required) | |
 | `name` | string (required) | Nombre de tabla, vista o procedimiento. |
-| `signature` | string (optional) | Solo procedimientos: firma/overload. |
+| `signature` | string (optional) | Solo procedimientos: firma/overload; ver formatos aceptados en `nz_describe_procedure`. |
 | `include_constraints` | bool (default `true`) | Solo tablas: igual que `nz_get_table_ddl`. |
 | `output_path` | string (optional) | Path absoluto en el host del MCP server donde escribir el DDL. Política: sin `..`, sin `~`, sin caracteres de control; carpeta padre debe existir; archivo no debe existir salvo `overwrite=true`. En POSIX el archivo se crea con `0600`; en Windows hereda ACL del padre (issue #127). |
 | `overwrite` | bool (default `false`) | Si `true`, sobrescribe `output_path` cuando ya existe. |

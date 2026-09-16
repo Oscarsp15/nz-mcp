@@ -482,6 +482,26 @@ def test_column_meta_maps_oid_int_to_name() -> None:
     assert meta == [{"name": "c", "type": "varchar"}]
 
 
+def test_column_meta_maps_byteint_oid_to_name() -> None:
+    """OID 2500 is Netezza's BYTEINT, verified live against _V_DATATYPE (issue #268)."""
+
+    class _C:
+        description = (("c", 2500),)
+
+    meta = _column_meta_from_cursor(cast(Any, _C()))
+    assert meta == [{"name": "c", "type": "byteint"}]
+
+
+def test_column_meta_maps_nvarchar_oid_to_name() -> None:
+    """OID 2530 is Netezza's NVARCHAR, verified live against _V_DATATYPE (issue #268)."""
+
+    class _C:
+        description = (("c", 2530),)
+
+    meta = _column_meta_from_cursor(cast(Any, _C()))
+    assert meta == [{"name": "c", "type": "nvarchar"}]
+
+
 def test_column_meta_empty_description() -> None:
     class _C:
         description = None
