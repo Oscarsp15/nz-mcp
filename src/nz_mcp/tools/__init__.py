@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from nz_mcp.tools import (
     alter_table,  # noqa: F401  (registers nz_alter_table)
+    call_async,  # noqa: F401  (registers nz_call_procedure_async, nz_job_poll)
     call_procedure,  # noqa: F401  (registers nz_call_procedure)
     clone_procedure,  # noqa: F401  (registers nz_clone_procedure)
     databases,  # noqa: F401  (registers database tools)
