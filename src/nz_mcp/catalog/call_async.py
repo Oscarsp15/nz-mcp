@@ -51,9 +51,9 @@ def _run_job(
     try:
         connection = cast(Any, open_connection(profile, password, timeout=None))
 
-        # Capture Netezza session ID so nz_job_cancel can identify the session to abort.
-        # SELECT CURRENT_SID is a Netezza scalar that returns this connection's own session ID.
-        # It is safe under concurrent use: each session always returns its own ID, never another's.
+        # Capture Netezza session ID; exposed by nz_job_poll so a DBA can abort the session
+        # manually with nzsession if needed. SELECT CURRENT_SID is a Netezza scalar that returns
+        # this connection's own session ID (safe under concurrent use; never returns another's).
         with closing(connection.cursor()) as sid_cur:
             sid_cur.execute("SELECT CURRENT_SID")
             row = sid_cur.fetchone()
@@ -168,11 +168,11 @@ def launch_call_procedure(
         "session_id": None,
         "hint_es": (
             f"Sondea con nz_job_poll(job_id='{job_id}') cada 30 s. "
-            "Cancela con nz_job_cancel(job_id=...) si es necesario."
+            "El session_id en nz_job_poll permite a un DBA abortar con nzsession si es necesario."
         ),
         "hint_en": (
             f"Poll with nz_job_poll(job_id='{job_id}') every 30 s. "
-            "Cancel with nz_job_cancel(job_id=...) if needed."
+            "The session_id from nz_job_poll allows a DBA to abort with nzsession if needed."
         ),
     }
 

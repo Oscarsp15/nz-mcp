@@ -1071,7 +1071,7 @@ Lanza un SP vía `CALL schema.proc(args)` en un **hilo daemon** y devuelve un `j
 
 **Reglas**:
 - Máx **5 jobs simultáneos** en memoria; superar el límite → `JOB_LIMIT_REACHED`.
-- Captura `SELECT CURRENT_SID` inmediatamente al abrir la conexión (escalar seguro bajo concurrencia: cada sesión devuelve siempre su propio ID) para que `nz_job_cancel` pueda identificar la sesión a abortar.
+- Captura `SELECT CURRENT_SID` inmediatamente al abrir la conexión (escalar Netezza seguro bajo concurrencia: cada sesión devuelve siempre su propio ID); `session_id` queda expuesto en `nz_job_poll` para que un DBA lo use con `nzsession` si necesita abortar el SP manualmente. **Caveat**: bajo alta concurrencia el session_id puede coincidir con otra sesión activa si CURRENT_SID no está disponible en el perfil (en ese caso permanece `null`).
 - Mismo conjunto de guardas que `nz_call_procedure`: `sql_guard` (kind `CALL`), `assert_env_safe` (`PROD_REF_IN_NONPROD`), solo placeholders `?`.
 - Los jobs expiran y se borran del store **1 hora** después de completar (estado `done`/`failed`/`cancelled`).
 - No usar para SPs cortos (< 30 s): `nz_call_procedure` es más simple y devuelve el resultado en el mismo llamado.
