@@ -95,12 +95,6 @@ about what is drawn yet — the level-0 output is pinned character by character 
 ``tests/unit/test_cli_output.py``, and that pin is the contract every later level
 has to keep.
 
-:func:`interactive_ui_blocker` is the same detection asked a harder question:
-may a **full-screen** application start here? It is the gate of ADR 0028,
-condition 1, and it lives in this module for the reason everything else about
-terminals does - one place decides. It returns a value and builds nothing; it
-does not import ``textual`` and never will. The wizard is the only caller.
-
 :func:`prepare_windows_console` is ADR 0033's answer to a measurement ADR 0031 made
 correctly and still left a real user unable to see the redesign: a Windows console on a
 legacy code page is not a fact to accept, it is a fact to try to change first. On Windows,
@@ -147,7 +141,7 @@ from typing import Any, Final, Literal, Protocol, TextIO
 
 import typer
 from rich import box
-from rich.console import Console, detect_legacy_windows
+from rich.console import Console
 from rich.table import Table
 
 Style = Literal["plain", "heading", "success", "warning", "error"]
@@ -351,9 +345,8 @@ def animation_enabled(stream: SupportsIsatty | None = None) -> bool:
 #: It names this program, so it wins over ``NO_COLOR``, which is a global convention.
 UI_LEVEL_ENV: Final[str] = "NZ_MCP_UI_LEVEL"
 
-#: What :func:`terminal_level` can answer. Level 2 — full screen — exists, but it is not
-#: this function's to grant (ADR 0031, point 9): the type makes that impossible to do by
-#: accident, which is why it is a ``Literal`` and not ``int``.
+#: What :func:`terminal_level` can answer: Nivel B (0) or Nivel A (1) — ADR 0035 removed
+#: the third, full-screen level this used to leave room for.
 TerminalLevel = Literal[0, 1]
 
 #: The only spellings the escape hatch accepts, after stripping. Anything else — ``2``
@@ -410,9 +403,9 @@ def _windows_console_renders_unicode() -> bool:
     return _console_output_code_page() == _UTF8_CODE_PAGE
 
 
-#: Escape hatch of ADR 0033. Same spellings as :data:`NO_TUI_ENV`: any value counts as *yes*
-#: except the two that conventionally mean "no", so that whoever sets it does not have their
-#: console touched at all - no code page, no console mode, no stream reconfiguration.
+#: Escape hatch of ADR 0033. Any value counts as *yes* except the two that conventionally
+#: mean "no", so that whoever sets it does not have their console touched at all - no code
+#: page, no console mode, no stream reconfiguration.
 NO_CONSOLE_PREP_ENV: Final[str] = "NZ_MCP_NO_CONSOLE_PREP"
 
 #: ``nStdHandle`` values ``GetStdHandle`` accepts for the two streams this layer draws on -
@@ -605,13 +598,8 @@ def terminal_level(stream: SupportsIsatty | None = None) -> TerminalLevel:
     4. ``CI`` present. A build log is a file someone reads a month later, and some runners
        attach a pseudo-terminal, where ``isatty`` says yes and is wrong.
     5. ``stream`` is not a terminal: redirected, piped, replaced by a wrapper.
-    6. On POSIX, a ``TERM`` that is empty, unset or unusable to terminfo — the same lookup
-       the full-screen gate already trusts.
+    6. On POSIX, a ``TERM`` that is empty, unset or unusable to terminfo.
     7. On Windows, a console outside Windows Terminal that is not on code page 65001.
-
-    Level 2 — full screen — is not this function's to decide; see
-    :func:`interactive_ui_blocker`, which asks harder questions and, as its eighth trigger,
-    also requires this one to answer 1.
     """
     forced = _forced_level()
     if forced is not None:
@@ -644,26 +632,8 @@ def stdout_terminal_level() -> TerminalLevel:
     return terminal_level(sys.stdout)
 
 
-#: Escape hatch of ADR 0028, condition 1. Anyone whose terminal, multiplexer or remote
-#: session makes the full-screen wizard a bad deal sets this once in their shell profile
-#: and never thinks about it again.
-NO_TUI_ENV: Final[str] = "NZ_MCP_NO_TUI"
-
-#: Why the full-screen wizard did not start, when it did not. Names, not sentences: the
-#: caller decides whether any of this is worth showing, and tests assert on them.
-InteractiveBlocker = Literal[
-    "opted_out",
-    "term_dumb",
-    "no_terminal",
-    "background_process",
-    "terminal_without_capabilities",
-    "console_without_vt",
-    "window_too_small",
-    "terminal_level_0",
-]
-
-#: The terminfo capability a full-screen application cannot do without: absolute cursor
-#: addressing. A terminal type that does not declare it cannot be painted on, whatever
+#: The terminfo capability a terminal cannot be drawn on without: absolute cursor
+#: addressing. A terminal type that does not declare it cannot be positioned on, whatever
 #: else it can do.
 _CURSOR_ADDRESSING: Final[str] = "cup"
 
@@ -672,13 +642,13 @@ def _terminfo_declares_full_screen(term: str) -> bool:
     """Whether the terminfo database describes ``term`` as paintable.
 
     POSIX only; on Windows there is no terminfo and the question is answered by
-    :func:`rich.console.detect_legacy_windows` instead.
+    :func:`_windows_console_renders_unicode` instead.
 
     ``curses.setupterm`` is the same lookup every curses program does, and the entry it
-    finds has to declare absolute cursor addressing - the one capability a full-screen
-    wizard cannot work around. Anything that goes wrong - no terminfo database at all, a
-    broken entry, a build of Python without ``curses`` - counts as "no guarantees",
-    because that is what it is.
+    finds has to declare absolute cursor addressing - the one capability Nivel A cannot
+    work around. Anything that goes wrong - no terminfo database at all, a broken entry, a
+    build of Python without ``curses`` - counts as "no guarantees", because that is what
+    it is.
 
     One thing this deliberately does **not** promise: that an unknown terminal type is
     rejected. Measured on the CI runners, ncurses answers a name it has never seen with a
@@ -703,19 +673,17 @@ def _terminfo_declares_full_screen(term: str) -> bool:
 
 
 def _terminal_type_is_capable() -> bool:
-    """Whether ``TERM`` describes something a full-screen application can be drawn on.
+    """Whether ``TERM`` describes something Nivel A can safely draw on.
 
-    The fifth trigger, and one of the two the first round of this work missed: ``TERM=dumb``
-    is not the only way to end up without guarantees. An **empty or unset** ``TERM`` is
-    routine inside containers and in some multiplexed SSH sessions, and an unknown value is
-    routine on a host whose terminfo database does not carry the client's terminal type. In
-    both cases there is a real terminal on all three streams and a perfectly valid window
-    size, so none of the other triggers fires - and the wizard would start with no guarantee
-    that a single escape sequence or key it sends means anything.
+    Signal 6 of :func:`terminal_level` (ADR 0031, point 2): ``TERM=dumb`` is not the only
+    way to end up without guarantees. An **empty or unset** ``TERM`` is routine inside
+    containers and in some multiplexed SSH sessions, and an unknown value is routine on a
+    host whose terminfo database does not carry the client's terminal type. In both cases
+    there is a real terminal with no guarantee that a single escape sequence means
+    anything, so this falls back to the floor rather than risk one.
 
     Only asked on POSIX. On Windows ``TERM`` is normally unset and says nothing; there the
-    equivalent question is whether the console speaks VT, which is the trigger after this
-    one.
+    equivalent question is whether the console speaks VT, which is signal 7.
     """
     if os.name != "posix":
         return True
@@ -723,146 +691,8 @@ def _terminal_type_is_capable() -> bool:
     return bool(term) and _terminfo_declares_full_screen(term)
 
 
-def _owns_the_terminal() -> bool:
-    """Whether this process is in the **foreground** process group of its terminal.
-
-    The trigger the first seven cannot see, and the one with the worst failure. A process
-    started in the background - ``nz-mcp &``, or one that inherited the descriptors through
-    ``nohup`` or ``setsid`` - has three perfectly valid terminals on ``isatty``, a real
-    ``TERM`` and a good window size, so every other check says yes. Then the application
-    reads the keyboard, POSIX answers with ``SIGTTIN``, the process **stops** with the
-    alternate screen still open, and the terminal is left unusable for whoever was sitting
-    at it. Refusing to start is the whole fix: the help prints, the job finishes, nothing
-    is left behind.
-
-    ``os.tcgetpgrp`` asks the terminal which process group it is currently listening to;
-    if it is not ours, we are in the background. Anything that cannot be asked - a stream
-    with no descriptor because a wrapper replaced it, a descriptor that is not a terminal -
-    counts as "not ours", because degrading costs a help screen and guessing wrong costs
-    someone their terminal.
-
-    **On Windows this does not apply and the answer is always yes**, and that is said out
-    loud here rather than left implicit. There are no POSIX process groups, no controlling
-    terminal to own and no ``SIGTTIN``: a detached process there has no console at all,
-    which is the third trigger (``isatty`` is false), and one started with a shared console
-    is not stopped for reading it.
-
-    The platform is decided by **looking the two calls up** instead of by comparing
-    ``sys.platform``, and both halves of that are deliberate. The question this trigger
-    really asks is *"does this operating system have process groups?"*, and the honest way
-    to ask it is whether the functions that answer them exist. It also keeps the whole
-    function analysable and testable on both platforms, which a ``sys.platform`` branch
-    would not be: the type checker prunes one side of it, so half of this would go
-    unchecked on every build and untested on every runner.
-    """
-    ask_the_terminal: Callable[[int], int] | None = getattr(os, "tcgetpgrp", None)
-    our_own_group: Callable[[], int] | None = getattr(os, "getpgrp", None)
-    if ask_the_terminal is None or our_own_group is None:
-        return True
-    try:
-        descriptor = sys.stdin.fileno()
-    except (AttributeError, OSError, ValueError):
-        return False
-    try:
-        return ask_the_terminal(descriptor) == our_own_group()
-    except OSError:
-        # ``ENOTTY`` (the descriptor is not a terminal) and ``EBADF`` (it was closed under
-        # us) both land here. Neither is a terminal this process may paint on.
-        return False
-
-
-def _opted_out_of_the_tui() -> bool:
-    """Whether ``NZ_MCP_NO_TUI`` asks for the chained questions.
-
-    Any value counts except the two that conventionally mean "no", so that
-    ``NZ_MCP_NO_TUI=1`` and ``NZ_MCP_NO_TUI=true`` do the same obvious thing and
-    ``NZ_MCP_NO_TUI=0`` does not silently disable a wizard someone wanted.
-    """
-    value = os.environ.get(NO_TUI_ENV, "").strip().lower()
-    return bool(value) and value not in ("0", "false")
-
-
-def interactive_ui_blocker(*, min_width: int, min_height: int) -> InteractiveBlocker | None:
-    """Report why a full-screen application must not start here, or ``None`` if it may.
-
-    This is the gate of ADR 0028, condition 1, and it lives here because every piece of
-    terminal detection this project owns lives here. It decides a value; it builds
-    nothing, imports no TUI library and has no opinion about what the caller does next.
-
-    The gate has to be ours. Measured on ``textual`` 8.2.8: the word ``dumb`` does not
-    appear anywhere in the package, and the single ``isatty`` in its drivers decides *how*
-    to read input rather than *whether* to start. A TUI library will try to paint wherever
-    it is allowed to; declining is this project's job.
-
-    The eight start-up triggers, in the order that costs least to check:
-
-    1. ``NZ_MCP_NO_TUI`` - an explicit request, honoured without argument.
-    2. ``TERM=dumb`` - a terminal that has told us it understands nothing.
-    3. No terminal at all on input, payload or status: redirected, piped, in CI, or
-       driven by another process. Note that ``nz-mcp init > block.json``, which the
-       install guide suggests, lands here on purpose.
-    4. A process running in the **background** of a terminal it does not own: ``nz-mcp &``,
-       or one that inherited the descriptors through ``nohup`` or ``setsid``. All three
-       streams are terminals here, so trigger 3 says nothing, and the failure is the worst
-       of the list: ``SIGTTIN`` stops the process with the alternate screen open and leaves
-       the terminal unusable. POSIX only; see :func:`_owns_the_terminal`.
-    5. On POSIX, a ``TERM`` that is empty, unset or unknown to terminfo, or that does not
-       declare cursor addressing. Common inside containers and in some multiplexed SSH
-       sessions, and invisible to every other trigger: the streams are terminals and the
-       window is a good size.
-    6. A Windows console that does not speak VT sequences. Legacy code pages turn box
-       drawing into ``?``; the wizard is ASCII, but a console without VT cannot position
-       a cursor either. Triggers 5 and 6 are the same question asked per platform.
-    7. A window below the declared minimum.
-    8. A terminal that does not reach level 1 of ADR 0031 (:func:`terminal_level`). Full
-       screen is drawn with colour and Unicode - they are its raw material, not a garnish -
-       so whoever asked for none (``NO_COLOR``, ``NZ_MCP_UI_LEVEL=0``) or is on a console
-       that cannot show them gets the chained questions instead. Deliberately the
-       **result** of the detection and not the override: any of its signals closes this.
-       The converse does not hold - ``NZ_MCP_UI_LEVEL=1`` silences this trigger and no
-       other, and the other seven are the ones that decide.
-
-    One more trigger - shrinking below the minimum *during* the session - cannot be seen
-    from here and belongs to the application.
-
-    Args:
-        min_width: Narrowest window the caller can draw itself in, in cells.
-        min_height: Shortest window the caller can draw itself in, in cells.
-
-    Returns:
-        The name of the first trigger that fired, or ``None`` when none did.
-    """
-    # The triggers as data rather than as a chain of returns: the list of reasons a wizard
-    # may not start is the interesting part of this function, and a test can walk it.
-    triggers: tuple[tuple[InteractiveBlocker, Callable[[], bool]], ...] = (
-        ("opted_out", _opted_out_of_the_tui),
-        ("term_dumb", _term_is_dumb),
-        ("no_terminal", lambda: not _standard_streams_are_terminals()),
-        ("background_process", lambda: not _owns_the_terminal()),
-        ("terminal_without_capabilities", lambda: not _terminal_type_is_capable()),
-        ("console_without_vt", detect_legacy_windows),
-        ("window_too_small", lambda: _window_is_smaller_than(min_width, min_height)),
-        ("terminal_level_0", lambda: terminal_level() == 0),
-    )
-    return next((name for name, fired in triggers if fired()), None)
-
-
 def _term_is_dumb() -> bool:
     return os.environ.get("TERM", "").strip().lower() == _DUMB_TERM
-
-
-def _standard_streams_are_terminals() -> bool:
-    return all(_is_a_terminal(stream) for stream in (sys.stdin, sys.stdout, sys.stderr))
-
-
-def _window_is_smaller_than(min_width: int, min_height: int) -> bool:
-    size = shutil.get_terminal_size()
-    return size.columns < min_width or size.lines < min_height
-
-
-def interactive_ui_enabled(*, min_width: int, min_height: int) -> bool:
-    """Whether a full-screen application may start. See :func:`interactive_ui_blocker`."""
-    return interactive_ui_blocker(min_width=min_width, min_height=min_height) is None
 
 
 def _is_a_terminal(stream: object) -> bool:
@@ -1369,9 +1199,7 @@ def confirm(prompt: str, *, default: bool = False) -> bool:
 
 __all__: Final[tuple[str, ...]] = (
     "NO_CONSOLE_PREP_ENV",
-    "NO_TUI_ENV",
     "UI_LEVEL_ENV",
-    "InteractiveBlocker",
     "Style",
     "SupportsIsatty",
     "animation_enabled",
@@ -1384,8 +1212,6 @@ __all__: Final[tuple[str, ...]] = (
     "emit",
     "fail",
     "heading",
-    "interactive_ui_blocker",
-    "interactive_ui_enabled",
     "note",
     "prepare_windows_console",
     "progress",
