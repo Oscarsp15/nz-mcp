@@ -162,6 +162,9 @@ No hay `timeout_s`: el job corre sin límite hasta que termina o se cancela expl
 | Campo | Tipo | Requerido |
 |---|---|---|
 | `job_id` | `str` | sí |
+| `confirm` | `bool` | sí (debe ser `true`) |
+
+> `confirm=true` es obligatorio: `ABORT SESSION` interrumpe una sesión activa, al igual que las demás acciones admin destructivas del catálogo (`nz_drop_table`, `nz_call_procedure` con `dry_run=false`, etc.).
 
 **Output**:
 ```json
@@ -192,6 +195,7 @@ Su contrato, código y tests quedan exactamente como los dejó #272. Las dos too
 | Jobs perdidos al reiniciar el servidor | Ciclo de vida del proceso MCP = sesión del cliente; documentado como limitación conocida |
 | Proliferación de hilos si se lanzan muchos jobs | `MAX_CONCURRENT_JOBS = 5`; error claro si se supera |
 | nzpy no documentada como thread-safe | Cada hilo tiene su propia conexión y cursor; `_DriverDiagnosticsHandler` ya filtra por thread ID; no hay estado compartido de driver |
+| **`ABORT SESSION <session_id>` no verificado contra Netezza real** | **Supuesto a validar en FASE 2**: sintaxis, privilegios del perfil SaaS y comportamiento (aborta la sesión del job, no la del caller). El issue #275 dejó este punto explícitamente abierto. FASE 2 debe probarlo antes de publicar `nz_job_cancel`. |
 | ABORT SESSION puede no tener permisos | `abort_error` en la respuesta; instrucción para que un DBA ejecute el ABORT manualmente con el `session_id` devuelto |
 | `session_id` no capturado (raro) | `nz_job_cancel` devuelve `CANCEL_UNAVAILABLE`; el job sigue corriendo |
 | Carrera entre `ABORT SESSION` y la finalización natural del SP | `nz_job_cancel` verifica el estado antes de enviar ABORT; si ya terminó, devuelve `already_done` |
