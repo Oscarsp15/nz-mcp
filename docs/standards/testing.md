@@ -1,5 +1,23 @@
 # Estándares de testing
 
+## Worktrees paralelos: `import nz_mcp` puede resolver al checkout equivocado
+
+Cuando varios agentes trabajan en `git worktree` separados del checkout principal, el
+paquete instalado en modo editable (`pip install -e .` / `uv sync`) apunta al checkout
+donde se instaló — casi siempre el principal, no el worktree. Correr `pytest` (o cualquier
+script) desde un worktree **sin más** puede resolver `import nz_mcp` contra el código del
+checkout compartido en vez del que se está probando, y los tests pasan en verde sin haber
+tocado una sola línea del cambio real.
+
+Antepone `PYTHONPATH` con el `src/` del worktree para forzarlo:
+
+```bash
+PYTHONPATH="$(pwd)/src" pytest -q -m "not integration"
+```
+
+Verifícalo una vez por sesión con `python -c "import nz_mcp; print(nz_mcp.__file__)"` y
+confirma que la ruta impresa es la del worktree, no la del checkout principal.
+
 ## Pirámide
 
 ```

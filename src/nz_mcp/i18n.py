@@ -385,6 +385,16 @@ MESSAGES: Final[dict[str, Message]] = {
             "from the keyring. Continue?"
         ),
     },
+    "CLI.CONFIRM_NO_TTY": {
+        "es": (
+            "No se pudo hacer la pregunta de confirmación: no hay terminal disponible. "
+            "Vuelve a ejecutar el comando con --yes para continuar sin confirmar."
+        ),
+        "en": (
+            "The confirmation question could not be asked: no terminal is available. "
+            "Re-run the command with --yes to continue without confirming."
+        ),
+    },
     "CLI.PROFILE_REMOVE_CANCELLED": {
         "es": "Cancelado: el perfil '{profile}' sigue configurado.",
         "en": "Cancelled: profile '{profile}' is still configured.",
@@ -1128,6 +1138,10 @@ MESSAGES: Final[dict[str, Message]] = {
     "CLI.HELP.OPT.TIMEOUT_S_DEFAULT": {
         "es": "Segundos que se espera a una consulta antes de cortarla",
         "en": "Seconds a query is given before it is cut off",
+    },
+    "CLI.HELP.OPT.YES": {
+        "es": "Responde 'sí' a cada confirmación sin preguntar (para scripts y CI)",
+        "en": "Answer 'yes' to every confirmation without asking (for scripts and CI)",
     },
     # nz-mcp list-profiles — where each profile points, and which one is in use.
     "CLI.PROFILES_EMPTY": {
