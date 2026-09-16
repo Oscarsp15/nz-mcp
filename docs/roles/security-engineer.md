@@ -72,6 +72,7 @@ _SECRET_PATTERNS = [
     re.compile(r"(password|pwd|secret|token|api[_-]?key)\s*[=:]\s*\S+", re.I),
 ]
 
+
 def sanitize(s: str, *, known_secrets: set[str] = frozenset()) -> str:
     for pat in _SECRET_PATTERNS:
         s = pat.sub(r"\1=***", s)

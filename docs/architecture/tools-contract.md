@@ -27,7 +27,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (36 tools registradas)
+## Catálogo v0.1 (39 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -681,6 +681,7 @@ Clona un procedimiento almacenado de un origen a un destino (otro database/schem
 | `transformations` | array (optional) | Reemplazos sobre el cuerpo: `[{from, to, regex: bool}]`. Limitado a < 20. |
 | `dry_run` | bool (default true) | Si `true`, solo devuelve el DDL final que se ejecutaría. |
 | `confirm` | bool (**required if** `dry_run=false`) | |
+| `echo_sql` | bool (default **true**) | Si `false`, la respuesta de ejecución real omite `ddl_to_execute` (queda `null`); en `dry_run` siempre se devuelve el DDL como preview. |
 
 **Output**:
 ```json
@@ -692,11 +693,23 @@ Clona un procedimiento almacenado de un origen a un destino (otro database/schem
 }
 ```
 
+**Output** (ejecución real con `echo_sql=false`):
+```json
+{
+  "dry_run": false,
+  "ddl_to_execute": null,
+  "executed": true,
+  "warnings": [],
+  "duration_ms": 42
+}
+```
+
 **Reglas**:
 - Si `target_database == source_database` y `target_procedure` igual → debe `replace_if_exists=true` o falla con `PROCEDURE_ALREADY_EXISTS`.
 - Detección heurística de referencias cross-DB (warnings, no bloqueo).
 - Toda transformación textual se aplica al **body**, nunca al header firmado.
 - Auditoría: log estructurado con `source_*`, `target_*`, `ddl_hash`.
+- `echo_sql` controla **solo** la ejecución real: con `false`, `ddl_to_execute` queda `null` y la respuesta se reduce a metadatos (`executed`, `warnings`, `duration_ms`), para clonar en lote sin arrastrar el DDL completo al contexto. En `dry_run` el DDL se devuelve **siempre**, porque el preview es el objetivo de ese modo.
 
 ---
 
@@ -1030,6 +1043,87 @@ Elimina una vista vía `DROP VIEW schema.view` (modo `admin`, `confirm` obligato
 
 ---
 
+---
+
+#### 38. `nz_call_procedure_async`
+
+Lanza un SP vía `CALL schema.proc(args)` en un **hilo daemon** y devuelve un `job_id` inmediatamente sin bloquear el event loop. Pensado para SPs de larga ejecución (> 30 s) donde `nz_call_procedure` bloquearía todas las llamadas MCP durante la espera. Requiere modo `admin` y `confirm=true`. Ver `docs/adr/0036-nz-call-procedure-asincrono.md`.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | Debe coincidir con la BD del perfil activo. |
+| `schema` | string (required) | |
+| `procedure` | string (required) | |
+| `args` | array de escalares (optional) | `str`/`int`/`float`/`bool`/`null`. Se pasan parametrizados, nunca concatenados. Máx 100. |
+| `signature` | string (optional) | Firma de tipos `(TIPO, …)` del overload; si se da, valida que el nº de args coincida. |
+| `confirm` | bool (**required**, debe ser `true`) | |
+
+**Output**:
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "running",
+  "session_id": null,
+  "hint_es": "Sondea con nz_job_poll(job_id='...') cada 30 s.",
+  "hint_en": "Poll with nz_job_poll(job_id='...') every 30 s."
+}
+```
+
+**Reglas**:
+- Máx **5 jobs simultáneos** en memoria; superar el límite → `JOB_LIMIT_REACHED`.
+- Captura `SELECT CURRENT_SID` inmediatamente al abrir la conexión (escalar Netezza seguro bajo concurrencia: cada sesión devuelve siempre su propio ID); `session_id` queda expuesto en `nz_job_poll` para que un DBA lo use con `nzsession` si necesita abortar el SP manualmente. **Caveat**: bajo alta concurrencia el session_id puede coincidir con otra sesión activa si CURRENT_SID no está disponible en el perfil (en ese caso permanece `null`).
+- Mismo conjunto de guardas que `nz_call_procedure`: `sql_guard` (kind `CALL`), `assert_env_safe` (`PROD_REF_IN_NONPROD`), solo placeholders `?`.
+- Los jobs expiran y se borran del store **1 hora** después de completar (estado `done`/`failed`/`cancelled`).
+- No usar para SPs cortos (< 30 s): `nz_call_procedure` es más simple y devuelve el resultado en el mismo llamado.
+
+---
+
+#### 39. `nz_job_poll`
+
+Devuelve el estado actual de un job lanzado por `nz_call_procedure_async`. Modo `read`. No tiene efecto secundario.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `job_id` | string (required) | UUID devuelto por `nz_call_procedure_async`. |
+
+**Output** (en ejecución):
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "running",
+  "session_id": 12345,
+  "elapsed_ms": 45200,
+  "partial_notices": ["NOTICE: paso 1 ok"],
+  "return_value": null,
+  "messages": [],
+  "duration_ms": null,
+  "error": null
+}
+```
+
+**Output** (completado):
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "done",
+  "session_id": 12345,
+  "elapsed_ms": 185400,
+  "partial_notices": ["NOTICE: paso 1 ok", "NOTICE: paso 2 ok"],
+  "return_value": "OK",
+  "messages": ["NOTICE: paso 1 ok", "NOTICE: paso 2 ok"],
+  "duration_ms": 185100,
+  "error": null
+}
+```
+
+**Reglas**:
+- Job no encontrado (expirado o ID incorrecto) → `JOB_NOT_FOUND`.
+- No sondear más frecuentemente que cada **10 s**; para SPs de larga duración, cada **30 s** es suficiente.
+- `partial_notices` se actualiza cada vez que el hilo emite un `NOTICE` (captura periódica); `messages` solo está completo cuando `status == "done"`.
+- `error` tiene forma `{code, detail, partial_notices}` cuando `status == "failed"`.
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -1050,6 +1144,8 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 | `nz_truncate`, `nz_drop_table`, `nz_drop_procedure`, `nz_drop_view` | false | **true** | true |
 | `nz_switch_profile`, `nz_switch_database` | false | false | true |
 | `nz_alter_table` | false | true | false |
+| `nz_call_procedure_async` | false | **true** | false |
+| `nz_job_poll` | true | false | true |
 
 ### Formato de errores
 

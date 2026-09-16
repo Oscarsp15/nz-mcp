@@ -78,3 +78,91 @@ def test_nz_clone_procedure_dry_run_mocked(monkeypatch: pytest.MonkeyPatch, tmp_
     )
     assert out.dry_run is True
     assert out.executed is False
+
+
+def test_nz_clone_procedure_echo_sql_false_omits_ddl_on_real_execution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "nz-mcp"
+    home.mkdir()
+    profiles = home / "profiles.toml"
+    profiles.write_text(
+        'active = "a"\n[profiles.a]\nhost="h"\nport=5480\ndatabase="DEV"\nuser="u"\nmode="admin"\n',
+        encoding="utf-8",
+    )
+    import nz_mcp.config as cfg
+
+    monkeypatch.setenv("NZ_MCP_HOME", str(home))
+    monkeypatch.setattr(cfg, "config_dir", lambda: home)
+    monkeypatch.setattr(
+        "nz_mcp.tools.clone_procedure.clone_procedure",
+        lambda *_a, **_k: {
+            "dry_run": False,
+            "ddl_to_execute": None,
+            "executed": True,
+            "warnings": [],
+            "duration_ms": 5,
+        },
+    )
+    out = nz_clone_procedure(
+        CloneProcedureInput(
+            source_database="DEV",
+            source_schema="PUBLIC",
+            source_procedure="S",
+            target_database="DEV",
+            target_schema="PUBLIC",
+            target_procedure="X",
+            dry_run=False,
+            confirm=True,
+            echo_sql=False,
+        ),
+        config_path=profiles,
+    )
+    assert out.executed is True
+    assert out.ddl_to_execute is None
+
+
+def test_nz_clone_procedure_echo_sql_default_true_passed_through(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "nz-mcp"
+    home.mkdir()
+    profiles = home / "profiles.toml"
+    profiles.write_text(
+        'active = "a"\n[profiles.a]\nhost="h"\nport=5480\ndatabase="DEV"\nuser="u"\nmode="admin"\n',
+        encoding="utf-8",
+    )
+    import nz_mcp.config as cfg
+
+    monkeypatch.setenv("NZ_MCP_HOME", str(home))
+    monkeypatch.setattr(cfg, "config_dir", lambda: home)
+    captured: dict[str, object] = {}
+
+    def _fake_clone_procedure(*_a: object, **kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {
+            "dry_run": True,
+            "ddl_to_execute": "CREATE PROCEDURE PUBLIC.X()",
+            "executed": False,
+            "warnings": [],
+            "duration_ms": None,
+        }
+
+    monkeypatch.setattr(
+        "nz_mcp.tools.clone_procedure.clone_procedure",
+        _fake_clone_procedure,
+    )
+    out = nz_clone_procedure(
+        CloneProcedureInput(
+            source_database="DEV",
+            source_schema="PUBLIC",
+            source_procedure="S",
+            target_database="DEV",
+            target_schema="PUBLIC",
+            target_procedure="X",
+            dry_run=True,
+        ),
+        config_path=profiles,
+    )
+    assert captured["echo_sql"] is True
+    assert out.ddl_to_execute == "CREATE PROCEDURE PUBLIC.X()"

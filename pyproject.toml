@@ -48,7 +48,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "pytest-xdist>=3.5",
     "hypothesis>=6.100",
-    "ruff>=0.5,<0.16",
+    "ruff>=0.5,<0.17",
     "mypy>=1.10,<3",
     "pre-commit>=3.7",
     "types-toml",
@@ -90,10 +90,11 @@ select = [
 ]
 ignore = [
     "PLR0913",       # too many arguments — covered by maintainability.md threshold
+    "PLR0917",       # too many positional arguments — same threshold, split rule (ruff 0.16)
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "PLR2004", "ARG", "PLC0415"]   # assert / magic numbers / unused fixture args / nested imports for fixture isolation
+"tests/**" = ["S101", "S106", "PLR2004", "ARG", "PLC0415"]   # assert / hardcoded test passwords / magic numbers / unused fixture args / nested imports for fixture isolation
 "tests/scenarios/**" = ["S101", "PLR2004", "ARG", "PLC0415", "S105", "S608", "PLR0911"] # + fake password, SQL built from tool output, statement dispatch in the driver double
 "src/nz_mcp/i18n.py" = ["E501"]                       # message strings may exceed line length
 "scripts/**" = ["S603", "S607", "PLR0911", "PLR2004", "T201"] # CLI utility scripts

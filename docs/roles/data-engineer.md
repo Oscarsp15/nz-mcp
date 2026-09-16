@@ -25,9 +25,9 @@ conn = nzpy.connect(
     port=profile.port,
     database=profile.database,
     user=profile.user,
-    password=password,           # de keyring, jamás de env ni config
-    securityLevel=1,             # forzar TLS si el servidor lo soporta
-    application_name="nz-mcp",   # aparece en _v_session
+    password=password,  # de keyring, jamás de env ni config
+    securityLevel=1,  # forzar TLS si el servidor lo soporta
+    application_name="nz-mcp",  # aparece en _v_session
 )
 ```
 
