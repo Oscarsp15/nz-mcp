@@ -217,7 +217,7 @@ def open_connection(
     profile: Profile,
     password: str,
     *,
-    timeout: int | None | _TimeoutSentinel = _PROFILE_TIMEOUT,
+    timeout: int | _TimeoutSentinel | None = _PROFILE_TIMEOUT,
 ) -> object:
     """Open a Netezza connection with configurable timeout and fixed app name.
 

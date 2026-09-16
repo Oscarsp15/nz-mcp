@@ -38,9 +38,10 @@ from .errors import GuardRejectedError, ObjectNotFoundError
 from .sql_guard import validate
 from .catalog.X import fetch_X
 
+
 @tool(
     name="nz_describe_X",
-    description="...",                     # inglés, < 200 chars
+    description="...",  # inglés, < 200 chars
     mode="read",
     input_model=MyInput,
     output_model=MyOutput,

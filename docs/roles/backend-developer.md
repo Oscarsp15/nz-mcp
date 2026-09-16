@@ -37,10 +37,12 @@ from .sql_guard import validate
 from .connection import execute_select
 from .i18n import t
 
+
 class QuerySelectInput(BaseModel):
     sql: str = Field(..., min_length=1, max_length=100_000)
     max_rows: int = Field(default=100, ge=1, le=1000)
     timeout_s: int = Field(default=30, ge=1, le=300)
+
 
 class QuerySelectOutput(BaseModel):
     columns: list[ColumnInfo]
@@ -49,6 +51,7 @@ class QuerySelectOutput(BaseModel):
     truncated: bool
     duration_ms: int
     hint: str | None = None
+
 
 @tool(
     name="nz_query_select",

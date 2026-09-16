@@ -106,17 +106,28 @@ Si el aserto no habla de **dos tools**, es un unitario.
 import pytest
 from unittest.mock import MagicMock
 
+
 @pytest.fixture
 def fake_profile():
-    return Profile(name="test", host="x", port=5480, database="DB",
-                   user="u", mode="read", max_rows_default=100, timeout_s_default=30)
+    return Profile(
+        name="test",
+        host="x",
+        port=5480,
+        database="DB",
+        user="u",
+        mode="read",
+        max_rows_default=100,
+        timeout_s_default=30,
+    )
+
 
 @pytest.fixture
 def fake_cursor():
     cur = MagicMock()
-    cur.description = [("ID","INTEGER"),("NAME","VARCHAR")]
-    cur.fetchmany.side_effect = [[(1,"a"),(2,"b")], []]
+    cur.description = [("ID", "INTEGER"), ("NAME", "VARCHAR")]
+    cur.fetchmany.side_effect = [[(1, "a"), (2, "b")], []]
     return cur
+
 
 @pytest.fixture
 def fake_connection(fake_cursor):
@@ -124,13 +135,14 @@ def fake_connection(fake_cursor):
     conn.cursor.return_value = fake_cursor
     return conn
 
+
 @pytest.fixture(autouse=True)
 def isolated_keyring(monkeypatch):
     """Cada test usa un keyring vacío en memoria."""
     store = {}
-    monkeypatch.setattr("keyring.get_password", lambda s,u: store.get((s,u)))
-    monkeypatch.setattr("keyring.set_password", lambda s,u,p: store.update({(s,u):p}))
-    monkeypatch.setattr("keyring.delete_password", lambda s,u: store.pop((s,u), None))
+    monkeypatch.setattr("keyring.get_password", lambda s, u: store.get((s, u)))
+    monkeypatch.setattr("keyring.set_password", lambda s, u, p: store.update({(s, u): p}))
+    monkeypatch.setattr("keyring.delete_password", lambda s, u: store.pop((s, u), None))
 ```
 
 ## Property-based con hypothesis
@@ -146,14 +158,18 @@ import pytest
 from nz_mcp.sql_guard import validate
 from nz_mcp.errors import GuardRejectedError
 
+
 @pytest.mark.adversarial
-@pytest.mark.parametrize("sql,code", [
-    ("SELECT 1; DROP TABLE t;", "STACKED_NOT_ALLOWED"),
-    ("UPDATE t SET a=1", "UPDATE_REQUIRES_WHERE"),
-    ("DELETE FROM t", "DELETE_REQUIRES_WHERE"),
-    ("DROP DATABASE x", "STATEMENT_NOT_ALLOWED"),
-    ("BEGIN; DELETE FROM t; COMMIT;", "STACKED_NOT_ALLOWED"),
-])
+@pytest.mark.parametrize(
+    "sql,code",
+    [
+        ("SELECT 1; DROP TABLE t;", "STACKED_NOT_ALLOWED"),
+        ("UPDATE t SET a=1", "UPDATE_REQUIRES_WHERE"),
+        ("DELETE FROM t", "DELETE_REQUIRES_WHERE"),
+        ("DROP DATABASE x", "STATEMENT_NOT_ALLOWED"),
+        ("BEGIN; DELETE FROM t; COMMIT;", "STACKED_NOT_ALLOWED"),
+    ],
+)
 def test_guard_rejects(sql, code):
     with pytest.raises(GuardRejectedError) as exc:
         validate(sql, mode="read")
