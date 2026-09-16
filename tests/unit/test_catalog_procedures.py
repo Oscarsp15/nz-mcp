@@ -169,6 +169,43 @@ def test_pick_procedure_row_signature_mismatch() -> None:
         proc._pick_procedure_row([a], "(BOOL)", "P")
 
 
+def test_pick_procedure_row_nps11_name_prefixed_signature() -> None:
+    """NPS 11.x stores PROCEDURESIGNATURE as PROCNAME(TYPES) — issue #267."""
+    a = {"PROCEDURE": "CONSULTA_CREA", "PROCEDURESIGNATURE": "CONSULTA_CREA(CHARACTERVARYING(100))"}
+    b = {
+        "PROCEDURE": "CONSULTA_CREA",
+        "PROCEDURESIGNATURE": "CONSULTA_CREA(CHARACTERVARYING(100),INTEGER)",
+    }
+    got = proc._pick_procedure_row([a, b], "CONSULTA_CREA(CHARACTERVARYING(100))", "CONSULTA_CREA")
+    assert got is a
+
+
+def test_pick_procedure_row_accepts_types_only_signature() -> None:
+    """The types-only string nz_list_procedures.arguments returns must also match."""
+    a = {"PROCEDURE": "CONSULTA_CREA", "PROCEDURESIGNATURE": "CONSULTA_CREA(CHARACTERVARYING(100))"}
+    b = {
+        "PROCEDURE": "CONSULTA_CREA",
+        "PROCEDURESIGNATURE": "CONSULTA_CREA(CHARACTERVARYING(100),INTEGER)",
+    }
+    got = proc._pick_procedure_row([a, b], "(CHARACTER VARYING(100))", "CONSULTA_CREA")
+    assert got is a
+
+
+def test_pick_procedure_row_accepts_types_only_without_outer_parens() -> None:
+    a = {"PROCEDURE": "P", "PROCEDURESIGNATURE": "P(DATE,VARCHAR(20))"}
+    b = {"PROCEDURE": "P", "PROCEDURESIGNATURE": "P(INTEGER)"}
+    got = proc._pick_procedure_row([a, b], "DATE, VARCHAR(20)", "P")
+    assert got is a
+
+
+def test_pick_procedure_row_types_only_signature_mismatch() -> None:
+    """A types-only signature still raises ObjectNotFoundError when nothing matches."""
+    a = {"PROCEDURE": "P", "PROCEDURESIGNATURE": "P(INT)"}
+    b = {"PROCEDURE": "P", "PROCEDURESIGNATURE": "P(VARCHAR)"}
+    with pytest.raises(ObjectNotFoundError):
+        proc._pick_procedure_row([a, b], "(BOOL)", "P")
+
+
 def test_get_procedure_section_range_truncated(monkeypatch: pytest.MonkeyPatch) -> None:
     long_src = "\n".join([f"-- {i}" for i in range(600)])
     row = {

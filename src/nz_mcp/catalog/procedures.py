@@ -537,6 +537,40 @@ def _normalize_signature(sig: str) -> str:
     return "".join(sig.upper().split())
 
 
+def _strip_outer_parens(sig: str) -> str:
+    """Drop one matching pair of wrapping parentheses, if present."""
+    return sig[1:-1] if sig.startswith("(") and sig.endswith(")") else sig
+
+
+def _signature_types_only(procedure_signature: str) -> str:
+    """Return the parenthesized type list from a catalog ``PROCEDURESIGNATURE``.
+
+    On NPS 11.x, ``PROCEDURESIGNATURE`` is ``PROCNAME(TYPES)``; older shapes
+    store only ``(TYPES)``. Either way the type list starts at the first
+    ``(``, so slicing from there drops the leading name when one is present
+    without needing to know it — issue #267.
+    """
+    idx = procedure_signature.find("(")
+    return procedure_signature[idx:] if idx >= 0 else procedure_signature
+
+
+def _signature_matches(row_signature: str, wanted: str) -> bool:
+    """Compare a caller-supplied ``signature`` against a catalog row.
+
+    Tries the full ``PROCNAME(TYPES)`` comparison first (unchanged existing
+    behavior). If that fails, falls back to comparing only the argument-type
+    list — with or without the outer parentheses — so a caller can also pass
+    the types-only string ``nz_list_procedures`` already surfaces in its
+    ``arguments`` field, instead of only the string an ``OVERLOAD_AMBIGUOUS``
+    error happens to print. Issue #267.
+    """
+    if _normalize_signature(row_signature) == _normalize_signature(wanted):
+        return True
+    row_types = _normalize_signature(_strip_outer_parens(_signature_types_only(row_signature)))
+    want_types = _normalize_signature(_strip_outer_parens(wanted))
+    return bool(row_types) and row_types == want_types
+
+
 def _fetch_procedure_rows(
     profile: Profile,
     database: str,
@@ -583,8 +617,7 @@ def _pick_procedure_row(rows: list[Any], signature: str | None, procedure: str) 
         only = rows[0]
         if signature is None:
             return only
-        got = _normalize_signature(_ddl_get(only, "PROCEDURESIGNATURE"))
-        if got == _normalize_signature(signature):
+        if _signature_matches(_ddl_get(only, "PROCEDURESIGNATURE"), signature):
             return only
         raise ObjectNotFoundError(
             detail=(f"No procedure overload matches signature {signature!r} for {procedure!r}."),
@@ -597,8 +630,7 @@ def _pick_procedure_row(rows: list[Any], signature: str | None, procedure: str) 
             return rows[0]
         raise OverloadAmbiguousError(procedure=procedure, signatures=sorted(unique))
 
-    want = _normalize_signature(signature)
-    matches = [r for r in rows if _normalize_signature(_ddl_get(r, "PROCEDURESIGNATURE")) == want]
+    matches = [r for r in rows if _signature_matches(_ddl_get(r, "PROCEDURESIGNATURE"), signature)]
     if len(matches) == 1:
         return matches[0]
     if not matches:
