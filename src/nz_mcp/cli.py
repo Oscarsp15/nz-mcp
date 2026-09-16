@@ -1294,6 +1294,15 @@ def _validate_before_saving(
         if report.ok:
             out.success(t("CLI.VALIDATE_ALL_OK", locale))
             return True
+        if assume_yes:
+            # The fourth prompt this ladder can reach - "retry, fix a field, save anyway,
+            # or cancel" - has no bypass of its own, and a closed stdin (the common CI
+            # shape: no VPN, the ladder fails) would hit it and abort with the exact
+            # generic message ``--yes`` exists to avoid. Under ``--yes`` a failed ladder
+            # is not a question: it saves anyway, the same outcome typing "g" gives,
+            # without ever asking.
+            out.warn(t("CLI.VALIDATE_SAVED_ANYWAY", locale, profile=name))
+            return True
         out.note(t("CLI.VALIDATE_MENU", locale))
         choice = _prompt_failure_choice(locale)
         if choice == "g":

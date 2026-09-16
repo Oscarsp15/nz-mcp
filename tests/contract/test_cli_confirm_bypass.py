@@ -103,3 +103,42 @@ def test_wizard_validate_ask_confirm_yes_does_not_block(
     assert result.exit_code == 0
     assert ran_ladder == [True]
     assert get_password("new") == "pw123456"
+
+
+def test_wizard_yes_saves_anyway_when_the_ladder_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_profiles: Path
+) -> None:
+    """The realistic CI shape: no VPN, the ladder fails - and a fourth prompt used to wait.
+
+    Past "validar antes de guardar?" (answered "yes" by ``--yes``), a failing ladder used to
+    fall into ``_prompt_failure_choice`` - "retry, fix a field, save anyway, cancel" - which
+    had no ``--yes`` bypass of its own and no closed-stdin guard either: it hit ``typer.ask``
+    directly and aborted with the exact generic message this flag exists to avoid. Under
+    ``--yes`` a failed ladder must save anyway (the "g" outcome) without ever asking.
+    """
+    from nz_mcp import cli
+    from nz_mcp.profile_check import CheckOutcome, ValidationReport
+    from nz_mcp.secret import Secret
+
+    draft = cli._ProfileDraft(
+        host="nz.example.com",
+        port=5480,
+        database="DB",
+        user="svc",
+        password=Secret("pw123456"),
+        mode="read",
+        security_level=2,
+        ca_certs=None,
+    )
+    monkeypatch.setattr(cli, "_collect_draft", lambda name, previous, locale: draft)
+
+    def _failing_run_ladder(profile: object, password: object, locale: object) -> ValidationReport:
+        return ValidationReport(outcomes=(CheckOutcome(level="connect", status="failed"),))
+
+    monkeypatch.setattr(cli, "_run_ladder", _failing_run_ladder)
+
+    result = runner.invoke(app, ["add-profile", "new", "--yes"])
+    assert result.exit_code == 0
+    combined = result.stdout + result.stderr
+    assert "Aborted" not in combined
+    assert get_password("new") == "pw123456"
