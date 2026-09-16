@@ -1009,6 +1009,27 @@ Al menos una de las cuatro listas de operaciones debe venir no vacía; si no →
 
 ---
 
+#### 37. `nz_drop_view`
+
+Elimina una vista vía `DROP VIEW schema.view` (modo `admin`, `confirm` obligatorio). Cierra el hueco de que `nz_execute_ddl` compila vistas pero ninguna tool las borra, lo que bloqueaba limpiar objetos de prueba (issue #273).
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | Debe coincidir con la BD del perfil activo. |
+| `schema` | string (required) | |
+| `view` | string (required) | |
+| `confirm` | bool (**required**, debe ser `true`) | Sin `dry_run`, igual que `nz_drop_table`. |
+| `if_exists` | bool (default `true`) | Si `true` y la vista no existe, es un no-op (`dropped=false`). NPS no parsea `IF EXISTS` en `DROP VIEW` en ninguna forma (ni prefijo ni sufijo, a diferencia de `DROP TABLE`) — verificado en vivo contra NPS 11.2.1.11-IF1 — así que se resuelve en la capa Python (chequeo de catálogo, igual que `nz_drop_procedure`). |
+
+**Output**: `{ "dropped": true, "duration_ms": 8 }` — `dropped=false` cuando `if_exists=true` y no existía.
+
+**Reglas**:
+- `sql_guard.validate(mode="admin")` clasifica el statement como `DROP`.
+- Guarda de entorno `assert_env_safe`: eliminar una vista `PROD_*` desde un perfil no productivo → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD`, incluso con `if_exists=true` (dispara antes del chequeo de catálogo) (issue #278).
+- No usar para tablas (`nz_drop_table`) ni para procedimientos (`nz_drop_procedure`).
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -1026,7 +1047,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 | `nz_clone_procedure` | false | false | true |
 | `nz_execute_ddl` | false | false | true |
 | `nz_call_procedure` | false | **true** | false |
-| `nz_truncate`, `nz_drop_table`, `nz_drop_procedure` | false | **true** | true |
+| `nz_truncate`, `nz_drop_table`, `nz_drop_procedure`, `nz_drop_view` | false | **true** | true |
 | `nz_switch_profile`, `nz_switch_database` | false | false | true |
 | `nz_alter_table` | false | true | false |
 

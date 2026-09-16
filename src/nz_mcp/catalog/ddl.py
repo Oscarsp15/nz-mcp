@@ -11,6 +11,7 @@ from nz_mcp.auth import get_password
 from nz_mcp.catalog.identifier import validate_catalog_identifier, validate_database_identifier
 from nz_mcp.catalog.procedures import list_procedures
 from nz_mcp.catalog.tables import table_exists
+from nz_mcp.catalog.views import list_views
 from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
 from nz_mcp.errors import GuardRejectedError, InvalidInputError, NetezzaError
@@ -487,6 +488,12 @@ def _procedure_named_exists(profile: Profile, database: str, schema: str, proced
     return any(str(r.get("name", "")).upper() == target for r in rows)
 
 
+def _view_named_exists(profile: Profile, database: str, schema: str, view: str) -> bool:
+    rows = list_views(profile, database, schema, pattern=None)
+    target = view.upper()
+    return any(str(r.get("name", "")).upper() == target for r in rows)
+
+
 def execute_drop_procedure(
     profile: Profile,
     database: str,
@@ -528,6 +535,56 @@ def execute_drop_procedure(
     except Exception as exc:  # noqa: BLE001, RUF100
         raise NetezzaError(
             operation="execute_drop_procedure",
+            database=database,
+            detail=sanitize(str(exc), known_secrets={password}),
+        ) from exc
+    finally:
+        connection.close()
+
+    duration_ms = int((time.monotonic() - start) * 1000)
+    return {"dropped": True, "duration_ms": duration_ms}
+
+
+def execute_drop_view(
+    profile: Profile,
+    database: str,
+    schema: str,
+    view: str,
+    *,
+    if_exists: bool,
+) -> dict[str, Any]:
+    """Execute ``DROP VIEW schema.view`` with ``sql_guard`` (admin).
+
+    ``if_exists`` is enforced in Python (catalog existence check): NPS rejects both
+    ``DROP VIEW IF EXISTS ...`` and the Netezza ``DROP VIEW ... IF EXISTS`` suffix that
+    works for ``DROP TABLE`` — neither form parses. Verified live against NPS
+    11.2.1.11-IF1 (issue #273).
+    """
+    _ensure_session_database(profile, database)
+    sch = validate_catalog_identifier(schema)
+    vw = validate_catalog_identifier(view)
+
+    drop_sql = f"DROP VIEW {sch}.{vw}"
+    parsed = guard_validate(drop_sql, mode="admin")
+    if parsed.kind is not StatementKind.DROP:
+        raise NetezzaError(
+            operation="execute_drop_view",
+            detail=f"Unexpected statement kind after validation: {parsed.kind}",
+        )
+    assert_env_safe(parsed.raw, active_database=profile.database)
+
+    if if_exists and not _view_named_exists(profile, database, sch, vw):
+        return {"dropped": False, "duration_ms": 0}
+
+    password = get_password(profile.name)
+    connection = cast(_ConnectionLike, open_connection(profile, password))
+    start = time.monotonic()
+    try:
+        with closing(connection.cursor()) as cursor:
+            cursor.execute(parsed.raw, ())
+    except Exception as exc:  # noqa: BLE001, RUF100
+        raise NetezzaError(
+            operation="execute_drop_view",
             database=database,
             detail=sanitize(str(exc), known_secrets={password}),
         ) from exc
