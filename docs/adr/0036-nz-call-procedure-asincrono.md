@@ -38,10 +38,12 @@ Se limita a **`MAX_CONCURRENT_JOBS = 5`** trabajos simultáneos. Un intento de l
 Inmediatamente después de abrir la conexión, antes del CALL, el hilo ejecuta:
 
 ```sql
-SELECT CURRENT_SESSION
+SELECT CURRENT_SID
 ```
 
-El resultado (`int`) se almacena en el job store. Es el identificador que `nz_job_cancel` necesita para enviar `ABORT SESSION <session_id>`. Si esta consulta falla (raro: la conexión ya está abierta), el job continúa y `session_id` queda `null`; `nz_job_cancel` devuelve entonces `CANCEL_UNAVAILABLE` con una explicación.
+`CURRENT_SESSION` no existe en Netezza SaaS (verificado in-vivo: `Attribute 'CURRENT_SESSION' not found`). `CURRENT_SID` es el escalar correcto: cada sesión devuelve siempre su propio ID, seguro bajo concurrencia.
+
+El resultado (`int`) se almacena en el job store y queda expuesto en `nz_job_poll` para que un DBA pueda abortar la sesión con `nzsession` si es necesario. Si esta consulta falla (raro: la conexión ya está abierta), el job continúa y `session_id` queda `null`.
 
 ### 3. Job store
 
@@ -62,19 +64,17 @@ JobState:
 
 No hay persistencia en disco. Si el servidor reinicia, los jobs en vuelo se pierden. El ciclo de vida del servidor MCP (proceso por sesión de cliente) hace que esto sea aceptable para MVP.
 
-### 4. Cancelación: ABORT SESSION
+### 4. Cancelación: pospuesta a issue separado
 
-`nz_job_cancel` abre una **segunda conexión admin** con el mismo perfil, ejecuta `ABORT SESSION <session_id>` y cierra esa conexión. Luego marca el job como `"cancelling"` (el hilo background termina con error al recibir la interrupción de la sesión).
+`nz_job_cancel` fue **pospuesta** (decisión Oscar, 2026-09-16) porque `ABORT SESSION <id>` no está disponible vía SQL en este perfil Netezza SaaS (verificado in-vivo: todas las variantes de sintaxis — `ABORT SESSION`, `SELECT ABORT_SESSION(id)`, `SELECT pg_cancel_backend(id)`, etc. — retornan error de sintaxis o función inexistente). El kill real requeriría `nzsession` en el host del servidor, que el MCP no puede invocar.
 
-Si la sesión ya terminó antes de que llegue el ABORT (`status == "done"` o `"failed"`), devuelve `status: "already_done"` sin error.
+El `session_id` capturado en el paso 2 sigue siendo útil: queda expuesto en `nz_job_poll` para que un DBA lo use manualmente con `nzsession` si necesita abortar el SP.
 
-Si `session_id` es `null` (no pudo capturarse), devuelve `CANCEL_UNAVAILABLE`.
-
-`ABORT SESSION` requiere privilegios admin en Netezza. Si falla por permisos, el error se devuelve en el campo `abort_error` de la respuesta y el job sigue como `"running"` — el caller puede esperar a que termine o pedirle a un DBA que lo cancele con `ABORT SESSION <session_id>` directamente.
+Un issue separado (abierto por Oscar) rastreará el diseño de `nz_job_cancel` cuando se cuente con la capacidad server-side correcta.
 
 ### 5. Superficie de tools
 
-Las tres tools siguen las convenciones del contrato (`docs/architecture/tools-contract.md`).
+Las dos tools de esta FASE 2 siguen las convenciones del contrato (`docs/architecture/tools-contract.md`). `nz_job_cancel` se pospone al issue separado (ver §4).
 
 #### `nz_call_procedure_async`
 
@@ -99,8 +99,8 @@ No hay `timeout_s`: el job corre sin límite hasta que termina o se cancela expl
   "job_id": "3f2d…",
   "status": "running",
   "session_id": null,
-  "hint_es": "Sondea con nz_job_poll(job_id) cada 30 s. Cancela con nz_job_cancel(job_id) si es necesario.",
-  "hint_en": "Poll with nz_job_poll(job_id) every 30 s. Cancel with nz_job_cancel(job_id) if needed."
+  "hint_es": "Sondea con nz_job_poll(job_id) cada 30 s. El campo session_id permite a un DBA abortar con nzsession si es necesario.",
+  "hint_en": "Poll with nz_job_poll(job_id) every 30 s. The session_id field allows a DBA to abort with nzsession if needed."
 }
 ```
 
@@ -153,28 +153,9 @@ No hay `timeout_s`: el job corre sin límite hasta que termina o se cancela expl
 }
 ```
 
-#### `nz_job_cancel`
+#### `nz_job_cancel` — pospuesta
 
-**Modo**: `admin`
-
-**Input**:
-
-| Campo | Tipo | Requerido |
-|---|---|---|
-| `job_id` | `str` | sí |
-| `confirm` | `bool` | sí (debe ser `true`) |
-
-> `confirm=true` es obligatorio: `ABORT SESSION` interrumpe una sesión activa, al igual que las demás acciones admin destructivas del catálogo (`nz_drop_table`, `nz_call_procedure` con `dry_run=false`, etc.).
-
-**Output**:
-```json
-{
-  "job_id": "3f2d…",
-  "status": "cancelling",
-  "message_es": "ABORT SESSION enviado a la sesión 2485636. El job pasará a 'cancelled' cuando el hilo confirme la interrupción.",
-  "message_en": "ABORT SESSION sent to session 2485636. The job will transition to 'cancelled' once the thread confirms the interruption."
-}
-```
+Ver §4. Esta tool no se entrega en FASE 2. Se rastreará en un issue separado.
 
 ### 6. `nz_call_procedure` síncrono no cambia
 
@@ -185,7 +166,7 @@ Su contrato, código y tests quedan exactamente como los dejó #272. Las dos too
 ### Positivas
 
 - El agente llamador vuelve a estar disponible mientras el SP corre.
-- El session ID capturado cierra el pendiente de #275 (cancelación server-side).
+- El session ID capturado expone el valor en `nz_job_poll` para uso manual por DBA con `nzsession`.
 - Ningún cambio en `nz_call_procedure` existente: cero riesgo de regresión en callers actuales.
 
 ### Riesgos y mitigaciones
@@ -195,10 +176,8 @@ Su contrato, código y tests quedan exactamente como los dejó #272. Las dos too
 | Jobs perdidos al reiniciar el servidor | Ciclo de vida del proceso MCP = sesión del cliente; documentado como limitación conocida |
 | Proliferación de hilos si se lanzan muchos jobs | `MAX_CONCURRENT_JOBS = 5`; error claro si se supera |
 | nzpy no documentada como thread-safe | Cada hilo tiene su propia conexión y cursor; `_DriverDiagnosticsHandler` ya filtra por thread ID; no hay estado compartido de driver |
-| **`ABORT SESSION <session_id>` no verificado contra Netezza real** | **Supuesto a validar en FASE 2**: sintaxis, privilegios del perfil SaaS y comportamiento (aborta la sesión del job, no la del caller). El issue #275 dejó este punto explícitamente abierto. FASE 2 debe probarlo antes de publicar `nz_job_cancel`. |
-| ABORT SESSION puede no tener permisos | `abort_error` en la respuesta; instrucción para que un DBA ejecute el ABORT manualmente con el `session_id` devuelto |
-| `session_id` no capturado (raro) | `nz_job_cancel` devuelve `CANCEL_UNAVAILABLE`; el job sigue corriendo |
-| Carrera entre `ABORT SESSION` y la finalización natural del SP | `nz_job_cancel` verifica el estado antes de enviar ABORT; si ya terminó, devuelve `already_done` |
+| `ABORT SESSION` no disponible vía SQL en este perfil SaaS | Verificado in-vivo: todas las variantes de sintaxis fallan. `nz_job_cancel` pospuesta; `session_id` expuesto en `nz_job_poll` para abort manual con `nzsession` por un DBA |
+| `session_id` no capturado (raro: `SELECT CURRENT_SID` falla) | `session_id` queda `null` en `nz_job_poll`; DBA no puede abortar hasta que aparezca un valor |
 | Expiración: el caller no recoge el resultado a tiempo | TTL de 1 hora post-completado; documentado en la descripción de `nz_job_poll` |
 
 ## Estimación de esfuerzo (FASE 2)
