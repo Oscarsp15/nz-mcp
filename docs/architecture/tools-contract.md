@@ -100,24 +100,28 @@ Lista bases de datos visibles para el usuario del perfil.
 
 #### 5. `nz_list_tables`
 
-Lista **solo tablas** (no vistas, no procedimientos). Para vistas usar `nz_list_views`, para procedimientos `nz_list_procedures`.
+Lista **tablas** (base y/o externas; no vistas, no procedimientos). Para vistas usar `nz_list_views`, para procedimientos `nz_list_procedures`.
 
 | Input | Tipo | Descripción |
 |---|---|---|
 | `database` | string (required) | |
 | `schema` | string (required) | |
 | `pattern` | string (optional) | Filtro `LIKE` por nombre. Match case-insensitive. |
+| `object_type` | `"TABLE"` \| `"EXTERNAL TABLE"` \| `"ALL"` (default: `"TABLE"`) | Filtra por `OBJTYPE` real del catálogo. `ALL` incluye tablas base y externas (issue #295). |
 
 **Output** (solo `name` y `kind`; el conteo de filas va en `nz_table_stats`):
 
 ```json
 {
   "tables": [
-    {"name": "CUSTOMERS", "kind": "TABLE"}
+    {"name": "CUSTOMERS", "kind": "TABLE"},
+    {"name": "STG_S3_ORDERS", "kind": "EXTERNAL TABLE"}
   ],
   "duration_ms": 28
 }
 ```
+
+`kind` refleja el `OBJTYPE` real de cada fila (`TABLE` o `EXTERNAL TABLE`), no un valor fijo.
 
 ---
 
@@ -129,7 +133,9 @@ Lista **solo tablas** (no vistas, no procedimientos). Para vistas usar `nz_list_
 | `schema` | string (required) | |
 | `table` | string (required) | |
 
-**Output**:
+Funciona con tablas, tablas externas y vistas: `kind` refleja el tipo real (issue #295). `distribution` solo aparece cuando `kind` es `TABLE` o `EXTERNAL TABLE`; se omite (no aparece la clave) para vistas, porque Netezza no distribuye vistas.
+
+**Output** (tabla base):
 ```json
 {
   "name": "CUSTOMERS",
@@ -142,6 +148,21 @@ Lista **solo tablas** (no vistas, no procedimientos). Para vistas usar `nz_list_
   "primary_key": ["ID"],
   "foreign_keys": [],
   "duration_ms": 2100
+}
+```
+
+**Output** (vista, sin `distribution`):
+```json
+{
+  "name": "V_MODELOVERSION",
+  "kind": "VIEW",
+  "columns": [
+    {"name": "ID", "type": "INTEGER", "nullable": false, "default": null}
+  ],
+  "organized_on": [],
+  "primary_key": [],
+  "foreign_keys": [],
+  "duration_ms": 1800
 }
 ```
 
