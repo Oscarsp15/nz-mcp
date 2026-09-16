@@ -89,7 +89,7 @@ def test_wizard_validate_ask_confirm_yes_does_not_block(
         security_level=2,
         ca_certs=None,
     )
-    monkeypatch.setattr(cli, "_collect_draft", lambda name, previous, locale: draft)
+    monkeypatch.setattr(cli, "_collect_draft", lambda previous, locale: draft)
 
     ran_ladder: list[bool] = []
 
@@ -130,7 +130,7 @@ def test_wizard_yes_saves_anyway_when_the_ladder_fails(
         security_level=2,
         ca_certs=None,
     )
-    monkeypatch.setattr(cli, "_collect_draft", lambda name, previous, locale: draft)
+    monkeypatch.setattr(cli, "_collect_draft", lambda previous, locale: draft)
 
     def _failing_run_ladder(profile: object, password: object, locale: object) -> ValidationReport:
         return ValidationReport(outcomes=(CheckOutcome(level="connect", status="failed"),))
