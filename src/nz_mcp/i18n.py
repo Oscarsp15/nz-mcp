@@ -553,69 +553,7 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Puerto inválido: {value}. Usa un número entre 1 y 65535.",
         "en": "Invalid port: {value}. Use a number between 1 and 65535.",
     },
-    # Full-screen wizard (ADR 0028 / 0029). Short labels, because here they sit in a
-    # column next to the field instead of on a line of their own; the long explanations
-    # are the same CLI.WIZARD_*_EXPLAIN entries the chained questions already print.
-    "CLI.WIZARD_FIELD_HOST": {
-        "es": "Host",
-        "en": "Host",
-    },
-    "CLI.WIZARD_FIELD_PORT": {
-        "es": "Puerto",
-        "en": "Port",
-    },
-    "CLI.WIZARD_FIELD_DATABASE": {
-        "es": "Base de datos",
-        "en": "Database",
-    },
-    "CLI.WIZARD_FIELD_USER": {
-        "es": "Usuario",
-        "en": "User",
-    },
-    "CLI.WIZARD_FIELD_MODE": {
-        "es": "Modo",
-        "en": "Mode",
-    },
-    "CLI.WIZARD_FIELD_SECURITY": {
-        "es": "Seguridad",
-        "en": "Security",
-    },
-    "CLI.WIZARD_FIELD_CA_CERTS": {
-        "es": "Bundle CA",
-        "en": "CA bundle",
-    },
-    "CLI.WIZARD_FIELD_PASSWORD": {
-        "es": "Password",
-        "en": "Password",
-    },
-    "CLI.WIZARD_UI_TITLE": {
-        "es": "nz-mcp: perfil '{profile}'",
-        "en": "nz-mcp: profile '{profile}'",
-    },
-    # The password key is not repeated here: its own row already carries it, and the line
-    # has to fit in the narrowest window the wizard accepts. Three shortcuts at most (ADR
-    # 0032, decision 7): F2 took the place of Tab, which every form already teaches.
-    "CLI.WIZARD_UI_KEYS": {
-        "es": "Enter continuar | Esc salir | F2 tema",
-        "en": "Enter continue | Esc quit | F2 theme",
-    },
-    # The interactive menu (issue #226). Two keys, and only two: the name of each command and
-    # the sentence describing it come from the "CLI.HELP.*" entries the help screen already
-    # uses, so the menu cannot say something the help does not.
-    #
-    # Same rule as the help texts: no character a Windows console on a legacy code page
-    # cannot draw. Hence a colon and not an em dash, which renders there as "?".
-    "CLI.MENU_TITLE": {
-        "es": "nz-mcp: elige una tarea",
-        "en": "nz-mcp: pick a task",
-    },
-    # Three shortcuts at most (ADR 0032, decision 7): "?" took the third slot from F2, which
-    # still works - it is just not advertised here, the same way the arrows never were.
-    "CLI.MENU_KEYS": {
-        "es": "Enter abrir | Esc salir | ? ayuda",
-        "en": "Enter open | Esc quit | ? help",
-    },
-    # The six tasks of ADR 0032, decision 1, in its own fixed order. Written by hand, not
+    # The six tasks nz-mcp help lists, in a fixed order. Written by hand, not
     # derived from typer (that derivation is what this decision spends): the label is the
     # verb the task list shows, the description is the sentence under the highlighted one.
     "CLI.MENU.TASK.CONNECT.LABEL": {
@@ -666,53 +604,7 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Ejecuta el catálogo de consultas y dice cuáles fallan.",
         "en": "Run the query catalog and report which ones fail.",
     },
-    # The context panel, "Etiqueta: valor" (ADR 0032, decision 1). Mode itself is never
-    # translated - it is configuration surface, per decision 10 - so it has no STATUS-style
-    # key here, only the label that names the row.
-    "CLI.MENU_CONTEXT.TITLE": {
-        "es": "Conexión",
-        "en": "Connection",
-    },
-    "CLI.MENU_CONTEXT.PROFILE": {
-        "es": "Perfil",
-        "en": "Profile",
-    },
-    "CLI.MENU_CONTEXT.HOST": {
-        "es": "Host",
-        "en": "Host",
-    },
-    "CLI.MENU_CONTEXT.DATABASE": {
-        "es": "Base",
-        "en": "Database",
-    },
-    "CLI.MENU_CONTEXT.MODE": {
-        "es": "Modo",
-        "en": "Mode",
-    },
-    "CLI.MENU_CONTEXT.STATUS": {
-        "es": "Estado",
-        "en": "Status",
-    },
-    # Placeholder for a field with nothing to say - no active profile, or one that will not
-    # load (acceptance criterion 4 of issue #239). One glyph, same in both locales.
-    "CLI.MENU_CONTEXT.NO_VALUE": {
-        "es": "—",
-        "en": "—",
-    },
-    "CLI.MENU_CONTEXT.STATUS_OK": {
-        "es": "OK",
-        "en": "OK",
-    },
-    "CLI.MENU_CONTEXT.STATUS_WARNING": {
-        "es": "Aviso",
-        "en": "Warning",
-    },
-    "CLI.MENU_CONTEXT.STATUS_ERROR": {
-        "es": "Error",
-        "en": "Error",
-    },
-    # "?" and "nz-mcp help" (ADR 0032, decision 2): the one heading and the one row format
-    # both surfaces share, so the correspondence cannot read differently in each.
+    # ``nz-mcp help``: the one heading and the one row format it shows.
     "CLI.MENU_HELP_MODAL.TITLE": {
         "es": "Tareas y su comando",
         "en": "Tasks and their command",
@@ -720,114 +612,6 @@ MESSAGES: Final[dict[str, Message]] = {
     "CLI.MENU_HELP_MODAL.UNAVAILABLE": {
         "es": "no disponible",
         "en": "not available",
-    },
-    "CLI.MENU_HELP_MODAL.KEYS": {
-        "es": "Esc cerrar",
-        "en": "Esc close",
-    },
-    # "Ver perfiles" (issue #240, ADR 0032, decision 3): the third and last screen the ADR
-    # authorises. Column headers and the status word reuse the context panel's own keys
-    # above (``CLI.MENU_CONTEXT.*``) rather than duplicating "Perfil", "Host", "Base",
-    # "Modo", "Estado", "OK", "Aviso" and "Error" a second time - same vocabulary, same
-    # level. Only the screen's own title, key hints, empty state and the actions modal add
-    # keys here.
-    "CLI.PROFILES_SCREEN.TITLE": {
-        "es": "nz-mcp: perfiles",
-        "en": "nz-mcp: profiles",
-    },
-    "CLI.PROFILES_SCREEN.KEYS": {
-        "es": "Enter acciones | Esc volver",
-        "en": "Enter actions | Esc back",
-    },
-    "CLI.PROFILES_SCREEN.EMPTY": {
-        "es": "No hay perfiles configurados.",
-        "en": "No profiles are configured.",
-    },
-    "CLI.PROFILES_SCREEN.EMPTY_KEYS": {
-        "es": "Enter configurar | Esc volver",
-        "en": "Enter configure | Esc back",
-    },
-    "CLI.PROFILES_SCREEN.ACTIONS_TITLE": {
-        "es": "Acciones de {profile}",
-        "en": "Actions for {profile}",
-    },
-    "CLI.PROFILES_SCREEN.ACTIONS_KEYS": {
-        "es": "Enter elegir | Esc volver",
-        "en": "Enter choose | Esc back",
-    },
-    "CLI.PROFILES_SCREEN.ACTION_USE": {
-        "es": "Usar",
-        "en": "Use",
-    },
-    "CLI.PROFILES_SCREEN.ACTION_TEST": {
-        "es": "Probar",
-        "en": "Test",
-    },
-    "CLI.PROFILES_SCREEN.ACTION_EDIT": {
-        "es": "Editar",
-        "en": "Edit",
-    },
-    "CLI.PROFILES_SCREEN.ACTION_REMOVE": {
-        "es": "Borrar",
-        "en": "Delete",
-    },
-    "CLI.WIZARD_UI_PASSWORD_SET": {
-        "es": "definida (escribe aquí para cambiarla)",
-        "en": "set (type here to change it)",
-    },
-    "CLI.WIZARD_UI_PASSWORD_UNSET": {
-        "es": "sin definir (escríbela aquí, o Ctrl+P en el terminal)",
-        "en": "not set (type it here, or Ctrl+P on the terminal)",
-    },
-    "CLI.WIZARD_UI_PASSWORD_TERMINAL": {
-        "es": "definida en el terminal (escribe aquí para cambiarla)",
-        "en": "set on the terminal (type here to change it)",
-    },
-    "CLI.WIZARD_UI_DEGRADED": {
-        "es": (
-            "La ventana se ha quedado por debajo de {width}x{height}, así que sigo con "
-            "preguntas. No se pierde nada de lo que ya has escrito."
-        ),
-        "en": (
-            "The window dropped below {width}x{height}, so I am carrying on with "
-            "questions. Nothing you already typed is lost."
-        ),
-    },
-    # Full-screen wizard, ADR 0032 decision 4: the stepper, one log line per broken field,
-    # and the toast on save. Grouped here as one block since they are a single change
-    # (issue #241). Register: technical and terse, "Label: value", no "todo bien" / "listo"
-    # / "genial" - a test of this exact catalog block enforces it.
-    "CLI.WIZARD_UI_STEP_CONNECTION": {
-        "es": "1 Conexión",
-        "en": "1 Connection",
-    },
-    "CLI.WIZARD_UI_STEP_CREDENTIALS": {
-        "es": "2 Credenciales",
-        "en": "2 Credentials",
-    },
-    "CLI.WIZARD_UI_STEP_CONFIRM": {
-        "es": "3 Confirmar",
-        "en": "3 Confirm",
-    },
-    "CLI.WIZARD_UI_ERROR_REQUIRED": {
-        "es": "valor requerido",
-        "en": "value required",
-    },
-    "CLI.WIZARD_UI_ERROR_PORT": {
-        "es": "fuera de rango (1-65535)",
-        "en": "out of range (1-65535)",
-    },
-    "CLI.WIZARD_UI_ERROR_MODE": {
-        "es": "valor no válido (read, write, admin)",
-        "en": "not a valid value (read, write, admin)",
-    },
-    "CLI.WIZARD_UI_ERROR_SECURITY": {
-        "es": "fuera de rango (0-3)",
-        "en": "out of range (0-3)",
-    },
-    "CLI.WIZARD_UI_TOAST_SAVED": {
-        "es": "Perfil guardado: {profile}",
-        "en": "Profile saved: {profile}",
     },
     # Validation ladder run before persisting the profile
     "CLI.VALIDATE_ASK": {
@@ -1286,10 +1070,6 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Dibuja",
         "en": "Draws",
     },
-    "DOCTOR.LABEL.FULL_SCREEN": {
-        "es": "Pantalla completa",
-        "en": "Full screen",
-    },
     "DOCTOR.TERMINAL.LEVEL_0": {
         "es": "ASCII sin color (el piso garantizado)",
         "en": "ASCII without colour (the guaranteed floor)",
@@ -1297,48 +1077,6 @@ MESSAGES: Final[dict[str, Message]] = {
     "DOCTOR.TERMINAL.LEVEL_1": {
         "es": "color, bordes redondeados e indicador fluido",
         "en": "colour, rounded borders and a fluid indicator",
-    },
-    "DOCTOR.TERMINAL.FULL_SCREEN_OPEN": {
-        "es": "disponible (el menu y el asistente se abren)",
-        "en": "available (the menu and the wizard open)",
-    },
-    "DOCTOR.TERMINAL.BLOCKER.OPTED_OUT": {
-        "es": "cerrada por NZ_MCP_NO_TUI; quita esa variable para abrirla",
-        "en": "closed by NZ_MCP_NO_TUI; unset that variable to open it",
-    },
-    "DOCTOR.TERMINAL.BLOCKER.TERM_DUMB": {
-        "es": "cerrada porque TERM=dumb; usa un terminal que declare sus capacidades",
-        "en": "closed because TERM=dumb; use a terminal that declares its capabilities",
-    },
-    "DOCTOR.TERMINAL.BLOCKER.NO_TERMINAL": {
-        "es": "cerrada porque la salida no va a un terminal (tuberia o redireccion)",
-        "en": "closed because output is not going to a terminal (pipe or redirection)",
-    },
-    "DOCTOR.TERMINAL.BLOCKER.BACKGROUND_PROCESS": {
-        "es": "cerrada porque el proceso corre en segundo plano; traelo al frente",
-        "en": "closed because the process runs in the background; bring it to the foreground",
-    },
-    "DOCTOR.TERMINAL.BLOCKER.TERMINAL_WITHOUT_CAPABILITIES": {
-        "es": "cerrada porque el tipo de terminal no sabe mover el cursor; revisa TERM",
-        "en": "closed because this terminal type cannot address the cursor; check TERM",
-    },
-    "DOCTOR.TERMINAL.BLOCKER.CONSOLE_WITHOUT_VT": {
-        "es": "cerrada porque la consola no procesa secuencias VT; usa Windows Terminal",
-        "en": "closed because the console does not process VT sequences; use Windows Terminal",
-    },
-    "DOCTOR.TERMINAL.BLOCKER.WINDOW_TOO_SMALL": {
-        "es": "cerrada porque la ventana es demasiado pequena; agrandala y repite",
-        "en": "closed because the window is too small; enlarge it and try again",
-    },
-    "DOCTOR.TERMINAL.BLOCKER.TERMINAL_LEVEL_0": {
-        "es": (
-            "cerrada porque el terminal esta en nivel 0; usa Windows Terminal, o pon la "
-            "consola en code page 65001, o fuerza NZ_MCP_UI_LEVEL=1"
-        ),
-        "en": (
-            "closed because the terminal is at level 0; use Windows Terminal, or set the "
-            "console to code page 65001, or force NZ_MCP_UI_LEVEL=1"
-        ),
     },
     "DOCTOR.LABEL.KEYRING_BACKEND": {
         "es": "Backend de keyring",

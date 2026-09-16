@@ -85,22 +85,16 @@ _FORBIDDEN_DYNAMIC: Final[frozenset[tuple[str, str]]] = frozenset(
 #: - ``rich``: ``rich.console.Console`` writes to **stdout** by default — exactly the byte
 #:   that corrupts the JSON-RPC of ``serve`` — so condition 2 of ADR 0027 confines the whole
 #:   package to ``cli_output.py``, where the channel is decided once.
-#: - ``textual``: condition 2 of ADR 0029 confines it to the one full-screen surface the
-#:   project still has - the wizard (ADR 0028) - and to the visual layer it uses, ``tui``
-#:   (the sheet, the themes and the base application), and pointedly **not** to the output
-#:   layer, which would then be two things at once. It writes to ``sys.__stdout__``, which
-#:   a name-based protection would miss entirely; the descriptor swap covers it, and this
-#:   keeps it away from the ``serve`` import graph as well. ADR 0035 removed the menu and
-#:   "Ver perfiles", the other two surfaces this used to confine ``textual`` to.
+#:
+#: ADR 0035 removed every full-screen surface (the menu, "Ver perfiles" and the wizard),
+#: and with it ``textual`` as a dependency: there is no longer a second entry here to
+#: confine. This map, and the tests below that walk it, stay generic on purpose - a future
+#: TUI-shaped dependency finds the same guard already built, not a bespoke one to redo.
 #:
 #: The values are paths under ``src/nz_mcp`` and match as prefixes, so a whole directory
-#: can own a package. Everything outside the homes of a package is forbidden - including,
-#: for each of these two, the home of the other. A package may have more than one home:
-#: what this check is about is that the list is short, closed and written down, not that it
-#: has exactly one entry.
+#: can own a package. Everything outside the home of a package is forbidden.
 _LAYER_ONLY_MODULES: Final[dict[str, tuple[str, ...]]] = {
     "rich": ("cli_output.py",),
-    "textual": ("wizard", "tui"),
 }
 
 _ANSI: Final[re.Pattern[str]] = re.compile("\x1b\\[")
@@ -446,38 +440,6 @@ def test_rich_may_not_be_imported_outside_the_output_layer(source: str) -> None:
     stray ``from rich.console import Console`` fails CI rather than a user's MCP client.
     """
     assert _layer_only_imports(ast.parse(source)) != []
-
-
-@pytest.mark.contract
-@pytest.mark.parametrize(
-    "source",
-    [
-        pytest.param("import textual\n", id="import-textual"),
-        pytest.param("from textual.app import App\n", id="from-textual-app"),
-        pytest.param("import textual.widgets as w\n", id="aliased-textual-submodule"),
-    ],
-)
-def test_textual_may_not_be_imported_outside_the_wizard(source: str) -> None:
-    """Condition 2 of ADR 0029, enforced instead of merely written down.
-
-    ``textual`` is a whole application framework with its own event loop, and it writes to
-    ``sys.__stdout__``. Confining it to ``src/nz_mcp/wizard/`` keeps a future major inside
-    one directory and keeps it out of the ``serve`` import graph, where the JSON-RPC lives.
-    """
-    assert _layer_only_imports(ast.parse(source)) != []
-
-
-@pytest.mark.contract
-def test_each_confined_package_is_forbidden_in_the_other_ones_home() -> None:
-    """The confinement is symmetric: the wizard does not import ``rich`` either.
-
-    It gets ``rich`` underneath ``textual``, which is the same rendering stack the output
-    layer already uses. Naming it directly would be a second route to the same library and
-    the beginning of a second way to decide a channel.
-    """
-    assert _confined_elsewhere(Path("wizard/app.py")) == frozenset({"rich"})
-    assert _confined_elsewhere(Path("cli_output.py")) == frozenset({"textual"})
-    assert _confined_elsewhere(Path("cli.py")) == frozenset({"rich", "textual"})
 
 
 @pytest.mark.contract
