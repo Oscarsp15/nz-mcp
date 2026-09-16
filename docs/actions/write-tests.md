@@ -22,17 +22,22 @@
 ```python
 import pytest
 
+
 # unit (sin mark)
 def test_x(): ...
+
 
 @pytest.mark.contract
 def test_mcp_lists_all_tools(): ...
 
+
 @pytest.mark.adversarial
 def test_guard_rejects_stacked(): ...
 
+
 @pytest.mark.integration
 def test_real_select_against_netezza(): ...
+
 
 @pytest.mark.slow
 def test_benchmark(): ...
@@ -63,12 +68,13 @@ import pytest
 from nz_mcp.tools.query_select import nz_query_select, QuerySelectInput
 from nz_mcp.errors import GuardRejectedError
 
+
 def test_select_happy_path(fake_profile, fake_connection, monkeypatch):
-    monkeypatch.setattr("nz_mcp.connection.get_connection",
-                        lambda profile: fake_connection)
+    monkeypatch.setattr("nz_mcp.connection.get_connection", lambda profile: fake_connection)
     out = nz_query_select(fake_profile, QuerySelectInput(sql="SELECT 1"))
     assert out.row_count >= 0
     assert out.truncated is False
+
 
 def test_select_rejects_delete(fake_profile):
     with pytest.raises(GuardRejectedError) as e:
@@ -83,16 +89,19 @@ import pytest
 from nz_mcp.sql_guard import validate
 from nz_mcp.errors import GuardRejectedError
 
+
 @pytest.mark.adversarial
-@pytest.mark.parametrize("sql,code", [
-    ("SELECT 1; DROP TABLE t;",                  "STACKED_NOT_ALLOWED"),
-    ("SELECT /*; DROP TABLE t; */ 1;",           "STACKED_NOT_ALLOWED"),
-    ("WITH x AS (DELETE FROM t RETURNING *) SELECT * FROM x;",
-                                                  "STATEMENT_NOT_ALLOWED"),
-    ("UPDATE t SET a=1",                          "UPDATE_REQUIRES_WHERE"),
-    ("DELETE FROM t",                             "DELETE_REQUIRES_WHERE"),
-    ("BEGIN; DELETE FROM t; COMMIT;",             "STACKED_NOT_ALLOWED"),
-])
+@pytest.mark.parametrize(
+    "sql,code",
+    [
+        ("SELECT 1; DROP TABLE t;", "STACKED_NOT_ALLOWED"),
+        ("SELECT /*; DROP TABLE t; */ 1;", "STACKED_NOT_ALLOWED"),
+        ("WITH x AS (DELETE FROM t RETURNING *) SELECT * FROM x;", "STATEMENT_NOT_ALLOWED"),
+        ("UPDATE t SET a=1", "UPDATE_REQUIRES_WHERE"),
+        ("DELETE FROM t", "DELETE_REQUIRES_WHERE"),
+        ("BEGIN; DELETE FROM t; COMMIT;", "STACKED_NOT_ALLOWED"),
+    ],
+)
 def test_guard_blocks(sql, code):
     with pytest.raises(GuardRejectedError) as e:
         validate(sql, mode="read")
@@ -104,6 +113,7 @@ def test_guard_blocks(sql, code):
 ```python
 from hypothesis import given, strategies as st
 from nz_mcp.logging_utils import sanitize
+
 
 @given(st.text(min_size=8, max_size=64))
 def test_sanitize_masks_known_secret(secret):
@@ -118,22 +128,39 @@ import pytest
 from nz_mcp.server import build_server
 
 EXPECTED_TOOLS = {
-    "nz_query_select", "nz_explain", "nz_list_databases", "nz_list_schemas",
-    "nz_list_tables", "nz_describe_table", "nz_table_sample", "nz_table_stats",
-    "nz_get_table_ddl", "nz_list_views", "nz_get_view_ddl",
-    "nz_list_procedures", "nz_describe_procedure", "nz_get_procedure_ddl",
+    "nz_query_select",
+    "nz_explain",
+    "nz_list_databases",
+    "nz_list_schemas",
+    "nz_list_tables",
+    "nz_describe_table",
+    "nz_table_sample",
+    "nz_table_stats",
+    "nz_get_table_ddl",
+    "nz_list_views",
+    "nz_get_view_ddl",
+    "nz_list_procedures",
+    "nz_describe_procedure",
+    "nz_get_procedure_ddl",
     "nz_get_procedure_section",
-    "nz_insert", "nz_update", "nz_delete",
-    "nz_create_table", "nz_truncate", "nz_drop_table",
+    "nz_insert",
+    "nz_update",
+    "nz_delete",
+    "nz_create_table",
+    "nz_truncate",
+    "nz_drop_table",
     "nz_clone_procedure",
-    "nz_current_profile", "nz_switch_profile",
+    "nz_current_profile",
+    "nz_switch_profile",
 }
+
 
 @pytest.mark.contract
 def test_all_tools_registered():
     server = build_server()
     names = {t.name for t in server.list_tools()}
     assert names == EXPECTED_TOOLS
+
 
 @pytest.mark.contract
 def test_all_tools_have_schemas():

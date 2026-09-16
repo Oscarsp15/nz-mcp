@@ -681,6 +681,7 @@ Clona un procedimiento almacenado de un origen a un destino (otro database/schem
 | `transformations` | array (optional) | Reemplazos sobre el cuerpo: `[{from, to, regex: bool}]`. Limitado a < 20. |
 | `dry_run` | bool (default true) | Si `true`, solo devuelve el DDL final que se ejecutaría. |
 | `confirm` | bool (**required if** `dry_run=false`) | |
+| `echo_sql` | bool (default **true**) | Si `false`, la respuesta de ejecución real omite `ddl_to_execute` (queda `null`); en `dry_run` siempre se devuelve el DDL como preview. |
 
 **Output**:
 ```json
@@ -692,11 +693,23 @@ Clona un procedimiento almacenado de un origen a un destino (otro database/schem
 }
 ```
 
+**Output** (ejecución real con `echo_sql=false`):
+```json
+{
+  "dry_run": false,
+  "ddl_to_execute": null,
+  "executed": true,
+  "warnings": [],
+  "duration_ms": 42
+}
+```
+
 **Reglas**:
 - Si `target_database == source_database` y `target_procedure` igual → debe `replace_if_exists=true` o falla con `PROCEDURE_ALREADY_EXISTS`.
 - Detección heurística de referencias cross-DB (warnings, no bloqueo).
 - Toda transformación textual se aplica al **body**, nunca al header firmado.
 - Auditoría: log estructurado con `source_*`, `target_*`, `ddl_hash`.
+- `echo_sql` controla **solo** la ejecución real: con `false`, `ddl_to_execute` queda `null` y la respuesta se reduce a metadatos (`executed`, `warnings`, `duration_ms`), para clonar en lote sin arrastrar el DDL completo al contexto. En `dry_run` el DDL se devuelve **siempre**, porque el preview es el objetivo de ese modo.
 
 ---
 
