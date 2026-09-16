@@ -9,7 +9,7 @@ non-production session cannot invoke a ``PROD_`` procedure.
 from __future__ import annotations
 
 import time
-from contextlib import closing
+from contextlib import closing, suppress
 from typing import Any, Final, Protocol, cast
 
 from nzpy import ProgrammingError
@@ -18,7 +18,7 @@ from nz_mcp.auth import get_password
 from nz_mcp.catalog.identifier import validate_catalog_identifier, validate_database_identifier
 from nz_mcp.config import TIMEOUT_S_CAP, Profile
 from nz_mcp.connection import open_connection
-from nz_mcp.errors import InvalidInputError, NetezzaError
+from nz_mcp.errors import InvalidInputError, NetezzaError, QueryTimeoutError
 from nz_mcp.logging_utils import sanitize
 from nz_mcp.sql_guard import StatementKind, assert_env_safe
 from nz_mcp.sql_guard import validate as guard_validate
@@ -69,6 +69,21 @@ def _count_signature_args(signature: str) -> int:
         elif ch == "," and depth == 0:
             count += 1
     return count
+
+
+def _read_notices(cursor: object) -> list[str]:
+    """Extract and normalise the NOTICE messages accumulated on a cursor."""
+    raw = getattr(cursor, "notices", None) or []
+    return [s for n in raw if (s := str(n).strip())]
+
+
+def _is_timeout_exc(exc: BaseException) -> bool:
+    """Return True when *exc* looks like a socket read-timeout from nzpy."""
+    # TimeoutError covers socket.timeout (same class in Python 3.11+).
+    if isinstance(exc, TimeoutError):
+        return True
+    # nzpy may surface it as a generic OSError; match on message as a fallback.
+    return isinstance(exc, OSError) and "timed out" in str(exc).lower()
 
 
 def _fetch_return_value(cursor: _CursorLike) -> str | None:
@@ -149,18 +164,40 @@ def call_procedure(
     password = get_password(profile.name)
     connection = cast(_ConnectionLike, open_connection(exec_profile, password))
     start = time.monotonic()
+    # Declared here so the except block can read any notices emitted before the failure.
+    partial_notices: list[str] = []
     try:
         with closing(connection.cursor()) as cursor:
             cursor.execute(parsed.raw, tuple(call_args))
+            # Read notices immediately after execute() so they are available even
+            # if _fetch_return_value raises (e.g. "no result set" on a void proc).
+            partial_notices = _read_notices(cursor)
             return_value = _fetch_return_value(cursor)
-            messages = [str(n).strip() for n in (getattr(cursor, "notices", None) or []) if n]
     except NetezzaError:
         raise
     except Exception as exc:  # noqa: BLE001, RUF100
+        # Capture any notices emitted before the failure; the cursor variable is
+        # still in scope because Python does not limit with-block assignments.
+        with suppress(Exception):
+            partial_notices = _read_notices(cursor)
+        detail = sanitize(str(exc), known_secrets={password})
+        if _is_timeout_exc(exc):
+            raise QueryTimeoutError(
+                operation="call_procedure",
+                database=database,
+                detail=detail,
+                # The client socket timed out but the server session may still be
+                # running.  nzpy exposes no cancel() and the finally close() only
+                # shuts the local socket, so the session can persist in _V_SESSION
+                # until the procedure finishes or a DBA runs ABORT SESSION.
+                orphan_session_risk=True,
+                partial_notices=partial_notices,
+            ) from exc
         raise NetezzaError(
             operation="call_procedure",
             database=database,
-            detail=sanitize(str(exc), known_secrets={password}),
+            detail=detail,
+            partial_notices=partial_notices,
         ) from exc
     finally:
         connection.close()
@@ -171,6 +208,6 @@ def call_procedure(
         "call_sql": parsed.raw,
         "executed": True,
         "return_value": return_value,
-        "messages": messages,
+        "messages": partial_notices,
         "duration_ms": duration_ms,
     }

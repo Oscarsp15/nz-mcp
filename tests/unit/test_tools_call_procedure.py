@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 import pytest
 from nzpy import ProgrammingError
 
-from nz_mcp.catalog.call import _count_signature_args, call_procedure
+from nz_mcp.catalog.call import (
+    _count_signature_args,
+    _is_timeout_exc,
+    _read_notices,
+    call_procedure,
+)
 from nz_mcp.config import Profile
-from nz_mcp.errors import GuardRejectedError, InvalidInputError, NetezzaError
+from nz_mcp.errors import GuardRejectedError, InvalidInputError, NetezzaError, QueryTimeoutError
 
 
 def _profile(*, database: str = "DESA_MODELOS", mode: Literal["admin"] = "admin") -> Profile:
@@ -221,6 +226,150 @@ def test_execute_failure_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
             dry_run=False,
             confirm=True,
             timeout_s=None,
+        )
+
+
+def test_read_notices_empty_when_no_attr() -> None:
+    class _NoCursorAttr:
+        pass
+
+    assert _read_notices(_NoCursorAttr()) == []
+    assert _read_notices(object()) == []
+
+
+def test_read_notices_strips_whitespace() -> None:
+    class _C:
+        notices: ClassVar[list[str]] = ["  hello  ", "", "  "]
+
+    assert _read_notices(_C()) == ["hello"]
+
+
+def test_is_timeout_exc_timeout_error() -> None:
+    assert _is_timeout_exc(TimeoutError("timed out")) is True
+
+
+def test_is_timeout_exc_oserror_with_message() -> None:
+    assert _is_timeout_exc(OSError("The read operation timed out")) is True
+
+
+def test_is_timeout_exc_generic_runtime_error() -> None:
+    assert _is_timeout_exc(RuntimeError("boom")) is False
+
+
+def test_notices_preserved_in_error_context_when_execute_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """NOTICE messages emitted before a mid-proc failure must survive in the error."""
+
+    class _PartialCursor(_FakeCursor):
+        def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
+            # Populate notices before raising, simulating a proc that emits
+            # RAISE NOTICE then fails.
+            self.notices = ["step 1 done", "step 2 done"]
+            raise RuntimeError("mid-proc error")
+
+    cursor = _PartialCursor()
+    monkeypatch.setattr("nz_mcp.catalog.call.open_connection", lambda _p, _w: _FakeConn(cursor))
+    monkeypatch.setattr("nz_mcp.catalog.call.get_password", lambda _n: "pw")
+    with pytest.raises(NetezzaError) as ei:
+        call_procedure(
+            _profile(),
+            database="DESA_MODELOS",
+            schema="DBO",
+            procedure="P",
+            args=None,
+            signature=None,
+            dry_run=False,
+            confirm=True,
+            timeout_s=None,
+        )
+    assert ei.value.context.get("partial_notices") == ["step 1 done", "step 2 done"]
+
+
+def test_notices_empty_in_error_context_when_cursor_has_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _BoomCursor:
+        notices: ClassVar[list[str]] = []
+
+        def execute(self, *_a: object, **_k: object) -> None:
+            raise RuntimeError("boom")
+
+        def close(self) -> None:
+            pass
+
+    class _BoomConn:
+        def cursor(self) -> _BoomCursor:
+            return _BoomCursor()
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("nz_mcp.catalog.call.open_connection", lambda _p, _w: _BoomConn())
+    monkeypatch.setattr("nz_mcp.catalog.call.get_password", lambda _n: "pw")
+    with pytest.raises(NetezzaError) as ei:
+        call_procedure(
+            _profile(),
+            database="DESA_MODELOS",
+            schema="DBO",
+            procedure="P",
+            args=None,
+            signature=None,
+            dry_run=False,
+            confirm=True,
+            timeout_s=None,
+        )
+    assert ei.value.context.get("partial_notices") == []
+
+
+def test_timeout_raises_query_timeout_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A socket timeout must surface as QueryTimeoutError with orphan_session_risk flag."""
+
+    class _TimeoutCursor(_FakeCursor):
+        def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
+            self.notices = ["proc started"]
+            raise TimeoutError("The read operation timed out")
+
+    cursor = _TimeoutCursor()
+    monkeypatch.setattr("nz_mcp.catalog.call.open_connection", lambda _p, _w: _FakeConn(cursor))
+    monkeypatch.setattr("nz_mcp.catalog.call.get_password", lambda _n: "pw")
+    with pytest.raises(QueryTimeoutError) as ei:
+        call_procedure(
+            _profile(),
+            database="DESA_MODELOS",
+            schema="DBO",
+            procedure="P",
+            args=None,
+            signature=None,
+            dry_run=False,
+            confirm=True,
+            timeout_s=30,
+        )
+    assert ei.value.context.get("orphan_session_risk") is True
+    assert ei.value.context.get("partial_notices") == ["proc started"]
+
+
+def test_timeout_oserror_raises_query_timeout_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An OSError with 'timed out' in the message must also surface as QueryTimeoutError."""
+
+    class _OsTimeoutCursor(_FakeCursor):
+        def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
+            raise OSError("The read operation timed out")
+
+    cursor = _OsTimeoutCursor()
+    monkeypatch.setattr("nz_mcp.catalog.call.open_connection", lambda _p, _w: _FakeConn(cursor))
+    monkeypatch.setattr("nz_mcp.catalog.call.get_password", lambda _n: "pw")
+    with pytest.raises(QueryTimeoutError):
+        call_procedure(
+            _profile(),
+            database="DESA_MODELOS",
+            schema="DBO",
+            procedure="P",
+            args=None,
+            signature=None,
+            dry_run=False,
+            confirm=True,
+            timeout_s=30,
         )
 
 
