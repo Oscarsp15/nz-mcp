@@ -563,12 +563,19 @@ def _signature_matches(row_signature: str, wanted: str) -> bool:
     the types-only string ``nz_list_procedures`` already surfaces in its
     ``arguments`` field, instead of only the string an ``OVERLOAD_AMBIGUOUS``
     error happens to print. Issue #267.
+
+    An empty type list only ever comes from a genuine zero-argument
+    signature (``"()"`` strips to ``""``): ``_signature_types_only`` returns
+    the untouched, non-empty ``row_signature`` whenever it finds no ``(``
+    at all, so ``row_types`` can never go empty through a parse failure —
+    matching two empty strings here is exactly the zero-argument case, not
+    a false positive (issue #270 review).
     """
     if _normalize_signature(row_signature) == _normalize_signature(wanted):
         return True
     row_types = _normalize_signature(_strip_outer_parens(_signature_types_only(row_signature)))
     want_types = _normalize_signature(_strip_outer_parens(wanted))
-    return bool(row_types) and row_types == want_types
+    return row_types == want_types
 
 
 def _fetch_procedure_rows(

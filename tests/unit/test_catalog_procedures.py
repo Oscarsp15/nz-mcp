@@ -198,6 +198,30 @@ def test_pick_procedure_row_accepts_types_only_without_outer_parens() -> None:
     assert got is a
 
 
+def test_pick_procedure_row_accepts_types_only_signature_for_zero_args() -> None:
+    """A zero-argument overload's types-only signature is "()" — issue #270 review.
+
+    ``_signature_matches`` used to require a non-empty type list, so the exact
+    "()" that ``nz_list_procedures.arguments`` returns for a no-argument
+    procedure could never match, even though it is the correct value.
+    """
+    a = {
+        "PROCEDURE": "PI_CRONTROLESPACIONETEZZA",
+        "PROCEDURESIGNATURE": "PI_CRONTROLESPACIONETEZZA()",
+    }
+    b = {
+        "PROCEDURE": "PI_CRONTROLESPACIONETEZZA",
+        "PROCEDURESIGNATURE": "PI_CRONTROLESPACIONETEZZA(INTEGER)",
+    }
+    got = proc._pick_procedure_row([a, b], "()", "PI_CRONTROLESPACIONETEZZA")
+    assert got is a
+
+
+def test_pick_procedure_row_single_zero_arg_accepts_empty_parens() -> None:
+    r = {"PROCEDURE": "P", "PROCEDURESIGNATURE": "P()"}
+    assert proc._pick_procedure_row([r], "()", "P") is r
+
+
 def test_pick_procedure_row_types_only_signature_mismatch() -> None:
     """A types-only signature still raises ObjectNotFoundError when nothing matches."""
     a = {"PROCEDURE": "P", "PROCEDURESIGNATURE": "P(INT)"}
