@@ -51,10 +51,9 @@ class DiagnosticReport(BaseModel):
     active_profile: str | None
     keyring_backend: str
     keyring_available: bool
-    #: What the CLI can draw on this terminal, and - when the full screen is closed - which
-    #: of the eight triggers closed it. Reported because a silent degradation is
-    #: indistinguishable from a missing feature: the menu simply does not appear, and the
-    #: reader has nothing to act on.
+    #: What the CLI can draw on this terminal, and - when the wizard's full screen is
+    #: closed - which of the eight triggers closed it. ADR 0035 removed the menu and "Ver
+    #: perfiles"; the wizard is the only full-screen surface left to report on.
     terminal_level: TerminalLevel
     full_screen_blocker: InteractiveBlocker | None
     locale: Locale
