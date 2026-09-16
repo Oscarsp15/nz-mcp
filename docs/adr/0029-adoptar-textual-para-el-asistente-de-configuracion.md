@@ -1,7 +1,8 @@
 # ADR 0029 — Adoptar `textual` acotado y confinado para el asistente de configuración
 
 - **Fecha**: 2026-09-06 (adenda 1: 2026-09-06; adenda 2: 2026-09-06)
-- **Estado**: aceptado, con dos adendas — la [1](#adenda-1-2026-09-06--qué-garantiza-de-verdad-la-condición-5)
+- **Estado**: **retirado por el [ADR 0035](0035-cli-de-dos-niveles-sin-pantalla-completa.md) (2026-09-16)** — sin nivel 2, no queda ningún consumidor de `textual`; la dependencia se retira de `pyproject.toml`. Se conserva este documento como registro histórico.
+  Con dos adendas — la [1](#adenda-1-2026-09-06--qué-garantiza-de-verdad-la-condición-5)
   precisa qué garantiza la condición 5, y la [2](#adenda-2-2026-09-06--la-cláusula-2-se-abre-un-campo-que-guarda-un-número)
   abre su cláusula 2 a un campo interactivo que no guarda la credencial
 - **Decidido por**: DX Engineer (IA) + validación humana (auditor: Security Engineer)

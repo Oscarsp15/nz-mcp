@@ -63,12 +63,13 @@ Ver [tech-lead.md](../roles/tech-lead.md#plantilla-adr-para-copiar-a-docsadrnnnn
 | 0025 | [Eliminar `on_conflict="skip"` de `nz_insert`](0025-on-conflict-skip-eliminado.md) | aceptado | 2026-09-05 |
 | 0026 | [La password viaja como `Secret`, nunca como `str` desnuda](0026-secret-sin-password-en-trazas.md) | aceptado | 2026-09-05 |
 | 0027 | [Adoptar `rich` como dependencia directa acotada para la presentación del CLI](0027-adoptar-rich-para-la-presentacion-del-cli.md) | aceptado, enmendado por el 0031 | 2026-09-05 |
-| 0028 | [El asistente de configuración es la única excepción al ADR 0005](0028-asistente-de-configuracion-interactivo.md) | aceptado (enmienda el 0005), ampliado por el 0032 | 2026-09-06 |
-| 0029 | [Adoptar `textual` acotado y confinado para el asistente de configuración](0029-adoptar-textual-para-el-asistente-de-configuracion.md) | aceptado | 2026-09-06 |
-| 0030 | [El menú interactivo es la segunda excepción al ADR 0005](0030-menu-interactivo-como-punto-de-entrada.md) | aceptado (amplía el 0028), ampliado por el 0032 | 2026-09-06 |
-| 0031 | [El CLI dibuja por niveles de capacidad, y el ASCII pasa de techo a piso](0031-mejora-progresiva-por-capacidad-del-terminal.md) | aceptado (enmienda el 0027), enmendado por el 0033 | 2026-09-10 |
-| 0032 | [Rediseñar el nivel 2 del CLI interactivo como un producto único](0032-rediseno-del-nivel-2-del-cli-interactivo.md) | aceptado (amplía el 0028 y el 0030) | 2026-09-09 |
+| 0028 | [El asistente de configuración es la única excepción al ADR 0005](0028-asistente-de-configuracion-interactivo.md) | aceptado (enmienda el 0005), ampliado por el 0032, enmendado por el 0035 (pierde su rama de pantalla completa) | 2026-09-06 |
+| 0029 | [Adoptar `textual` acotado y confinado para el asistente de configuración](0029-adoptar-textual-para-el-asistente-de-configuracion.md) | **retirado por el 0035** (sin nivel 2, sin consumidor) | 2026-09-06 |
+| 0030 | [El menú interactivo es la segunda excepción al ADR 0005](0030-menu-interactivo-como-punto-de-entrada.md) | **superseded por el 0035** | 2026-09-06 |
+| 0031 | [El CLI dibuja por niveles de capacidad, y el ASCII pasa de techo a piso](0031-mejora-progresiva-por-capacidad-del-terminal.md) | aceptado (enmienda el 0027), enmendado por el 0033 y el 0035 (su punto 9 queda sin objeto) | 2026-09-10 |
+| 0032 | [Rediseñar el nivel 2 del CLI interactivo como un producto único](0032-rediseno-del-nivel-2-del-cli-interactivo.md) | **superseded por el 0035** | 2026-09-09 |
 | 0033 | [El CLI prepara la consola de Windows antes de medir su capacidad](0033-preparar-consola-windows-antes-de-medir.md) | aceptado (enmienda el 0031) | 2026-09-11 |
 | 0034 | [`nz_alter_table` para `ALTER TABLE` aditivos y `StatementKind.ALTER` en `sql_guard`](0034-tool-alter-table.md) | aceptado | 2026-09-14 |
+| 0035 | [El CLI pasa a dos niveles; se elimina la pantalla completa](0035-cli-de-dos-niveles-sin-pantalla-completa.md) | aceptado (supersede el 0030 y el 0032; enmienda el 0028 y el 0031) | 2026-09-16 |
 
 > **Colisión de numeración**: dos ADR comparten el número `0014`. Las referencias en prosa a "ADR 0014" del CHANGELOG y de la ADR 0015 apuntan a [`0014-tool-execute-ddl.md`](0014-tool-execute-ddl.md). No se renumeran para no romper esos enlaces.

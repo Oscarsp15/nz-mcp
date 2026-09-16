@@ -1,10 +1,12 @@
 # ADR 0030 — El menú interactivo es la segunda excepción al ADR 0005, y no una tercera puerta
 
 - **Fecha**: 2026-09-06
-- **Estado**: aceptado — **amplía el [ADR 0028](0028-asistente-de-configuracion-interactivo.md)**, que sigue vigente en todo lo demás
+- **Estado**: **superseded por el [ADR 0035](0035-cli-de-dos-niveles-sin-pantalla-completa.md) (2026-09-16)** — el menú se elimina; `nz-mcp` sin argumentos vuelve a imprimir la ayuda. Se conserva este documento como registro histórico de por qué existió.
 - **Decidido por**: DX Engineer (IA) + validación humana (auditor: QA Engineer)
 - **Issue**: [#226](https://github.com/Oscarsp15/nz-mcp/issues/226)
 - **Alcance**: **qué** se permite ahora que hay una segunda pantalla, y con qué límites. La librería sigue siendo la del [ADR 0029](0029-adoptar-textual-para-el-asistente-de-configuracion.md); este ADR no vuelve a elegirla.
+
+> **Superseded por el [ADR 0035](0035-cli-de-dos-niveles-sin-pantalla-completa.md) (2026-09-16).** Oscar decidió reducir el CLI de tres niveles a dos, eliminando la pantalla completa por completo. El menú de este ADR ya no existe; el contenido que sigue queda como registro de su diseño original, no como comportamiento vigente.
 
 > **Ampliado por el [ADR 0032](0032-rediseno-del-nivel-2-del-cli-interactivo.md) (2026-09-09).** El menú pasa a listar **seis tareas** con verbo —Configurar una conexión, Ver perfiles, Probar la conexión, Iniciar el servidor MCP, Diagnosticar la instalación, Ver herramientas— en vez de los once nombres de comando, y ningún comando ni bandera se muestra en pantallas de trabajo: viven en el modal de `?` y en el subcomando `nz-mcp help`. Eso enmienda **tres puntos** de este ADR: el 1, el 4 y el 5. **Punto 4**: las entradas dejan de derivarse de los comandos que `typer` tiene registrados y pasan a ser una lista propia con sus claves i18n; lo que sí se sigue derivando de los comandos registrados es la ayuda de `?`. **Punto 1** —*el menú elige, no hospeda*—: se mantiene y se **extiende a una elección en dos pasos**, porque la pantalla "Ver perfiles" también elige y tampoco hospeda; sigue sin haber reentrada, la pantalla sigue cerrándose antes de ejecutar y el proceso sigue terminando con el código del comando. **Punto 5**: cuando se llega desde el menú, la elección del perfil la hace "Ver perfiles" y no el prompt en texto plano de `switch-profile`, que sigue intacto para quien teclea el comando en seco. La degradación **no cambia**. Todo lo demás sigue vigente sin cambios; el contenido que sigue se conserva tal como se escribió el 2026-09-06.
 
