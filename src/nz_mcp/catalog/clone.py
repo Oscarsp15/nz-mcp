@@ -210,8 +210,15 @@ def clone_procedure(
     transformations: list[dict[str, Any]] | None,
     dry_run: bool,
     confirm: bool,
+    echo_sql: bool = True,
 ) -> dict[str, Any]:
-    """Orchestrate procedure clone; returns a dict for MCP tool output."""
+    """Orchestrate procedure clone; returns a dict for MCP tool output.
+
+    When ``echo_sql`` is false the real-execution branch omits the rebuilt DDL from the
+    response (``ddl_to_execute`` becomes ``None``), so cloning many procedures in a row
+    does not echo each full statement back into the caller's context. The ``dry_run``
+    branch always returns the DDL regardless of ``echo_sql``: the preview is its point.
+    """
     if transformations is not None and len(transformations) > _MAX_TRANSFORMS:
         raise InvalidInputError(
             detail=f"At most {_MAX_TRANSFORMS} transformations allowed.",
@@ -316,7 +323,7 @@ def clone_procedure(
 
     return {
         "dry_run": False,
-        "ddl_to_execute": target_ddl,
+        "ddl_to_execute": target_ddl if echo_sql else None,
         "executed": True,
         "warnings": warnings,
         "duration_ms": duration_ms,

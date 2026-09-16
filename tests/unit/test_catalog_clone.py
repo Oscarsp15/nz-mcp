@@ -350,6 +350,123 @@ def test_clone_execute_failure(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
 
+def test_dry_run_with_echo_sql_false_still_returns_ddl(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "nz_mcp.catalog.clone.get_procedure_ddl",
+        lambda *_a, **_k: _SAMPLE_DDL,
+    )
+    monkeypatch.setattr("nz_mcp.catalog.clone.list_procedures", lambda *_a, **_k: [])
+
+    out = clone_procedure(
+        _profile(),
+        source_database="DEV",
+        source_schema="PUBLIC",
+        source_procedure="SRC",
+        source_signature=None,
+        target_database="DEV",
+        target_schema="PUBLIC",
+        target_procedure="NEW1",
+        replace_if_exists=True,
+        transformations=None,
+        dry_run=True,
+        confirm=False,
+        echo_sql=False,
+    )
+    assert out["dry_run"] is True
+    assert out["executed"] is False
+    assert out["ddl_to_execute"] is not None
+
+
+def test_execute_with_echo_sql_false_omits_ddl(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "nz_mcp.catalog.clone.get_procedure_ddl",
+        lambda *_a, **_k: _SAMPLE_DDL,
+    )
+    calls = 0
+
+    def _list(_p: object, _db: str, _sch: str, pattern: object = None) -> list[dict[str, str]]:
+        nonlocal calls
+        calls += 1
+        if calls >= 2:
+            return [
+                {
+                    "name": "NEW1",
+                    "owner": "U",
+                    "language": "NZPLSQL",
+                    "arguments": "()",
+                    "returns": "",
+                }
+            ]
+        return []
+
+    monkeypatch.setattr("nz_mcp.catalog.clone.list_procedures", _list)
+    monkeypatch.setattr("nz_mcp.catalog.clone.open_connection", lambda _p, _w: _FakeConn())
+    monkeypatch.setattr("nz_mcp.catalog.clone.get_password", lambda _n: "pw")
+
+    out = clone_procedure(
+        _profile(),
+        source_database="DEV",
+        source_schema="PUBLIC",
+        source_procedure="SRC",
+        source_signature=None,
+        target_database="DEV",
+        target_schema="PUBLIC",
+        target_procedure="NEW1",
+        replace_if_exists=True,
+        transformations=None,
+        dry_run=False,
+        confirm=True,
+        echo_sql=False,
+    )
+    assert out["executed"] is True
+    assert out["ddl_to_execute"] is None
+
+
+def test_execute_with_echo_sql_true_returns_ddl(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "nz_mcp.catalog.clone.get_procedure_ddl",
+        lambda *_a, **_k: _SAMPLE_DDL,
+    )
+    calls = 0
+
+    def _list(_p: object, _db: str, _sch: str, pattern: object = None) -> list[dict[str, str]]:
+        nonlocal calls
+        calls += 1
+        if calls >= 2:
+            return [
+                {
+                    "name": "NEW1",
+                    "owner": "U",
+                    "language": "NZPLSQL",
+                    "arguments": "()",
+                    "returns": "",
+                }
+            ]
+        return []
+
+    monkeypatch.setattr("nz_mcp.catalog.clone.list_procedures", _list)
+    monkeypatch.setattr("nz_mcp.catalog.clone.open_connection", lambda _p, _w: _FakeConn())
+    monkeypatch.setattr("nz_mcp.catalog.clone.get_password", lambda _n: "pw")
+
+    out = clone_procedure(
+        _profile(),
+        source_database="DEV",
+        source_schema="PUBLIC",
+        source_procedure="SRC",
+        source_signature=None,
+        target_database="DEV",
+        target_schema="PUBLIC",
+        target_procedure="NEW1",
+        replace_if_exists=True,
+        transformations=None,
+        dry_run=False,
+        confirm=True,
+        echo_sql=True,
+    )
+    assert out["executed"] is True
+    assert out["ddl_to_execute"] is not None
+
+
 def test_transformation_regex_no_match_warns(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "nz_mcp.catalog.clone.get_procedure_ddl",
