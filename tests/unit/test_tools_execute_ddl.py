@@ -503,7 +503,7 @@ def test_validate_compile_detects_compile_error(monkeypatch: pytest.MonkeyPatch)
             if call_count == 1:
                 return  # CREATE succeeds
             # "syntax error" pattern (NPS 11.x SaaS); "plpgsql" on older NPS.
-            raise RuntimeError('ERROR:  syntax error, unexpected WORD, expecting BEGIN')
+            raise RuntimeError("ERROR:  syntax error, unexpected WORD, expecting BEGIN")
 
         def close(self) -> None:
             pass
@@ -539,7 +539,8 @@ def test_validate_compile_detects_compile_error(monkeypatch: pytest.MonkeyPatch)
     assert "compile" in err_lower or "syntax error" in err_lower
 
 
-def test_validate_compile_arg_mismatch_means_body_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_validate_compile_arg_mismatch_is_inconclusive(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Overload-not-found error from CALL → inconclusive (None), never compiled=True."""
     call_count = 0
 
     class _ArgMismatchCursor:
@@ -578,8 +579,123 @@ def test_validate_compile_arg_mismatch_means_body_ok(monkeypatch: pytest.MonkeyP
         validate_compile=True,
     )
     assert out["executed"] is True
+    assert out["compiled"] is None
+    assert out["compile_error"] is None
+
+
+def test_validate_compile_runtime_error_means_body_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-compile, non-mismatch error (body ran with NULL and errored) → compiled=True."""
+    call_count = 0
+
+    class _RuntimeErrorCursor:
+        def execute(self, sql: str, params: object = None) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return  # CREATE succeeds
+            raise RuntimeError("division by zero")
+
+        def close(self) -> None:
+            pass
+
+    class _RuntimeErrorConn:
+        def __init__(self) -> None:
+            self._c = _RuntimeErrorCursor()
+
+        def cursor(self) -> _RuntimeErrorCursor:
+            return self._c
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        "nz_mcp.catalog.execute_ddl.open_connection",
+        lambda _p, _w: _RuntimeErrorConn(),
+    )
+    monkeypatch.setattr("nz_mcp.catalog.execute_ddl.get_password", lambda _n: "pw")
+    out = execute_ddl(
+        _profile(),
+        sql=_PROC,
+        input_path=None,
+        statement_type="procedure",
+        dry_run=False,
+        confirm=True,
+        validate_compile=True,
+    )
+    assert out["executed"] is True
     assert out["compiled"] is True
     assert out["compile_error"] is None
+
+
+def test_validate_compile_uses_typed_nulls_for_proc_with_args(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CALL for a proc with args must use NULL::type placeholders, not zero args."""
+    captured_calls: list[str] = []
+
+    class _CaptureCursor:
+        def execute(self, sql: str, params: object = None) -> None:
+            captured_calls.append(sql)
+
+        def close(self) -> None:
+            pass
+
+    class _CaptureConn:
+        def __init__(self) -> None:
+            self._c = _CaptureCursor()
+
+        def cursor(self) -> _CaptureCursor:
+            return self._c
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        "nz_mcp.catalog.execute_ddl.open_connection",
+        lambda _p, _w: _CaptureConn(),
+    )
+    monkeypatch.setattr("nz_mcp.catalog.execute_ddl.get_password", lambda _n: "pw")
+    out = execute_ddl(
+        _profile(),
+        sql=_PROC_INVALID,  # has (INT4) arg
+        input_path=None,
+        statement_type="procedure",
+        dry_run=False,
+        confirm=True,
+        validate_compile=True,
+    )
+    assert out["executed"] is True
+    call_sqls = [s for s in captured_calls if s.strip().upper().startswith("CALL")]
+    assert len(call_sqls) == 1, f"expected 1 CALL statement, got: {captured_calls}"
+    assert "NULL::INT4" in call_sqls[0].upper(), f"expected NULL::INT4 in CALL, got: {call_sqls[0]}"
+
+
+def test_parse_proc_args_zero_args() -> None:
+    from nz_mcp.catalog.execute_ddl import _parse_proc_args
+
+    assert _parse_proc_args(_PROC) == []
+
+
+def test_parse_proc_args_single_arg() -> None:
+    from nz_mcp.catalog.execute_ddl import _parse_proc_args
+
+    assert _parse_proc_args(_PROC_INVALID) == ["INT4"]
+
+
+def test_parse_proc_args_multi_args_with_precision() -> None:
+    from nz_mcp.catalog.execute_ddl import _parse_proc_args
+
+    ddl = (
+        "CREATE OR REPLACE PROCEDURE DBO.MULTI(NUMERIC(10,2), NVARCHAR(50))\n"
+        "RETURNS INT4 LANGUAGE NZPLSQL AS BEGIN_PROC END_PROC;"
+    )
+    assert _parse_proc_args(ddl) == ["NUMERIC(10,2)", "NVARCHAR(50)"]
+
+
+def test_parse_proc_args_none_for_non_proc() -> None:
+    from nz_mcp.catalog.execute_ddl import _parse_proc_args
+
+    assert _parse_proc_args(_VIEW) is None
 
 
 def test_extract_proc_ref_parses_schema_and_name() -> None:
