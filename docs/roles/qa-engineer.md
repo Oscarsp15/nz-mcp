@@ -69,21 +69,24 @@ tests/
 import pytest
 from unittest.mock import MagicMock
 
+
 @pytest.fixture
 def fake_cursor():
     cur = MagicMock()
     cur.fetchmany.side_effect = [
         [(1, "Alice"), (2, "Bob")],
-        [],   # señal de fin
+        [],  # señal de fin
     ]
     cur.description = [("ID", "INTEGER"), ("NAME", "VARCHAR")]
     return cur
+
 
 @pytest.fixture
 def fake_connection(fake_cursor):
     conn = MagicMock()
     conn.cursor.return_value = fake_cursor
     return conn
+
 
 def test_execute_select_streams_until_max_rows(fake_connection):
     result = execute_select(
@@ -103,11 +106,13 @@ Para `sql_guard` y `sanitize`:
 ```python
 from hypothesis import given, strategies as st
 
+
 @given(st.text(min_size=1, max_size=200))
 def test_sanitize_never_leaks_known_secret(s):
     secret = "super-secret-password-123"
     contaminated = f"connecting with password={secret} {s}"
     assert secret not in sanitize(contaminated, known_secrets={secret})
+
 
 @given(st.sampled_from(["SELECT 1", "SELECT * FROM t WHERE id = 1"]))
 def test_select_passes_in_read_mode(sql):

@@ -90,6 +90,7 @@ select = [
 ]
 ignore = [
     "PLR0913",       # too many arguments — covered by maintainability.md threshold
+    "PLR0917",       # too many positional arguments — same threshold, split rule (ruff 0.16)
 ]
 
 [tool.ruff.lint.per-file-ignores]

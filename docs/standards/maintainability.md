@@ -42,16 +42,28 @@ Si añadir una tool obliga a tocar `server.py`, `sql_guard.py` o `auth.py`, **al
 ```python
 TOOLS: dict[str, Tool] = {}
 
-def tool(*, name: str, description: str, mode: PermissionMode,
-         input_model: type[BaseModel], output_model: type[BaseModel],
-         annotations: dict | None = None):
+
+def tool(
+    *,
+    name: str,
+    description: str,
+    mode: PermissionMode,
+    input_model: type[BaseModel],
+    output_model: type[BaseModel],
+    annotations: dict | None = None,
+):
     def deco(fn):
         TOOLS[name] = Tool(
-            name=name, description=description, mode=mode,
-            input_model=input_model, output_model=output_model,
-            annotations=annotations or {}, handler=fn,
+            name=name,
+            description=description,
+            mode=mode,
+            input_model=input_model,
+            output_model=output_model,
+            annotations=annotations or {},
+            handler=fn,
         )
         return fn
+
     return deco
 ```
 
