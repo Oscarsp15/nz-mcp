@@ -31,12 +31,13 @@ class CloneProcedureInput(BaseModel):
     transformations: list[TransformationInput] | None = None
     dry_run: bool = True
     confirm: bool = False
+    echo_sql: bool = True
 
 
 class CloneProcedureOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     dry_run: bool
-    ddl_to_execute: str
+    ddl_to_execute: str | None = None
     executed: bool
     warnings: list[str]
     duration_ms: int | None = None
@@ -47,7 +48,8 @@ class CloneProcedureOutput(BaseModel):
     description=(
         "Clone a Netezza stored procedure to another database/schema with optional "
         "body transformations. Requires profile mode admin. Use dry_run first; destructive "
-        "when dry_run=false with confirm=true."
+        "when dry_run=false with confirm=true. echo_sql=false omits the rebuilt DDL when "
+        "cloning."
     ),
     mode="admin",
     input_model=CloneProcedureInput,
@@ -83,10 +85,11 @@ def nz_clone_procedure(
         transformations=trans,
         dry_run=params.dry_run,
         confirm=params.confirm,
+        echo_sql=params.echo_sql,
     )
     return CloneProcedureOutput(
         dry_run=bool(raw["dry_run"]),
-        ddl_to_execute=str(raw["ddl_to_execute"]),
+        ddl_to_execute=raw["ddl_to_execute"],
         executed=bool(raw["executed"]),
         warnings=list(raw["warnings"]),
         duration_ms=raw.get("duration_ms"),
