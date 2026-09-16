@@ -1,10 +1,12 @@
 # ADR 0032 — Rediseñar el nivel 2 del CLI interactivo como un producto único
 
 - **Fecha**: 2026-09-09
-- **Estado**: aceptado — **amplía el [ADR 0028](0028-asistente-de-configuracion-interactivo.md) y el [ADR 0030](0030-menu-interactivo-como-punto-de-entrada.md)**, que siguen vigentes en todo lo demás
+- **Estado**: **superseded por el [ADR 0035](0035-cli-de-dos-niveles-sin-pantalla-completa.md) (2026-09-16)** — el nivel 2 y la pantalla "Ver perfiles" se eliminan. Se conserva este documento como registro histórico de por qué existió.
 - **Decidido por**: TUI Designer (IA) + DX Engineer (IA) + validación humana (auditor: Tech Lead)
 - **Issue**: [#235](https://github.com/Oscarsp15/nz-mcp/issues/235)
 - **Alcance**: **cómo se ve y qué se muestra** en el nivel 2 —la ruta de pantalla completa—, y qué superficie nueva se autoriza. La librería sigue siendo la del [ADR 0029](0029-adoptar-textual-para-el-asistente-de-configuracion.md); los niveles 0 y 1 los gobierna el ADR 0031, *mejora progresiva por capacidad del terminal* (issue [#234](https://github.com/Oscarsp15/nz-mcp/issues/234)), y este ADR no los toca.
+
+> **Superseded por el [ADR 0035](0035-cli-de-dos-niveles-sin-pantalla-completa.md) (2026-09-16).** Oscar decidió reducir el CLI de tres niveles a dos, eliminando la pantalla completa. La pantalla "Ver perfiles" que este ADR diseñó ya no existe; `list-profiles` es la única superficie. El contenido que sigue queda como registro de su diseño original.
 
 ## Contexto
 

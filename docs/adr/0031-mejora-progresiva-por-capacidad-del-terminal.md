@@ -1,7 +1,7 @@
 # ADR 0031 — El CLI dibuja por niveles de capacidad, y el ASCII pasa de techo a piso
 
 - **Fecha**: 2026-09-10 (decisión del owner sobre las maquetas: 2026-09-09)
-- **Estado**: aceptado — **enmienda el [ADR 0027](0027-adoptar-rich-para-la-presentacion-del-cli.md)** en un punto: su ASCII sin color deja de ser *la* salida y pasa a ser **el piso garantizado**. Todo lo demás del 0027, y sus dos adendas, sigue vigente.
+- **Estado**: aceptado — **enmienda el [ADR 0027](0027-adoptar-rich-para-la-presentacion-del-cli.md)** en un punto: su ASCII sin color deja de ser *la* salida y pasa a ser **el piso garantizado**. Todo lo demás del 0027, y sus dos adendas, sigue vigente. **Enmendado por el [ADR 0035](0035-cli-de-dos-niveles-sin-pantalla-completa.md) (2026-09-16)** en el punto 9 únicamente: sin nivel 2, ese punto queda sin objeto. Los puntos 1-8 (la detección de nivel 0/1 y la paleta) no cambian.
 - **Decidido por**: TUI Designer (IA) + validación humana (auditor: Tech Lead)
 - **Issue**: [#234](https://github.com/Oscarsp15/nz-mcp/issues/234)
 - **Alcance**: **cuántos niveles hay, con qué señal se decide cada uno y qué puede pintar cada uno**. Con qué librería se pinta lo decidieron el [ADR 0027](0027-adoptar-rich-para-la-presentacion-del-cli.md) y el [ADR 0029](0029-adoptar-textual-para-el-asistente-de-configuracion.md); **qué** se muestra sigue siendo del rol DX. Este ADR no elige contenido ni librería.
