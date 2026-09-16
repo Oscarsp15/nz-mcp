@@ -168,13 +168,15 @@ def entry_point(ctx: typer.Context) -> None:
 
 
 @app.command("init", help=_help("CLI.HELP.INIT"), rich_help_panel=_COMMANDS_PANEL)
-def init_cmd() -> None:
+def init_cmd(
+    yes: bool = typer.Option(False, "--yes", "-y", help=_help("CLI.HELP.OPT.YES")),
+) -> None:
     """Interactive wizard: create the first profile."""
     locale = resolve_locale()
     out.heading("nz-mcp init")
     out.note(t("CLI.INIT_INTRO", locale))
     name = out.ask(t("CLI.INIT_NAME_PROMPT", locale), default="default")
-    _add_profile_interactive(name=name, set_active=True)
+    _add_profile_interactive(name=name, set_active=True, assume_yes=yes)
 
 
 @app.command(
@@ -280,9 +282,10 @@ def add_profile_cmd(
         "--active/--no-active",
         help=_help("CLI.HELP.OPT.SET_ACTIVE"),
     ),
+    yes: bool = typer.Option(False, "--yes", "-y", help=_help("CLI.HELP.OPT.YES")),
 ) -> None:
     """Add a new profile (interactive)."""
-    _add_profile_interactive(name=name, set_active=set_active)
+    _add_profile_interactive(name=name, set_active=set_active, assume_yes=yes)
 
 
 @app.command("edit-profile", help=_help("CLI.HELP.EDIT_PROFILE"), rich_help_panel=_COMMANDS_PANEL)
@@ -328,6 +331,7 @@ def edit_profile_cmd(
 )
 def remove_profile_cmd(
     name: str = typer.Argument(..., help=_help("CLI.HELP.OPT.PROFILE_TO_DELETE")),
+    yes: bool = typer.Option(False, "--yes", "-y", help=_help("CLI.HELP.OPT.YES")),
 ) -> None:
     """Delete a profile from profiles.toml and its password from the OS keyring."""
     locale = resolve_locale()
@@ -337,7 +341,7 @@ def remove_profile_cmd(
         out.fail(_format_profile_not_found_cli(locale, exc))
         raise typer.Exit(code=1)
     prompt = t("CLI.PROFILE_REMOVE_CONFIRM", locale, profile=name, path=profiles_path())
-    if not out.confirm(prompt, default=False):
+    if not _confirm(prompt, default=False, assume_yes=yes, locale=locale):
         out.warn(t("CLI.PROFILE_REMOVE_CANCELLED", locale, profile=name))
         raise typer.Exit(code=1)
     _delete_password_or_warn(name, locale)
@@ -935,10 +939,34 @@ def _load_profiles_or_exit(locale: Locale) -> ProfilesFile:
         raise typer.Exit(code=1) from exc
 
 
-def _confirm_overwrite_or_exit(name: str, locale: Locale) -> None:
+def _confirm(prompt: str, *, default: bool, assume_yes: bool, locale: Locale) -> bool:
+    """Ask a yes/no question, honouring ``--yes`` and never leaving a closed stdin hanging.
+
+    ``assume_yes`` is the ``--yes``/``-y`` escape hatch every confirmation in this module
+    shares (cli-redesign proposal, gap 1): it answers "yes" without printing the question,
+    which is what a script needs when it already knows the answer. Without it, a stdin that
+    cannot be read - closed, redirected from ``/dev/null``, at EOF - makes ``typer.confirm``
+    raise ``typer.Abort`` with a generic "Aborted!"; this turns that into the same
+    actionable, translated failure the rest of the CLI already gives instead.
+    """
+    if assume_yes:
+        return True
+    try:
+        return out.confirm(prompt, default=default)
+    except typer.Abort:
+        out.fail(t("CLI.CONFIRM_NO_TTY", locale))
+        raise typer.Exit(code=1) from None
+
+
+def _confirm_overwrite_or_exit(name: str, locale: Locale, *, assume_yes: bool) -> None:
     """Ask before replacing an existing profile; abort (exit 1) unless confirmed."""
     out.warn(t("CLI.PROFILE_ALREADY_EXISTS", locale, profile=name, path=profiles_path()))
-    if not out.confirm(t("CLI.PROFILE_OVERWRITE_CONFIRM", locale), default=False):
+    if not _confirm(
+        t("CLI.PROFILE_OVERWRITE_CONFIRM", locale),
+        default=False,
+        assume_yes=assume_yes,
+        locale=locale,
+    ):
         out.warn(t("CLI.PROFILE_OVERWRITE_CANCELLED", locale, profile=name))
         raise typer.Exit(code=1)
 
@@ -991,16 +1019,16 @@ _DRAFT_FIELDS: Final[tuple[str, ...]] = (
 )
 
 
-def _add_profile_interactive(*, name: str, set_active: bool) -> None:
+def _add_profile_interactive(*, name: str, set_active: bool, assume_yes: bool = False) -> None:
     locale = resolve_locale()
     file = _load_profiles_or_exit(locale)
     if name in file.profiles:
-        _confirm_overwrite_or_exit(name, locale)
+        _confirm_overwrite_or_exit(name, locale, assume_yes=assume_yes)
     previous = file.profiles.get(name, {})
     out.note(t("CLI.WIZARD_INTRO", locale, profile=name))
     draft = _collect_draft(name, previous, locale)
 
-    if not _validate_before_saving(name, draft, previous, locale):
+    if not _validate_before_saving(name, draft, previous, locale, assume_yes=assume_yes):
         out.warn(t("CLI.WIZARD_CANCELLED", locale, path=profiles_path()))
         raise typer.Exit(code=1)
 
@@ -1247,13 +1275,17 @@ def _validate_before_saving(
     draft: _ProfileDraft,
     previous: dict[str, object],
     locale: Locale,
+    *,
+    assume_yes: bool,
 ) -> bool:
     """Run the ladder before writing anything. Return ``True`` when the profile must be saved.
 
     No branch loses the collected data: on failure the user retries, fixes a single
     field, saves anyway (legitimate: configuring a profile without the VPN up), or cancels.
     """
-    if not out.confirm(t("CLI.VALIDATE_ASK", locale), default=True):
+    if not _confirm(
+        t("CLI.VALIDATE_ASK", locale), default=True, assume_yes=assume_yes, locale=locale
+    ):
         out.note(t("CLI.VALIDATE_NOT_RUN", locale))
         return True
     while True:
