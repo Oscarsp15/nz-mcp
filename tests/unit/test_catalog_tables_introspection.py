@@ -238,6 +238,27 @@ def test_parse_table_stats_nzpy_naive_string_converted_to_utc_iso() -> None:
     assert result == "2026-09-17T10:40:09+00:00"
 
 
+def test_parse_table_stats_varchar_string_is_tz_independent() -> None:
+    """Regression: CAST(CREATEDATE AS VARCHAR(19)) path must not shift by client TZ.
+
+    _V_TABLE.CREATEDATE as an integer epoch was already offset by the client's
+    local timezone (America/Lima UTC-5 → result was 5 h ahead of UTC). The SQL
+    now casts it to VARCHAR(19) so the driver delivers 'YYYY-MM-DD HH:MM:SS'.
+    This test verifies the string path through _parse_table_stats_row is
+    TZ-independent: the exact UTC string must come back unchanged.
+    """
+    p = _parse_table_stats_row(
+        {
+            "ROW_COUNT": 1,
+            "SIZE_BYTES_USED": 512,
+            "SIZE_BYTES_ALLOCATED": 1024,
+            "SKEW": None,
+            "TABLE_CREATED": "2026-09-17 11:09:00",
+        },
+    )
+    assert p["table_created"] == "2026-09-17T11:09:00+00:00"
+
+
 def test_get_table_stats_missing_row(monkeypatch: pytest.MonkeyPatch) -> None:
     class _Cur:
         def execute(self, _sql: str, _params: tuple[str, str]) -> None:
