@@ -50,7 +50,7 @@ Referencia obligatoria de SQL validado por versión:
 | `_v_table_storage_stat` | tamaño físico, compresión |
 | `_v_statistic` | row count estimate, last update |
 | `_v_session` | conexiones activas (uso interno, debug) |
-| `_v_table_constraint` + `_v_relation_keydata` | PK/FK |
+| `_v_table_constraint` + `_v_relation_keydata` | PK/FK; `nz_list_constraints` (PK/FK/unique por esquema o tabla) |
 
 ### Queries patrón
 

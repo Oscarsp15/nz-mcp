@@ -237,6 +237,24 @@ FIND_COLUMN: Final[CatalogQuery] = CatalogQuery(
     cross_database=True,
 )
 
+LIST_CONSTRAINTS: Final[CatalogQuery] = CatalogQuery(
+    id="list_constraints",
+    sql=(
+        "SELECT RELATION, CONSTRAINTNAME, CONTYPE, ATTNAME, CONSEQ "
+        "FROM <BD>.._V_RELATION_KEYDATA "
+        "WHERE SCHEMA = UPPER(?) AND CONTYPE IN ('p', 'f', 'u') "
+        "AND (? IS NULL OR RELATION = UPPER(?)) "
+        "ORDER BY RELATION, CONSTRAINTNAME, CONSEQ"
+    ),
+    catalog_views=("_V_RELATION_KEYDATA",),
+    description=(
+        "Lists primary/foreign/unique constraints for a schema, or one table when given, "
+        "grouped by constraint with columns in key order."
+    ),
+    tested_versions=(NPS_112_IF1,),
+    cross_database=True,
+)
+
 ALL_QUERIES: Final[tuple[CatalogQuery, ...]] = (
     LIST_DATABASES,
     LIST_SCHEMAS,
@@ -254,6 +272,7 @@ ALL_QUERIES: Final[tuple[CatalogQuery, ...]] = (
     GET_PROCEDURE_SECTION,
     GET_ALL_PROCEDURES_DDL,
     FIND_COLUMN,
+    LIST_CONSTRAINTS,
 )
 
 CATALOG_QUERY_MAP: Final[dict[str, CatalogQuery]] = {query.id: query for query in ALL_QUERIES}
