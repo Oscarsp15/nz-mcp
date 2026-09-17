@@ -28,7 +28,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (42 tools registradas)
+## Catálogo v0.1 (45 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -194,8 +194,15 @@ Devuelve una muestra pequeña (10 filas) para entender el shape. El `database` d
 | `schema` | string (required) | |
 | `table` | string (required) | |
 | `rows` | int (default 10, cap 50) | |
+| `where` | string (optional, max 2048) | Predicado SQL crudo para una muestra dirigida (p. ej. `FECDESEMBOLSO >= '2026-01-01'`). |
+| `order_by` | string (optional, max 2048) | Fragmento `ORDER BY` crudo para una muestra reproducible (p. ej. `FECDESEMBOLSO DESC, ID`). |
 
 **Output**: mismo formato que `nz_query_select` (incl. `columns`, `rows`, `row_count`, `truncated`, `duration_ms`, `hint`).
+
+**Reglas**:
+- `where` y `order_by` son **fragmentos SQL crudos**, no identificadores. La sentencia compuesta (`SELECT * FROM schema.table [WHERE …] [ORDER BY …]`) se valida entera con `sql_guard.validate(mode="read")`: se rechazan sentencias apiladas (`STACKED_NOT_ALLOWED`), tipos que no sean `SELECT` y CTEs con mutación. Un fragmento inválido o no read-only → `GUARD_REJECTED`.
+- El `LIMIT` se inyecta/acota al final con el cap `rows` (si el fragmento ya trae `LIMIT`, se reescribe a `rows` si es mayor).
+- El guard de misma-BD y el cap `rows` siguen intactos.
 
 ---
 
@@ -1281,6 +1288,127 @@ Lista constraints `PRIMARY KEY`/`FOREIGN KEY`/`UNIQUE` de un esquema completo, o
 
 ---
 
+#### 43. `nz_describe_view`
+
+Describe las columnas/tipos de una vista y las relaciones que lee (`depends_on`), en modo `read`. Reutiliza `nz_describe_table` para las columnas y el `kind` (una vista se resuelve como `VIEW`, sin `distribution`), y deriva `depends_on` **parseando el `DEFINITION` de `_V_VIEW` con sqlglot** (solo lectura del árbol, nunca se re-serializa) y resolviendo el `kind` real de cada referencia contra el catálogo (`_V_TABLE` / `_V_VIEW`). Se añadió porque `nz_find_table_references` solo cubre SPs: hasta ahora "¿qué alimenta esta vista?" era abrir DDLs y parsear a ojo (issue #304).
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | BD a inspeccionar (identificador validado para interpolación `<BD>..`). |
+| `schema` | string (required) | Esquema de la vista. |
+| `view` | string (required) | Nombre de la vista. |
+
+**Output**:
+```json
+{
+  "name": "V_CASCADAS",
+  "kind": "VIEW",
+  "columns": [
+    {"name": "FECCORTE", "type": "DATE", "nullable": true, "default": null}
+  ],
+  "depends_on": [
+    {"database": "DESA_MODELOS", "schema": "DBO", "name": "V_CASCADASUNIVERSO", "kind": "VIEW"},
+    {"database": "PROD_MODELOS", "schema": "DBO", "name": "T_REMOTE", "kind": "TABLE"}
+  ],
+  "duration_ms": 210
+}
+```
+
+**Reglas**:
+- Si el objeto no existe o no es visible → `OBJECT_NOT_FOUND`. Si existe pero **no es una vista** → `OBJECT_NOT_FOUND` con `object_type` del tipo real (`TABLE` / `EXTERNAL TABLE`); para tablas usar `nz_describe_table`.
+- `depends_on` es **best-effort**: si el `DEFINITION` no parsea con sqlglot se devuelve `[]` (no es un error); `kind` es `UNKNOWN` cuando la referencia no resuelve contra el catálogo.
+- **Cross-database**: una referencia cualificada con otra BD (`OTRA_BD.ESQ.TABLA`) se resuelve contra **esa** BD y se reporta con su `database`, para que un homónimo local no enmascare la dependencia real. Sin cualificar, se asume la BD/esquema de la vista.
+- Fuera de alcance: lineage a nivel de columna; recorrido recursivo (para eso, `nz_object_dependencies`).
+
+---
+
+#### 44. `nz_object_dependencies`
+
+Recorre dependencias de objeto (vistas/tablas) en modo `read`, en una dirección: `up` (qué lee el objeto) o `down` (qué lee al objeto), hasta `depth` niveles. `up` sigue el `DEFINITION` parseado de cada vista; `down` **no tiene catálogo** (Netezza no registra dependencias de vistas en `_V_DEPEND`, solo funciones/librerías), así que escanea los `DEFINITION` de las vistas del esquema dado y conserva las que referencian el nodo. El recorrido es BFS, deduplicado por `(schema, name)`, con tope de profundidad (5) y de nodos (200). Cierra el caso "¿puedo cambiar esta tabla sin romper el reporte?" (issue #304).
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | BD a inspeccionar (identificador validado para interpolación `<BD>..`). |
+| `schema` | string (required) | Esquema del objeto y universo del escaneo `down`. |
+| `object` | string (required) | Nombre del objeto (tabla o vista). |
+| `direction` | `"up"` \| `"down"` (default: `"up"`) | `up` = de qué depende; `down` = qué depende de él. |
+| `depth` | int (1..5, default: 1) | Niveles máximos a recorrer. |
+
+**Output**:
+```json
+{
+  "name": "V_CASCADAS",
+  "kind": "VIEW",
+  "direction": "up",
+  "depth": 2,
+  "nodes": [
+    {"database": "DESA_MODELOS", "schema": "DBO", "name": "V_CASCADASUNIVERSO", "kind": "VIEW", "level": 1},
+    {"database": "PROD_MODELOS", "schema": "DBO", "name": "T_REMOTE", "kind": "TABLE", "level": 1}
+  ],
+  "truncated": false,
+  "duration_ms": 340
+}
+```
+
+**Reglas**:
+- Si el objeto raíz no existe o no es visible → `OBJECT_NOT_FOUND`.
+- **Cross-database**: los nodos llevan su `database`; una referencia a otra BD se resuelve contra esa BD y no se colapsa con un homónimo local. La deduplicación del BFS usa `(database, schema, name)`, no `(schema, name)`.
+- `down` está acotado al esquema dado (no busca referencias en otros esquemas) y es más costoso: escanea y parsea el `DEFINITION` de cada vista del esquema.
+- `truncated=true` cuando se alcanza el tope de 200 nodos antes de agotar `depth`.
+- Fuera de alcance: lineage a nivel de columna; referencias dentro de SPs (para eso, `nz_find_table_references`).
+
+---
+
+#### 45. `nz_compare_tables`
+
+Compara el esquema de dos tablas o vistas: columnas solo en A, solo en B, discrepancias de tipo/nullability y discrepancias de posición ordinal. Modo `read`. Útil antes de migraciones, conciliaciones de datos o validación entre capas (ej. staging vs final).
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | BD de la tabla A (y default para tabla B si `database_b` no se especifica). |
+| `schema_a` | string (required) | Esquema de la tabla A. |
+| `table_a` | string (required) | Nombre de la tabla/vista A. |
+| `database_b` | string (optional) | BD de la tabla B (default: `database`). |
+| `schema_b` | string (optional) | Esquema de la tabla B (default: `schema_a`). |
+| `table_b` | string (required) | Nombre de la tabla/vista B. |
+
+**Output**:
+```json
+{
+  "identical": false,
+  "columns_in_a": 33,
+  "columns_in_b": 19,
+  "columns_in_common": 4,
+  "only_in_a": [
+    {"column": "FECCORTE", "type": "CHARACTER VARYING(10)", "nullable": true, "position": 1}
+  ],
+  "only_in_b": [
+    {"column": "FECHACORTE", "type": "CHARACTER VARYING(10)", "nullable": true, "position": 1}
+  ],
+  "type_mismatches": [
+    {
+      "column": "NUMDOCUMENTO",
+      "type_a": "CHARACTER VARYING(12)",
+      "type_b": "CHARACTER VARYING(4000)",
+      "nullable_a": true,
+      "nullable_b": false
+    }
+  ],
+  "position_mismatches": [
+    {"column": "CODCREDITO", "position_a": 1, "position_b": 4}
+  ],
+  "duration_ms": 74
+}
+```
+
+**Reglas**:
+- `identical` es `true` cuando ambos esquemas coinciden exactamente en columnas, tipos, nullability y posiciones.
+- La comparación de nombres de columna es case-insensitive (mayúsculas de catálogo).
+- Si `table_a` o `table_b` no existe, falla con `ObjectNotFoundError` (`code: OBJECT_NOT_FOUND`).
+- No compara datos entre tablas (fuera de alcance de esta tool).
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -1289,7 +1417,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
 |---|---|---|---|
-| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
+| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_find_column`, `nz_compare_tables`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
 | `nz_insert` | false | false | false |
 | `nz_insert_select` | false | false | false |
 | `nz_update`, `nz_delete` | false | true | false |

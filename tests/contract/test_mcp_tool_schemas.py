@@ -17,12 +17,14 @@ EXPECTED_V010A0: set[str] = {
     "nz_alter_table",
     "nz_call_procedure",
     "nz_clone_procedure",
+    "nz_compare_tables",
     "nz_create_table",
     "nz_create_table_as",
     "nz_current_profile",
     "nz_delete",
     "nz_describe_procedure",
     "nz_describe_table",
+    "nz_describe_view",
     "nz_drop_procedure",
     "nz_drop_table",
     "nz_execute_ddl",
@@ -41,6 +43,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_list_schemas",
     "nz_list_tables",
     "nz_list_views",
+    "nz_object_dependencies",
     "nz_profile_column",
     "nz_query_select",
     "nz_switch_database",
@@ -76,6 +79,26 @@ def test_listings_have_json_schemas() -> None:
     assert len(listings) >= len(EXPECTED_V010A0)
     for listing in listings:
         assert listing.input_schema.get("type") == "object"
+
+
+@pytest.mark.contract
+def test_nz_compare_tables_schema_and_annotations() -> None:
+    spec = TOOLS["nz_compare_tables"]
+    props = spec.input_model.model_json_schema()["properties"]
+    assert set(props) == {
+        "database",
+        "schema_a",
+        "table_a",
+        "database_b",
+        "schema_b",
+        "table_b",
+    }
+    assert spec.annotations == {
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
 
 
 @pytest.mark.contract

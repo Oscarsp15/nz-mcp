@@ -75,6 +75,8 @@ def dummy_params_for_query_id(query_id: str) -> tuple[Any, ...]:
         "list_tables": (_DUMMY_SCHEMA, None, None, None, None),
         "list_views": (_DUMMY_SCHEMA, None, None),
         "get_view_ddl": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
+        "relation_kind": (_DUMMY_SCHEMA, _DUMMY_OBJECT, _DUMMY_SCHEMA, _DUMMY_OBJECT),
+        "list_view_definitions": (_DUMMY_SCHEMA,),
         "describe_table_columns": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
         "describe_table_objtype": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
         "describe_table_distribution": (_DUMMY_DATABASE, _DUMMY_SCHEMA, _DUMMY_OBJECT),
