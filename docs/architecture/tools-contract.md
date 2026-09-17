@@ -961,7 +961,7 @@ Ejecuta un procedimiento almacenado vía `CALL schema.proc(args)` y devuelve el 
   "dry_run": false,
   "call_sql": "CALL DBO.NZMCP_SMOKE_CALL(?)",
   "executed": true,
-  "return_value": "50",
+  "return_value": 50,
   "messages": ["nz-mcp: recibido 5", "nz-mcp: paso 2 ok"],
   "duration_ms": 110
 }
@@ -970,7 +970,7 @@ Ejecuta un procedimiento almacenado vía `CALL schema.proc(args)` y devuelve el 
 **Reglas**:
 - `sql_guard` clasifica `CALL` (kind `CALL`) y lo permite **solo en `admin`** (rechazo `STATEMENT_NOT_ALLOWED` en read/write). Ruta dedicada de regex que **solo acepta placeholders `?`**: un argumento literal se rechaza (`UNKNOWN_STATEMENT`), forzando parametrización.
 - Guarda de entorno `assert_env_safe`: un `CALL` a un SP `PROD_*` desde un perfil no productivo → `PROD_REF_IN_NONPROD`.
-- `return_value` es el valor devuelto por el SP (o `null` si no hay result set); `messages` son los `NOTICE`/`RAISE` capturados de `cursor.notices`.
+- `return_value` es el valor devuelto por el SP con su **tipo nativo** (un `INT` sale como número `50`, no como `"50"`; `null` si no hay result set), para que `return_value == 0` no exija parseo en el cliente (issue #310). Un `NUMERIC`/`DECIMAL` se normaliza a `int` si es entero o a `float` si no; un tipo que JSON no puede llevar (`DATE`/`TIMESTAMP`, `bytes`) se serializa a string. `messages` son los `NOTICE`/`RAISE` capturados de `cursor.notices`.
 - Si el SP falla tras emitir NOTICEs, los mensajes previos al fallo se devuelven en `error.context["partial_notices"]` (el campo `messages` del output feliz sigue siendo la lista completa).
 - Un timeout de socket lanza `QueryTimeoutError` (código `QUERY_TIMEOUT`) con `context["orphan_session_risk"]=true` y `context["partial_notices"]`; el servidor puede seguir ejecutando el SP (nzpy no expone `cancel()`).
 - No usar para crear un SP (`nz_execute_ddl`) ni para leer su DDL (`nz_get_procedure_ddl`).
@@ -1161,7 +1161,7 @@ Devuelve el estado actual de un job lanzado por `nz_call_procedure_async`. Modo 
   "elapsed_ms": 185400,
   "poll_after_s": null,
   "partial_notices": ["NOTICE: paso 1 ok", "NOTICE: paso 2 ok"],
-  "return_value": "OK",
+  "return_value": 1,
   "messages": ["NOTICE: paso 1 ok", "NOTICE: paso 2 ok"],
   "duration_ms": 185100,
   "error": null
@@ -1173,6 +1173,7 @@ Devuelve el estado actual de un job lanzado por `nz_call_procedure_async`. Modo 
 - **Dos duraciones, no confundirlas**: `elapsed_ms` es tiempo de reloj desde que se llamó a `nz_call_procedure_async` (incluye abrir la conexión, sigue creciendo en cada sondeo); `duration_ms` es lo que tardó el `CALL` dentro de Netezza y solo se rellena cuando `status == "done"` — es el número que responde "¿cuánto tardó el SP?".
 - `poll_after_s` sugiere el próximo intervalo de sondeo en segundos, adaptado al tiempo transcurrido (crece hasta un tope de 30 s); es `null` cuando el job ya terminó (`done`/`failed`/`cancelled`) porque no hace falta volver a sondear.
 - `partial_notices` puede llegar vacío mientras el SP corre: nzpy entrega los `NOTICE` junto con el resultset al terminar, no de forma incremental. `messages` solo está completo cuando `status == "done"`.
+- `return_value` usa el **tipo nativo** del SP, igual que `nz_call_procedure` (un `INT` sale como número, `null` si no hay result set) — ver § 33 (issue #310).
 - `error` tiene forma `{code, detail, partial_notices}` cuando `status == "failed"`.
 - **El job store es en memoria**: si el servidor MCP reinicia, todos los jobs desaparecen. Guarda el `job_id` en otra parte si el SP es crítico.
 
