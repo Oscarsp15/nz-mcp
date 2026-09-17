@@ -23,7 +23,10 @@ class FindTableInput(BaseModel):
         default=None,
         min_length=1,
         max_length=128,
-        description="Limit the search to one database; omit to search every visible database.",
+        description=(
+            "Limit the search to one database. Omit to search every visible database, which "
+            "is only allowed when the pattern narrows (at least one literal character)."
+        ),
     )
     schema_pattern: str | None = Field(default=None, min_length=1, max_length=128)
     object_type: ObjectType = Field(
@@ -69,7 +72,9 @@ class FindTableOutput(BaseModel):
     name="nz_find_table",
     description=(
         "Find tables and views by name pattern across visible databases, optionally limited "
-        "by database or schema. Use to locate an object before describing or querying it."
+        "by database or schema. Use to locate an object before describing or querying it. "
+        "Without a database, a pattern of wildcards only is refused with INPUT_TOO_BROAD "
+        "and a hint to pass database or a narrower pattern."
     ),
     mode="read",
     input_model=FindTableInput,

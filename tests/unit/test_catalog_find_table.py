@@ -9,7 +9,7 @@ import pytest
 import nz_mcp.catalog.tables as tables_mod
 from nz_mcp.catalog.tables import find_tables
 from nz_mcp.config import Profile
-from nz_mcp.errors import NetezzaError, ObjectNotFoundError
+from nz_mcp.errors import InputTooBroadError, NetezzaError, ObjectNotFoundError
 
 _SQL = (
     "SELECT SCHEMA, NAME, KIND FROM <BD>.._V_TABLE "
@@ -111,7 +111,7 @@ def test_find_tables_stops_after_one_extra_match(monkeypatch: pytest.MonkeyPatch
 
     rows, truncated = find_tables(
         _profile(),
-        table_pattern="%",
+        table_pattern="T%",
         database=None,
         schema_pattern=None,
         object_type="TABLE",
@@ -173,3 +173,100 @@ def test_find_tables_bad_row_shape_raises(monkeypatch: pytest.MonkeyPatch) -> No
             max_rows=10,
         )
     assert "row shape" in exc.value.context["detail"]
+
+
+# --- cost guard (issue #361) --------------------------------------------------
+
+
+def test_find_tables_refuses_a_wildcard_only_pattern_without_scanning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pattern of wildcards matches everything: refuse before opening a connection."""
+    cursor = _wire(monkeypatch, databases=["DB1", "DB2"], results_by_db={})
+    opened: list[object] = []
+
+    def _no_connection(*args: object, **_kwargs: object) -> object:
+        opened.append(args)
+        raise AssertionError("the guard must refuse before opening a connection")
+
+    monkeypatch.setattr(tables_mod, "open_connection", _no_connection)
+
+    with pytest.raises(InputTooBroadError) as exc:
+        find_tables(
+            _profile(),
+            table_pattern="%",
+            database=None,
+            schema_pattern=None,
+            object_type="TABLE",
+            max_rows=10,
+        )
+
+    assert exc.value.code == "INPUT_TOO_BROAD"
+    assert exc.value.context["scanned"] == 2
+    assert exc.value.context["pattern"] == "%"
+    assert exc.value.context["hint_es"]
+    assert exc.value.context["hint_en"]
+    assert opened == []
+    assert cursor.executed_sql == []
+
+
+def test_find_tables_allows_a_specific_pattern(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cursor = _wire(
+        monkeypatch,
+        databases=["DB1", "DB2"],
+        results_by_db={"DB1": [("DBO", "T_A", "TABLE")]},
+    )
+
+    rows, truncated = find_tables(
+        _profile(),
+        table_pattern="T%",
+        database=None,
+        schema_pattern=None,
+        object_type="TABLE",
+        max_rows=10,
+    )
+
+    assert truncated is False
+    assert [row["name"] for row in rows] == ["T_A"]
+    assert len(cursor.executed_sql) == 2
+
+
+def test_find_tables_named_database_is_never_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The escape the hint points at: naming a database bounds the sweep to one."""
+    cursor = _wire(
+        monkeypatch,
+        databases=["DB1"],
+        results_by_db={"DB1": [("DBO", "T_A", "TABLE")]},
+    )
+
+    rows, _truncated = find_tables(
+        _profile(),
+        table_pattern="%",
+        database="db1",
+        schema_pattern=None,
+        object_type="TABLE",
+        max_rows=10,
+    )
+
+    assert [row["name"] for row in rows] == ["T_A"]
+    assert len(cursor.executed_sql) == 1
+
+
+@pytest.mark.parametrize(
+    ("pattern", "narrows"),
+    [
+        ("%", False),
+        ("%%", False),
+        ("_", False),
+        ("%_%", False),
+        ("____", False),
+        ("T%", True),
+        ("%T%", True),
+        ("ventas", True),
+        ("v_ntas", True),
+    ],
+)
+def test_narrows_anything_tells_a_search_from_a_sweep(pattern: str, narrows: bool) -> None:
+    assert tables_mod._narrows_anything(pattern) is narrows

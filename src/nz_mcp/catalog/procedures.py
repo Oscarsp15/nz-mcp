@@ -807,6 +807,12 @@ def _build_procedure_ddl(schema: str, row: Any) -> ProcedureDdl:
 # ── nz_find_table_references (issue #107) ────────────────────────────────────
 
 
+def _narrow_scan_hint(scan_cap: int) -> dict[str, str]:
+    """Hint pair for an ``INPUT_TOO_BROAD`` scan, localized once for the raise sites."""
+    hints = both("HINT.INPUT_TOO_BROAD.NARROW_PROCEDURE_PATTERN", cap=scan_cap)
+    return {"hint_es": hints["es"], "hint_en": hints["en"]}
+
+
 def find_table_references(
     profile: Profile,
     database: str,
@@ -859,7 +865,11 @@ def find_table_references(
         # is never paid when the caller already declared a tighter universe.
         candidate_count = len(list_procedures(profile, database, schema, pattern=pattern))
         if candidate_count > scan_cap:
-            raise InputTooBroadError(scanned=candidate_count, cap=scan_cap)
+            raise InputTooBroadError(
+                scanned=candidate_count,
+                cap=scan_cap,
+                **_narrow_scan_hint(scan_cap),
+            )
 
     deadline = None if timeout_s is None else time.monotonic() + timeout_s
 
@@ -872,6 +882,7 @@ def find_table_references(
         raise InputTooBroadError(
             scanned=scanned,
             cap=scan_cap,
+            **_narrow_scan_hint(scan_cap),
         )
 
     references: list[dict[str, Any]] = []
