@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import threading
 import tomllib
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -38,6 +39,13 @@ def config_dir() -> Path:
 
 def profiles_path() -> Path:
     return config_dir() / "profiles.toml"
+
+
+#: Serializes the read-modify-write of ``profiles.toml``. Since tools run in worker threads
+#: (ADR 0038) two switches can now overlap, and an unlocked pair would read the same
+#: snapshot, each write its own change, and lose one of them (they also share the ``.tmp``
+#: path). Reads stay lock-free on purpose: they are atomic and far more frequent.
+_WRITE_LOCK: Final[threading.Lock] = threading.Lock()
 
 
 class Profile(BaseModel):
@@ -106,10 +114,11 @@ def list_profile_names(path: Path | None = None) -> list[str]:
 def set_active_profile(name: str, path: Path | None = None) -> None:
     """Persist ``active = name`` in ``profiles.toml`` after validating the profile exists."""
     cfg = path or profiles_path()
-    get_profile(name, path=cfg)
-    raw: dict[str, Any] = tomllib.loads(cfg.read_text(encoding="utf-8"))
-    raw["active"] = name
-    _dump_profiles_raw(cfg, raw)
+    with _WRITE_LOCK:
+        get_profile(name, path=cfg)
+        raw: dict[str, Any] = tomllib.loads(cfg.read_text(encoding="utf-8"))
+        raw["active"] = name
+        _dump_profiles_raw(cfg, raw)
 
 
 def get_profile(name: str, path: Path | None = None) -> Profile:
@@ -172,17 +181,18 @@ def upsert_profile(
         merged = Profile.model_validate({"name": name, **block})
     except ValidationError as exc:
         raise InvalidProfileError(profile=name, detail=str(exc)) from exc
-    raw: dict[str, Any] = {}
-    if target.exists():
-        raw = tomllib.loads(target.read_text(encoding="utf-8"))
-    profiles = raw.get("profiles")
-    if not isinstance(profiles, dict):
-        profiles = {}
-    profiles[name] = block
-    raw["profiles"] = profiles
-    if set_active:
-        raw["active"] = name
-    _dump_profiles_raw(target, raw)
+    with _WRITE_LOCK:
+        raw: dict[str, Any] = {}
+        if target.exists():
+            raw = tomllib.loads(target.read_text(encoding="utf-8"))
+        profiles = raw.get("profiles")
+        if not isinstance(profiles, dict):
+            profiles = {}
+        profiles[name] = block
+        raw["profiles"] = profiles
+        if set_active:
+            raw["active"] = name
+        _dump_profiles_raw(target, raw)
     return merged
 
 
@@ -194,18 +204,19 @@ def remove_profile(name: str, path: Path | None = None) -> bool:
     Raises ``ProfileNotFoundError`` when the profile is not declared.
     """
     target = path or profiles_path()
-    if not target.exists():
-        raise ProfileNotFoundError(profile=name, hint_es="", hint_en="")
-    raw: dict[str, Any] = tomllib.loads(target.read_text(encoding="utf-8"))
-    profiles = raw.get("profiles")
-    if not isinstance(profiles, dict) or name not in profiles:
-        raise ProfileNotFoundError(profile=name, hint_es="", hint_en="")
-    del profiles[name]
-    raw["profiles"] = profiles
-    was_active = raw.get("active") == name
-    if was_active:
-        del raw["active"]
-    _dump_profiles_raw(target, raw)
+    with _WRITE_LOCK:
+        if not target.exists():
+            raise ProfileNotFoundError(profile=name, hint_es="", hint_en="")
+        raw: dict[str, Any] = tomllib.loads(target.read_text(encoding="utf-8"))
+        profiles = raw.get("profiles")
+        if not isinstance(profiles, dict) or name not in profiles:
+            raise ProfileNotFoundError(profile=name, hint_es="", hint_en="")
+        del profiles[name]
+        raw["profiles"] = profiles
+        was_active = raw.get("active") == name
+        if was_active:
+            del raw["active"]
+        _dump_profiles_raw(target, raw)
     return was_active
 
 
@@ -222,23 +233,24 @@ def update_profile_fields(
     if all(v is None for v in (mode, database, max_rows_default, timeout_s_default)):
         return None
     target = path or profiles_path()
-    if not target.exists():
-        raise ProfileNotFoundError(profile=name, hint_es="", hint_en="")
-    raw: dict[str, Any] = tomllib.loads(target.read_text(encoding="utf-8"))
-    profiles = raw.get("profiles")
-    if not isinstance(profiles, dict) or name not in profiles:
-        raise ProfileNotFoundError(profile=name, hint_es="", hint_en="")
-    block = dict(profiles[name])
-    if mode is not None:
-        block["mode"] = mode
-    if database is not None:
-        block["database"] = database
-    if max_rows_default is not None:
-        block["max_rows_default"] = max_rows_default
-    if timeout_s_default is not None:
-        block["timeout_s_default"] = timeout_s_default
-    merged = Profile.model_validate({"name": name, **block})
-    profiles[name] = block
-    raw["profiles"] = profiles
-    _dump_profiles_raw(target, raw)
+    with _WRITE_LOCK:
+        if not target.exists():
+            raise ProfileNotFoundError(profile=name, hint_es="", hint_en="")
+        raw: dict[str, Any] = tomllib.loads(target.read_text(encoding="utf-8"))
+        profiles = raw.get("profiles")
+        if not isinstance(profiles, dict) or name not in profiles:
+            raise ProfileNotFoundError(profile=name, hint_es="", hint_en="")
+        block = dict(profiles[name])
+        if mode is not None:
+            block["mode"] = mode
+        if database is not None:
+            block["database"] = database
+        if max_rows_default is not None:
+            block["max_rows_default"] = max_rows_default
+        if timeout_s_default is not None:
+            block["timeout_s_default"] = timeout_s_default
+        merged = Profile.model_validate({"name": name, **block})
+        profiles[name] = block
+        raw["profiles"] = profiles
+        _dump_profiles_raw(target, raw)
     return merged

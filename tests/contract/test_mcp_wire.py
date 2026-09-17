@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,9 +12,11 @@ import pytest
 from mcp import ClientSession
 from mcp.shared.message import SessionMessage
 from mcp.types import CallToolResult, ListToolsResult
+from pydantic import BaseModel, ConfigDict
 
 from nz_mcp import __version__
 from nz_mcp.server import build_mcp_server
+from nz_mcp.tools.registry import TOOLS, tool
 
 
 @asynccontextmanager
@@ -84,6 +87,64 @@ def test_mcp_tools_list_and_call(two_profiles: Path) -> None:
             assert isinstance(error["context"], dict)
 
     anyio.run(_run)
+
+
+@pytest.mark.contract
+def test_concurrent_tool_calls_do_not_serialize(two_profiles: Path) -> None:
+    """A parked slow tool must not delay an unrelated call over the real wire (issue #360)."""
+    started = threading.Event()
+    release = threading.Event()
+
+    class _In(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+
+    class _Out(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        ok: bool = True
+
+    @tool(
+        name="nz_test_slow_wire",
+        description="test-only",
+        mode="read",
+        input_model=_In,
+        output_model=_Out,
+        annotations={"readOnlyHint": True, "openWorldHint": False},
+    )
+    def _slow(_params: _In) -> _Out:
+        started.set()
+        release.wait(timeout=10)
+        return _Out()
+
+    try:
+
+        async def _run() -> None:
+            async with _inprocess_client(two_profiles) as client:
+                await client.initialize()
+                order: list[str] = []
+
+                async def _slow_call() -> None:
+                    await client.call_tool("nz_test_slow_wire", {})
+                    order.append("slow")
+
+                async def _fast_call() -> None:
+                    while not started.is_set():
+                        await anyio.sleep(0.005)
+                    await client.call_tool("nz_current_profile", {})
+                    order.append("fast")
+
+                async with anyio.create_task_group() as tg:
+                    tg.start_soon(_slow_call)
+                    tg.start_soon(_fast_call)
+                    while "fast" not in order:
+                        await anyio.sleep(0.005)
+                    assert order == ["fast"]
+                    release.set()
+                assert order == ["fast", "slow"]
+
+        anyio.run(_run)
+    finally:
+        release.set()
+        TOOLS.pop("nz_test_slow_wire", None)
 
 
 @pytest.mark.contract

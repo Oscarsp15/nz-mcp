@@ -71,6 +71,8 @@ Ver [tech-lead.md](../roles/tech-lead.md#plantilla-adr-para-copiar-a-docsadrnnnn
 | 0033 | [El CLI prepara la consola de Windows antes de medir su capacidad](0033-preparar-consola-windows-antes-de-medir.md) | aceptado (enmienda el 0031) | 2026-09-11 |
 | 0034 | [`nz_alter_table` para `ALTER TABLE` aditivos y `StatementKind.ALTER` en `sql_guard`](0034-tool-alter-table.md) | aceptado | 2026-09-14 |
 | 0035 | [El CLI pasa a dos niveles; se elimina la pantalla completa](0035-cli-de-dos-niveles-sin-pantalla-completa.md) | aceptado (supersede el 0030 y el 0032; enmienda el 0028 y el 0031) | 2026-09-16 |
-| 0036 | [Patrón asíncrono lanzar-sondear-cancelar para `nz_call_procedure`](0036-nz-call-procedure-asincrono.md) | aceptado | 2026-09-16 |
+| 0036 | [Patrón asíncrono lanzar-sondear-cancelar para `nz_call_procedure`](0036-nz-call-procedure-asincrono.md) | aceptado (su nota sobre `to_thread` queda superada por el 0038) | 2026-09-16 |
+| 0037 | [Aviso de versión nueva al arrancar el servidor (update-notify)](0037-aviso-de-version-nueva-al-arrancar.md) | aceptado | 2026-09-17 |
+| 0038 | [Despachar los tools síncronos en worker threads (`anyio.to_thread`)](0038-despacho-de-tools-en-worker-thread.md) | aceptado | 2026-09-17 |
 
 > **Colisión de numeración**: dos ADR comparten el número `0014`. Las referencias en prosa a "ADR 0014" del CHANGELOG y de la ADR 0015 apuntan a [`0014-tool-execute-ddl.md`](0014-tool-execute-ddl.md). No se renumeran para no romper esos enlaces.
