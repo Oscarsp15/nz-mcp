@@ -699,8 +699,8 @@ MESSAGES: Final[dict[str, Message]] = {
         "en": "View tools",
     },
     "CLI.MENU.TASK.TOOLS.DESCRIPTION": {
-        "es": "Ejecuta el catálogo de consultas y dice cuáles fallan.",
-        "en": "Run the query catalog and report which ones fail.",
+        "es": "Lista las herramientas que el servidor ofrece al asistente.",
+        "en": "List the tools the server offers the assistant.",
     },
     # ``nz-mcp help``: the one heading and the one row format it shows.
     "CLI.MENU_HELP_MODAL.TITLE": {
