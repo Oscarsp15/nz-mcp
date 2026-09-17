@@ -7,15 +7,18 @@ from datetime import UTC, datetime
 import pytest
 
 from nz_mcp.catalog import tables as tables_mod
+from nz_mcp.catalog.formatters import format_bytes_iec
 from nz_mcp.catalog.tables import (
+    _parse_table_stats_batch_row,
     _parse_table_stats_row,
     get_table_ddl,
     get_table_sample,
     get_table_stats,
+    get_table_stats_batch,
     skew_class,
 )
 from nz_mcp.config import Profile
-from nz_mcp.errors import InvalidInputError, ObjectNotFoundError
+from nz_mcp.errors import InvalidInputError, NetezzaError, ObjectNotFoundError
 
 
 def _profile_dev() -> Profile:
@@ -173,3 +176,142 @@ def test_get_table_ddl_builds_from_describe(monkeypatch: pytest.MonkeyPatch) -> 
     )
     assert "CREATE TABLE PUBLIC.T" in out["ddl"]
     assert out["reconstructed"] is True
+
+
+class _BatchCursor:
+    def __init__(self, rows: list[object], *, error: Exception | None = None) -> None:
+        self._rows = rows
+        self._error = error
+        self.sql = ""
+        self.params: tuple[object, ...] | None = None
+
+    def execute(self, sql: str, params: tuple[object, ...]) -> None:
+        self.sql = sql
+        self.params = params
+        if self._error is not None:
+            raise self._error
+
+    def fetchall(self) -> list[object]:
+        return self._rows
+
+    def close(self) -> None:
+        return None
+
+
+class _BatchConnection:
+    def __init__(self, cursor: _BatchCursor) -> None:
+        self._cursor = cursor
+
+    def cursor(self) -> _BatchCursor:
+        return self._cursor
+
+    def close(self) -> None:
+        return None
+
+
+def _patch_batch_driver(
+    monkeypatch: pytest.MonkeyPatch,
+    rows: list[object],
+    *,
+    error: Exception | None = None,
+) -> _BatchCursor:
+    cursor = _BatchCursor(rows, error=error)
+    monkeypatch.setattr(tables_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(tables_mod, "open_connection", lambda _p, _pw: _BatchConnection(cursor))
+    return cursor
+
+
+def _batch_row(
+    name: str,
+    row_count: int,
+    used: int,
+    allocated: int,
+    skew: float | None,
+) -> dict[str, object]:
+    return {
+        "TABLE_NAME": name,
+        "ROW_COUNT": row_count,
+        "SIZE_BYTES_USED": used,
+        "SIZE_BYTES_ALLOCATED": allocated,
+        "SKEW": skew,
+        "TABLE_CREATED": None,
+    }
+
+
+def test_parse_table_stats_batch_row_tuple() -> None:
+    parsed = _parse_table_stats_batch_row(("T", 10, 1024, 2048, 2.5, None))
+    assert parsed["name"] == "T"
+    assert parsed["row_count"] == 10
+    assert parsed["size_bytes_used"] == 1024
+    assert parsed["size_bytes_allocated"] == 2048
+    assert parsed["skew"] == 2.5
+    assert parsed["table_created"] is None
+
+
+def test_parse_table_stats_batch_row_dict() -> None:
+    parsed = _parse_table_stats_batch_row(
+        _batch_row("T", 10, 1024, 2048, None),
+    )
+    assert parsed["name"] == "T"
+    assert parsed["row_count"] == 10
+    assert parsed["skew"] is None
+
+
+def test_parse_table_stats_batch_row_dict_requires_table_name() -> None:
+    with pytest.raises(NetezzaError):
+        _parse_table_stats_batch_row({"ROW_COUNT": 1, "SIZE_BYTES_USED": 1})
+
+
+def test_parse_table_stats_batch_row_unexpected_shape_raises() -> None:
+    with pytest.raises(NetezzaError):
+        _parse_table_stats_batch_row((1, 2))
+
+
+def test_get_table_stats_batch_orders_by_size_with_name_tiebreak(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rows: list[object] = [
+        _batch_row("B", 500, 1024, 2048, 0.4),
+        _batch_row("C", 100, 2048, 2048, None),
+        _batch_row("A", 100, 2048, 4096, 0.05),
+    ]
+    cursor = _patch_batch_driver(monkeypatch, rows)
+
+    out = get_table_stats_batch(_profile_dev(), database="DEV", schema="PUBLIC", order_by="size")
+
+    assert [r["name"] for r in out] == ["A", "C", "B"]
+    assert out[0]["size_used_human"] == format_bytes_iec(2048)
+    assert out[0]["skew_class"] == "balanced"
+    assert out[2]["skew_class"] == "severe"
+    assert cursor.params == ("PUBLIC",)
+    assert "ORDER BY t.TABLENAME" in cursor.sql
+
+
+def test_get_table_stats_batch_orders_by_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows: list[object] = [
+        _batch_row("A", 100, 2048, 2048, None),
+        _batch_row("B", 500, 1024, 2048, None),
+        _batch_row("C", 100, 512, 512, None),
+    ]
+    _patch_batch_driver(monkeypatch, rows)
+
+    out = get_table_stats_batch(_profile_dev(), database="DEV", schema="PUBLIC", order_by="rows")
+
+    assert [r["name"] for r in out] == ["B", "A", "C"]
+
+
+def test_get_table_stats_batch_empty_schema_returns_empty_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_batch_driver(monkeypatch, [])
+
+    out = get_table_stats_batch(_profile_dev(), database="DEV", schema="PUBLIC", order_by="size")
+
+    assert out == []
+
+
+def test_get_table_stats_batch_driver_error_is_typed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_batch_driver(monkeypatch, [], error=RuntimeError("driver exploded"))
+
+    with pytest.raises(NetezzaError):
+        get_table_stats_batch(_profile_dev(), database="DEV", schema="PUBLIC", order_by="size")

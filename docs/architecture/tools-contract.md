@@ -28,7 +28,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (44 tools registradas)
+## Catálogo v0.1 (45 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -1351,6 +1351,51 @@ Recorre dependencias de objeto (vistas/tablas) en modo `read`, en una dirección
 
 ---
 
+#### 45. `nz_table_stats_batch`
+
+Estadísticas de almacenamiento de **todas** las tablas de un esquema en una sola llamada, ordenadas por tamaño o por filas, desde `_V_TABLE` + `_V_TABLE_STORAGE_STAT` (las mismas vistas que `nz_table_stats`). Pensada para capacity planning: evita N llamadas de `nz_table_stats` cuando el esquema tiene cientos de objetos.
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | |
+| `schema` | string (required) | |
+| `order_by` | `"size"` \| `"rows"` (default: `"size"`) | Métrica de orden descendente. |
+| `top_n` | int (1..1000, default: 20) | Cuántas tablas devolver; cap `MAX_ROWS_CAP`. |
+
+**Output**:
+```json
+{
+  "tables": [
+    {
+      "name": "UMD_FED_DETALLEBASEMASIVAS",
+      "row_count": 633792555,
+      "size_bytes_used": 19403767808,
+      "size_used_human": "18.1 GiB",
+      "size_bytes_allocated": 19613614080,
+      "size_allocated_human": "18.3 GiB",
+      "skew": 4.154311,
+      "skew_class": "severe",
+      "table_created": "1789541807"
+    }
+  ],
+  "order_by": "size",
+  "truncated": true,
+  "hint": "Mostrando las 20 tablas mayores de 733 en el esquema. Sube 'top_n' (máx 1000) para incluir más.",
+  "duration_ms": 9155
+}
+```
+
+**Reglas**:
+- Orden descendente por `order_by`, con desempate por nombre ascendente (determinista). El ranking y el corte `top_n` se hacen en Python sobre las filas del esquema; la SQL solo filtra por esquema y ordena por nombre, así que `top_n` nunca es SQL dinámico.
+- `truncated=true` cuando el esquema tiene más tablas que `top_n`; `hint` explica cómo subir `top_n` (cap `MAX_ROWS_CAP`).
+- Cubre tablas base **y externas** (toda fila de `_V_TABLE` con fila en `_V_TABLE_STORAGE_STAT`); no incluye vistas. Verificado en vivo: `DESA_MODELOS.DBO` → 733 tablas (501 `TABLE` + 232 `EXTERNAL TABLE`).
+- Un esquema sin tablas visibles devuelve `tables: []` (igual que `nz_list_tables`/`nz_list_views`), no `OBJECT_NOT_FOUND`: con una sola consulta al catálogo Netezza no distingue "esquema inexistente" de "esquema vacío". Los fallos del driver (incluido permiso denegado) llegan como error tipado `NETEZZA_ERROR`.
+- `stats_last_analyzed` no se incluye: en NPS 11.x es siempre `null` (ver `nz_table_stats`) y repetirlo en cada fila solo añade ruido.
+- `table_created` se expone tal cual lo entrega el driver (vía nzpy en NPS 11.2 es epoch en segundos, p. ej. `"1789541807"`), igual que `nz_table_stats`.
+- Reutiliza `_V_TABLE` + `_V_TABLE_STORAGE_STAT`; no expone `COMMAND` de `_V_SESSION`.
+- Fuera de alcance: alertas automáticas de espacio; paginación por cursor.
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -1359,7 +1404,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
 |---|---|---|---|
-| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
+| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_table_stats_batch`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
 | `nz_insert` | false | false | false |
 | `nz_insert_select` | false | false | false |
 | `nz_update`, `nz_delete` | false | true | false |
