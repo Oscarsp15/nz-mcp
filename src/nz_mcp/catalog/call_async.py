@@ -35,6 +35,17 @@ from nz_mcp.sql_guard import validate as guard_validate
 
 _MAX_ARGS = 100
 
+# Adaptive poll_after_s: short for fresh/fast jobs so a 3-second SP isn't stuck
+# behind a fixed wait, grows with elapsed time so long SPs don't get hammered.
+_POLL_MIN_S = 2
+_POLL_MAX_S = 30
+
+
+def _suggest_poll_after_s(elapsed_ms: int) -> int:
+    """Suggest a next-poll delay that scales with how long the job has been running."""
+    elapsed_s = elapsed_ms / 1000
+    return int(min(_POLL_MAX_S, max(_POLL_MIN_S, elapsed_s)))
+
 
 def _run_job(
     *,
@@ -162,17 +173,25 @@ def launch_call_procedure(
         daemon=True,
     ).start()
 
+    poll_after_s = _suggest_poll_after_s(0)
     return {
         "job_id": job_id,
         "status": "running",
         "session_id": None,
+        "poll_after_s": poll_after_s,
         "hint_es": (
-            f"Sondea con nz_job_poll(job_id='{job_id}') cada 30 s. "
-            "El session_id en nz_job_poll permite a un DBA abortar con nzsession si es necesario."
+            f"Sondea con nz_job_poll(job_id='{job_id}') en unos {poll_after_s} s; "
+            "el intervalo sugerido crece mientras el job siga corriendo, no esperes 30 s fijos. "
+            "session_id llega null aquí porque el hilo en segundo plano todavía no abre la "
+            "conexión a Netezza; aparece en la primera respuesta de nz_job_poll y permite a un "
+            "DBA abortar con nzsession si es necesario."
         ),
         "hint_en": (
-            f"Poll with nz_job_poll(job_id='{job_id}') every 30 s. "
-            "The session_id from nz_job_poll allows a DBA to abort with nzsession if needed."
+            f"Poll with nz_job_poll(job_id='{job_id}') in about {poll_after_s} s; "
+            "the suggested interval grows while the job keeps running, don't wait a fixed 30 s. "
+            "session_id is null here because the background thread hasn't opened the Netezza "
+            "connection yet; it appears in the first nz_job_poll response and lets a DBA abort "
+            "with nzsession if needed."
         ),
     }
 
@@ -186,11 +205,13 @@ def poll_job(job_id: str) -> dict[str, Any]:
             detail=f"No job with id={job_id!r} (may have expired or never existed).",
         )
     elapsed_ms = int((time.monotonic() - state.created_at) * 1000)
+    still_running = state.status in ("running", "cancelling")
     out: dict[str, Any] = {
         "job_id": state.job_id,
         "status": state.status,
         "session_id": state.session_id,
         "elapsed_ms": elapsed_ms,
+        "poll_after_s": _suggest_poll_after_s(elapsed_ms) if still_running else None,
         "partial_notices": state.partial_notices,
         "return_value": None,
         "messages": [],

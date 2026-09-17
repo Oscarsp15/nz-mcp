@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from nz_mcp.catalog.call_async import launch_call_procedure, poll_job
+from nz_mcp.catalog.call_async import _suggest_poll_after_s, launch_call_procedure, poll_job
 from nz_mcp.config import Profile
 from nz_mcp.errors import InvalidInputError
 from nz_mcp.jobs import (
@@ -98,6 +98,11 @@ def test_launch_returns_job_id_immediately() -> None:
 
     assert "job_id" in result
     assert result["status"] == "running"
+    assert result["session_id"] is None
+    assert result["poll_after_s"] == 2
+    assert "poll_after_s" not in result["hint_es"]  # hint embeds the value, not the field name
+    assert str(result["poll_after_s"]) in result["hint_es"]
+    assert str(result["poll_after_s"]) in result["hint_en"]
     # Unblock background thread so it doesn't linger past the test
     with suppress(threading.BrokenBarrierError):
         barrier.wait(timeout=2)
@@ -269,6 +274,7 @@ def test_poll_running_job() -> None:
     assert out["elapsed_ms"] >= 0
     assert out["return_value"] is None
     assert out["error"] is None
+    assert out["poll_after_s"] == _suggest_poll_after_s(out["elapsed_ms"])
 
 
 def test_poll_done_job_includes_result() -> None:
@@ -279,11 +285,33 @@ def test_poll_done_job_includes_result() -> None:
     assert out["return_value"] == "42"
     assert out["messages"] == ["ok"]
     assert out["duration_ms"] == 500
+    assert out["poll_after_s"] is None  # job finished — no reason to poll again
 
 
 def test_poll_unknown_job_raises() -> None:
     with pytest.raises(InvalidInputError, match="JOB_NOT_FOUND"):
         poll_job("does-not-exist")
+
+
+# ---------------------------------------------------------------------------
+# _suggest_poll_after_s — adaptive hint, no fixed 30 s wait (#300)
+# ---------------------------------------------------------------------------
+
+
+def test_suggest_poll_after_s_floors_for_fresh_job() -> None:
+    """A job that just launched (or a fast SP) shouldn't be told to wait 30 s."""
+    assert _suggest_poll_after_s(0) == 2
+    assert _suggest_poll_after_s(500) == 2
+
+
+def test_suggest_poll_after_s_scales_with_elapsed_time() -> None:
+    assert _suggest_poll_after_s(5_000) == 5
+    assert _suggest_poll_after_s(15_000) == 15
+
+
+def test_suggest_poll_after_s_caps_for_long_jobs() -> None:
+    assert _suggest_poll_after_s(60_000) == 30
+    assert _suggest_poll_after_s(600_000) == 30
 
 
 # ---------------------------------------------------------------------------
