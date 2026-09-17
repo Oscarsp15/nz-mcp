@@ -26,7 +26,7 @@ def test_the_six_tasks_are_the_fixed_order() -> None:
         "test-connection",
         "serve",
         "doctor",
-        "probe-catalog",
+        "tools",
     ]
 
 

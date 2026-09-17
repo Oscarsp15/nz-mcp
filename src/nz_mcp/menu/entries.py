@@ -41,7 +41,7 @@ TASKS: Final[tuple[MenuTask, ...]] = (
     MenuTask(id="test", command="test-connection"),
     MenuTask(id="serve", command="serve"),
     MenuTask(id="doctor", command="doctor"),
-    MenuTask(id="tools", command="probe-catalog"),
+    MenuTask(id="tools", command="tools"),
 )
 
 
