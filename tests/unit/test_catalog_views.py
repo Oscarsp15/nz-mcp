@@ -252,7 +252,8 @@ def test_list_views_rejects_bad_row_shape(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_get_view_ddl_returns_definition(monkeypatch: pytest.MonkeyPatch) -> None:
-    cursor = _FakeDdlCursor(one=("CREATE VIEW ...",))
+    # _V_VIEW.DEFINITION contains only the SELECT body, not the CREATE VIEW header.
+    cursor = _FakeDdlCursor(one=("SELECT 1 AS C",))
     connection = _FakeDdlConnection(cursor)
     monkeypatch.setattr("nz_mcp.catalog.views.get_password", lambda _n: "pw")
     monkeypatch.setattr("nz_mcp.catalog.views.open_connection", lambda *_a, **_k: connection)
@@ -263,12 +264,17 @@ def test_get_view_ddl_returns_definition(monkeypatch: pytest.MonkeyPatch) -> Non
         ),
     )
 
-    assert get_view_ddl(_profile(), database="DB", schema="PUB", view="V1") == "CREATE VIEW ..."
+    out = get_view_ddl(_profile(), database="DB", schema="PUB", view="V1")
+    assert out == "CREATE OR REPLACE VIEW PUB.V1 AS\nSELECT 1 AS C"
     assert cursor.executed_params == ("PUB", "V1")
 
 
-def test_get_view_ddl_dict_row(monkeypatch: pytest.MonkeyPatch) -> None:
-    cursor = _FakeDdlCursor(one={"DEFINITION": "CREATE VIEW X AS SELECT 1"})
+def test_get_view_ddl_wraps_body_with_create_or_replace_view(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #303: output must be a re-executable CREATE OR REPLACE VIEW statement."""
+    body = "(SELECT A FROM DBO.T1) UNION ALL (SELECT A FROM DBO.T2)"
+    cursor = _FakeDdlCursor(one=(body,))
     connection = _FakeDdlConnection(cursor)
     monkeypatch.setattr("nz_mcp.catalog.views.get_password", lambda _n: "pw")
     monkeypatch.setattr("nz_mcp.catalog.views.open_connection", lambda *_a, **_k: connection)
@@ -277,7 +283,39 @@ def test_get_view_ddl_dict_row(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda _i, _p: "SELECT DEFINITION FROM <BD>.._V_VIEW WHERE A=1",
     )
 
-    assert "CREATE VIEW X" in get_view_ddl(_profile(), database="DB", schema="S", view="X")
+    out = get_view_ddl(_profile(), database="DB", schema="dbo", view="v_cascadas")
+    assert out.startswith("CREATE OR REPLACE VIEW DBO.V_CASCADAS AS\n")
+    assert body in out
+
+
+def test_get_view_ddl_schema_and_view_uppercased(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Schema and view name in the CREATE OR REPLACE VIEW header are always uppercased."""
+    cursor = _FakeDdlCursor(one=("SELECT 1",))
+    connection = _FakeDdlConnection(cursor)
+    monkeypatch.setattr("nz_mcp.catalog.views.get_password", lambda _n: "pw")
+    monkeypatch.setattr("nz_mcp.catalog.views.open_connection", lambda *_a, **_k: connection)
+    monkeypatch.setattr(
+        "nz_mcp.catalog.views.resolve_query",
+        lambda _i, _p: "SELECT DEFINITION FROM <BD>.._V_VIEW WHERE A=1",
+    )
+
+    out = get_view_ddl(_profile(), database="DB", schema="myschema", view="my_view")
+    assert out.startswith("CREATE OR REPLACE VIEW MYSCHEMA.MY_VIEW AS\n")
+
+
+def test_get_view_ddl_dict_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    cursor = _FakeDdlCursor(one={"DEFINITION": "SELECT 1"})
+    connection = _FakeDdlConnection(cursor)
+    monkeypatch.setattr("nz_mcp.catalog.views.get_password", lambda _n: "pw")
+    monkeypatch.setattr("nz_mcp.catalog.views.open_connection", lambda *_a, **_k: connection)
+    monkeypatch.setattr(
+        "nz_mcp.catalog.views.resolve_query",
+        lambda _i, _p: "SELECT DEFINITION FROM <BD>.._V_VIEW WHERE A=1",
+    )
+
+    out = get_view_ddl(_profile(), database="DB", schema="S", view="X")
+    assert out.startswith("CREATE OR REPLACE VIEW S.X AS\n")
+    assert "SELECT 1" in out
 
 
 def test_get_view_ddl_raises_when_no_row(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -394,7 +432,8 @@ def test_get_view_ddl_emits_set_catalog_before_select(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Issue #125: SET CATALOG <db> must precede the SELECT to _V_VIEW."""
-    cursor = _FakeDdlCursor(one=("CREATE VIEW PROD_MAESTROBI.DBO.V AS SELECT 1",))
+    # _V_VIEW.DEFINITION returns only the SELECT body, not the CREATE VIEW header.
+    cursor = _FakeDdlCursor(one=("SELECT * FROM DBO.CONTINGENCIACREDITOSFULL",))
     connection = _FakeDdlConnection(cursor)
     monkeypatch.setattr("nz_mcp.catalog.views.get_password", lambda _n: "pw")
     monkeypatch.setattr("nz_mcp.catalog.views.open_connection", lambda *_a, **_k: connection)
@@ -412,7 +451,7 @@ def test_get_view_ddl_emits_set_catalog_before_select(
         view="V_CONTINGENCIACREDITOSFULL",
     )
 
-    assert out.startswith("CREATE VIEW")
+    assert out.startswith("CREATE OR REPLACE VIEW DBO.V_CONTINGENCIACREDITOSFULL AS\n")
     # First statement must be SET CATALOG with the validated/normalized DB id.
     assert len(cursor.statements) == 2
     set_catalog_sql, set_catalog_params = cursor.statements[0]
@@ -438,7 +477,7 @@ def test_get_view_ddl_returns_not_a_view_without_set_catalog_when_unfixed() -> N
     cursor = _CrossDbDdlCursor(
         target_db="PROD_MAESTROBI",
         session_db="DESA_MODELOS",
-        real_definition="CREATE OR REPLACE VIEW DBO.V AS SELECT 1",
+        real_definition="SELECT 1",
     )
     cursor.execute(
         (
@@ -454,13 +493,12 @@ def test_get_view_ddl_cross_db_fix_returns_real_definition(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Issue #125: with ``SET CATALOG``, cross-DB DEFINITION resolves correctly."""
+    # _V_VIEW.DEFINITION stores only the SELECT body; the CREATE OR REPLACE VIEW
+    # header is reconstructed by get_view_ddl, not fetched from the catalog.
     cursor = _CrossDbDdlCursor(
         target_db="PROD_MAESTROBI",
         session_db="DESA_MODELOS",
-        real_definition=(
-            "CREATE OR REPLACE VIEW DBO.V_CONTINGENCIACREDITOSFULL AS "
-            "SELECT * FROM DBO.CONTINGENCIACREDITOSFULL"
-        ),
+        real_definition="SELECT * FROM DBO.CONTINGENCIACREDITOSFULL",
     )
     connection = _FakeDdlConnection(cursor)  # type: ignore[arg-type]
     monkeypatch.setattr("nz_mcp.catalog.views.get_password", lambda _n: "pw")
@@ -481,7 +519,7 @@ def test_get_view_ddl_cross_db_fix_returns_real_definition(
 
     # Without the fix we would get "Not a view"; with SET CATALOG we get DDL.
     assert out != "Not a view"
-    assert out.startswith("CREATE OR REPLACE VIEW")
+    assert out.startswith("CREATE OR REPLACE VIEW DBO.V_CONTINGENCIACREDITOSFULL AS\n")
     assert "CONTINGENCIACREDITOSFULL" in out
 
 
