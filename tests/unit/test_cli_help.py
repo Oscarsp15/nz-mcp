@@ -38,6 +38,7 @@ _EXPECTED_ORDER: Final[tuple[str, ...]] = (
     "remove-profile",
     "doctor",
     "probe-catalog",
+    "tools",
     "version",
     "serve",
     "help",
@@ -74,7 +75,7 @@ def test_commands_are_listed_in_the_order_they_are_used() -> None:
 
 
 def test_the_top_of_the_help_names_the_command_to_start_with() -> None:
-    """A list of twelve commands with no entry point leaves the reader to guess."""
+    """A list of thirteen commands with no entry point leaves the reader to guess."""
     top = app.info.help or ""
     assert "nz-mcp init" in top
 

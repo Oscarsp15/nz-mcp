@@ -968,6 +968,10 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Ejecuta contra Netezza todas las consultas de catálogo y dice cuáles fallan.",
         "en": "Run every catalog query against Netezza and report which ones fail.",
     },
+    "CLI.HELP.TOOLS": {
+        "es": "Lista las herramientas que el servidor ofrece al asistente, con lo que hace cada una.",
+        "en": "List the tools the server offers the assistant, with what each one does.",
+    },
     "CLI.HELP.VERSION": {
         "es": "Muestra la versión instalada.",
         "en": "Print the installed version.",
@@ -1004,6 +1008,10 @@ MESSAGES: Final[dict[str, Message]] = {
     "CLI.HELP.OPT.JSON": {
         "es": "Imprime el resultado como JSON, para leerlo desde un script",
         "en": "Print the result as JSON, to read it from a script",
+    },
+    "CLI.HELP.OPT.NAME_FILTER": {
+        "es": "Muestra solo las herramientas cuyo nombre contenga este texto",
+        "en": "Show only the tools whose name contains this text",
     },
     "CLI.HELP.OPT.MODE": {
         "es": "Permiso del perfil: read, write o admin",
@@ -1059,6 +1067,31 @@ MESSAGES: Final[dict[str, Message]] = {
     "CLI.PROFILES_SINGLE_NEXT_STEP": {
         "es": "Comprueba que llega con: nz-mcp test-connection",
         "en": "Check that it connects with: nz-mcp test-connection",
+    },
+    # nz-mcp tools — the catalog the server exposes, read from the live registry.
+    "CLI.TOOLS_COLUMN_TOOL": {
+        "es": "Herramienta",
+        "en": "Tool",
+    },
+    "CLI.TOOLS_COLUMN_MODE": {
+        "es": "Modo",
+        "en": "Mode",
+    },
+    "CLI.TOOLS_COLUMN_DESCRIPTION": {
+        "es": "Qué hace",
+        "en": "What it does",
+    },
+    "CLI.TOOLS_COUNT": {
+        "es": "{n} de {total} herramientas.",
+        "en": "{n} of {total} tools.",
+    },
+    "CLI.TOOLS_NONE": {
+        "es": "Ninguna herramienta coincide con '{name}'.",
+        "en": "No tool matches '{name}'.",
+    },
+    "CLI.TOOLS_NEXT_STEP": {
+        "es": "El detalle de cada herramienta está en docs/architecture/tools-contract.md",
+        "en": "Each tool's detail is in docs/architecture/tools-contract.md",
     },
     # nz-mcp edit-profile
     "CLI.EDIT_PROFILE_INVALID_MODE": {

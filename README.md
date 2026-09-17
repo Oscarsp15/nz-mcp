@@ -125,6 +125,7 @@ Instalar con `pip` en el Python del sistema (ni pipx ni venv) es posible pero **
 | `nz-mcp doctor` | diagnóstico local, sin conectar a Netezza |
 | `nz-mcp test-connection [--profile <n>]` | abre la conexión del perfil y ejecuta `VERSION()`; sale con `0` si conecta, `1` si no |
 | `nz-mcp probe-catalog [--profile <n>] [--json]` | ejecuta todas las queries del catálogo con parámetros dummy |
+| `nz-mcp tools [--json] [--name <texto>]` | lista las herramientas que el servidor ofrece al asistente, con lo que hace cada una |
 | `nz-mcp serve` | arranca el servidor MCP sobre stdio; **lo lanza el cliente**, no tú a mano |
 | `nz-mcp version` | imprime la versión instalada |
 
