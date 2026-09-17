@@ -14,6 +14,7 @@ from nz_mcp.catalog.identifier import (
     render_cross_db,
     validate_catalog_identifier,
     validate_database_identifier,
+    validate_system_view_identifier,
 )
 from nz_mcp.catalog.resolver import resolve_query
 from nz_mcp.catalog.row_shape import is_sequence_row
@@ -28,6 +29,9 @@ _TABLE_ROW_MIN_ITEMS: Final[int] = 3
 _TABLE_KIND: Final[str] = "TABLE"
 _EXTERNAL_TABLE_KIND: Final[str] = "EXTERNAL TABLE"
 _VIEW_KIND: Final[str] = "VIEW"
+# Every Netezza catalog/management view (``_V_*``) lives in this schema; the caller's
+# ``schema`` argument is ignored for those names (issue #315).
+_SYSTEM_VIEW_SCHEMA: Final[str] = "DEFINITION_SCHEMA"
 _OBJECT_TYPES_WITH_DISTRIBUTION: Final[frozenset[str]] = frozenset(
     {_TABLE_KIND, _EXTERNAL_TABLE_KIND},
 )
@@ -178,6 +182,11 @@ def _row_to_table(row: Any) -> dict[str, str]:
     raise NetezzaError(operation="list_tables", detail="Unexpected row shape from _v_table")
 
 
+def _is_system_view_name(name: str) -> bool:
+    """True for Netezza catalog/management view names (``_V_*``)."""
+    return name.strip().startswith("_")
+
+
 def describe_table(
     profile: Profile,
     database: str,
@@ -189,10 +198,17 @@ def describe_table(
     ``kind`` is the real object type (``TABLE``, ``EXTERNAL TABLE``, or ``VIEW``); the
     ``distribution`` key is only present for tables and external tables, since Netezza
     views have no distribution.
+
+    A ``_V_*`` name is a Netezza catalog/management view: it is resolved in
+    ``DEFINITION_SCHEMA`` and the caller's ``schema`` argument is ignored (issue #315).
     """
     db_ident = validate_database_identifier(database)
-    sch_ident = validate_catalog_identifier(schema)
-    tab_ident = validate_catalog_identifier(table)
+    if _is_system_view_name(table):
+        sch_ident = validate_catalog_identifier(_SYSTEM_VIEW_SCHEMA)
+        tab_ident = validate_system_view_identifier(table)
+    else:
+        sch_ident = validate_catalog_identifier(schema)
+        tab_ident = validate_catalog_identifier(table)
     params: tuple[str, str] = (sch_ident, tab_ident)
     dist_params: tuple[str, str, str] = (db_ident, sch_ident, tab_ident)
     password = get_password(profile.name)
@@ -208,13 +224,13 @@ def describe_table(
             if not column_rows:
                 raise ObjectNotFoundError(
                     detail=(
-                        f"Table {table!r} does not exist in {database}.{schema} "
+                        f"Table {table!r} does not exist in {database}.{sch_ident} "
                         "or is not visible to this profile."
                     ),
                     object_type="table",
                     database=database,
-                    schema=schema,
-                    table=table,
+                    schema=sch_ident,
+                    table=tab_ident,
                 )
 
             objtype_sql = render_cross_db(

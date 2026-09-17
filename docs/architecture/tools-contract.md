@@ -155,10 +155,12 @@ Lista **tablas** (base y/o externas; no vistas, no procedimientos). Para vistas 
 | Input | Tipo | Descripción |
 |---|---|---|
 | `database` | string (required) | |
-| `schema` | string (required) | |
-| `table` | string (required) | |
+| `schema` | string (required) | Se **ignora** cuando `table` es una vista de catálogo `_V_*`. |
+| `table` | string (required) | Tabla, tabla externa, vista, o vista de catálogo `_V_*` (p. ej. `_V_RELATION_COLUMN`). |
 
 Funciona con tablas, tablas externas y vistas: `kind` refleja el tipo real (issue #295). `distribution` solo aparece cuando `kind` es `TABLE` o `EXTERNAL TABLE`; se omite (no aparece la clave) para vistas, porque Netezza no distribuye vistas.
+
+Las **vistas de catálogo** (`_V_*`, p. ej. `_V_RELATION_COLUMN`, `_V_SESSION`) se resuelven en `DEFINITION_SCHEMA`; el `schema` del input se ignora para esos nombres (issue #315). Así un DE puede descubrir las columnas de las vistas de sistema antes de consultarlas.
 
 **Output** (tabla base):
 ```json

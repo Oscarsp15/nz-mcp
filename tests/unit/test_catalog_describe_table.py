@@ -635,6 +635,51 @@ def test_describe_table_objtype_dict_shaped_row(monkeypatch: pytest.MonkeyPatch)
     assert out["kind"] == "TABLE"
 
 
+# ── issue #315: catalog/system views (``_V_*``) ─────────────────────────────
+
+
+def test_describe_table_system_view_ignores_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Issue #315: a ``_V_*`` view resolves in DEFINITION_SCHEMA, ignoring the caller's schema."""
+    buckets = {
+        "columns": [("ATTNAME", "CHARACTER VARYING(20)", True, None, 1)],
+        "objtype": [],
+        "pk": [],
+        "fk": [],
+    }
+    cursor = _RoutingCursor(buckets)
+    monkeypatch.setattr(tables_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(tables_mod, "open_connection", lambda *_a, **_k: _FakeConn(cursor))
+    monkeypatch.setattr(tables_mod, "resolve_query", _resolve_query_map)
+
+    out = describe_table(_profile(), database="DB", schema="DBO", table="_V_RELATION_COLUMN")
+
+    assert out["name"] == "_V_RELATION_COLUMN"
+    assert out["kind"] == "VIEW"
+    assert out["columns"][0]["name"] == "ATTNAME"
+    # Catalog queries must target DEFINITION_SCHEMA, not the caller's DBO.
+    assert cursor.executed_params[0] == ("DEFINITION_SCHEMA", "_V_RELATION_COLUMN")
+    # A view has no distribution, so the dist query must not be issued.
+    assert not any("_v_table_dist_map" in sql.lower() for sql in cursor.executed_sql)
+
+
+def test_describe_table_system_view_accepts_lowercase(monkeypatch: pytest.MonkeyPatch) -> None:
+    buckets = {
+        "columns": [("OBJID", "INTEGER", True, None, 1)],
+        "objtype": [],
+        "pk": [],
+        "fk": [],
+    }
+    cursor = _RoutingCursor(buckets)
+    monkeypatch.setattr(tables_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(tables_mod, "open_connection", lambda *_a, **_k: _FakeConn(cursor))
+    monkeypatch.setattr(tables_mod, "resolve_query", _resolve_query_map)
+
+    out = describe_table(_profile(), database="DB", schema="S", table="_v_table")
+
+    assert out["name"] == "_V_TABLE"
+    assert cursor.executed_params[0] == ("DEFINITION_SCHEMA", "_V_TABLE")
+
+
 def test_describe_table_objtype_bad_dict_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     buckets = {
         "columns": [("ID", "INTEGER", True, None, 1)],
