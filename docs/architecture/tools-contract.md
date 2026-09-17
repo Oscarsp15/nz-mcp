@@ -28,7 +28,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (50 tools registradas)
+## Catálogo v0.1 (51 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -1637,6 +1637,40 @@ Resume las filas por valor de una columna de partición/periodo: una entrada por
 
 ---
 
+#### 51. `nz_find_table`
+
+Busca **tablas y vistas por patrón de nombre** a través de las bases visibles (o de una sola si se indica `database`), devolviendo `{database, schema, name, kind}`. Resuelve el "¿dónde está el dato?" cuando hay decenas de bases con nombres casi idénticos: antes había que iterar BD × esquema a mano con `nz_list_tables`.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `table_pattern` | string (required) | Filtro `LIKE` sobre el nombre (case-insensitive). |
+| `database` | string (optional) | Limita la búsqueda a una base; si se omite, recorre todas las visibles. |
+| `schema_pattern` | string (optional) | Filtro `LIKE` sobre el esquema. Match case-insensitive. |
+| `object_type` | enum: `TABLE` (default) \| `VIEW` \| `ALL` | `TABLE` = tablas base; `VIEW` = vistas; `ALL` = tablas base + tablas externas + vistas. |
+| `max_rows` | int (default: perfil, cap `MAX_ROWS_CAP`) | Tope de coincidencias devueltas. |
+
+**Output**:
+```json
+{
+  "objects": [
+    {"database": "DESA_MODELOS", "schema": "DBO", "name": "EFE_MC_CREDITOS", "kind": "TABLE"}
+  ],
+  "truncated": false,
+  "hint": null,
+  "duration_ms": 1500
+}
+```
+
+**Reglas**:
+- Consulta `_V_TABLE` (con `OBJTYPE` real) y `_V_VIEW` por cada base; `kind` refleja el tipo real (`TABLE`, `EXTERNAL TABLE`, `VIEW`).
+- Recorre las bases en el orden de `nz_list_databases` y se detiene en cuanto encuentra una coincidencia de más que `max_rows`, así que un patrón raro no lee el catálogo entero de todas las bases.
+- `database` inexistente o no visible → `OBJECT_NOT_FOUND`; nombre inválido → `INVALID_INPUT`.
+- `truncated` + `hint` cuando hay más coincidencias que `max_rows` (mismo patrón que `nz_find_column`).
+- Sin coincidencias → `objects: []`, no es un error.
+- No busca por nombre de columna (eso es `nz_find_column`) ni devuelve columnas/estadísticas: solo la ubicación del objeto.
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -1645,7 +1679,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
 |---|---|---|---|
-| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_table_stats_batch`, `nz_summarize_partitions`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_find_column`, `nz_find_duplicates`, `nz_compare_rows`, `nz_compare_tables`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
+| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_table_stats_batch`, `nz_summarize_partitions`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_find_column`, `nz_find_table`, `nz_find_duplicates`, `nz_compare_rows`, `nz_compare_tables`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
 | `nz_insert` | false | false | false |
 | `nz_insert_select` | false | false | false |
 | `nz_update`, `nz_delete` | false | true | false |

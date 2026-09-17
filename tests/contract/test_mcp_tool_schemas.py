@@ -33,6 +33,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_export_ddl",
     "nz_find_column",
     "nz_find_duplicates",
+    "nz_find_table",
     "nz_find_table_references",
     "nz_get_procedure_ddl",
     "nz_get_procedure_section",
@@ -99,6 +100,26 @@ def test_nz_compare_tables_schema_and_annotations() -> None:
         "schema_b",
         "table_b",
     }
+    assert spec.annotations == {
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+
+
+@pytest.mark.contract
+def test_nz_find_table_schema_and_annotations() -> None:
+    spec = TOOLS["nz_find_table"]
+    props = spec.input_model.model_json_schema()["properties"]
+    assert set(props) == {
+        "table_pattern",
+        "database",
+        "schema_pattern",
+        "object_type",
+        "max_rows",
+    }
+    assert spec.mode == "read"
     assert spec.annotations == {
         "readOnlyHint": True,
         "destructiveHint": False,
