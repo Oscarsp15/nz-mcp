@@ -729,3 +729,108 @@ def _row_to_column_match(row: Any) -> dict[str, str]:
     raise NetezzaError(
         operation="find_column", detail="Unexpected row shape from _v_relation_column"
     )
+
+
+_CONSTRAINT_ROW_MIN_ITEMS: Final[int] = 5
+
+
+def list_constraints(
+    profile: Profile,
+    database: str,
+    schema: str,
+    table: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return PK/FK/unique constraints for ``schema``, or one ``table`` when given.
+
+    Queries ``_v_relation_keydata`` restricted to ``CONTYPE IN ('p', 'f', 'u')`` and groups
+    rows by ``(RELATION, CONSTRAINTNAME)``, ordering each constraint's columns by ``CONSEQ``.
+    When ``table`` is given and does not resolve to a real table in ``_v_table``, raises
+    ``ObjectNotFoundError`` instead of silently returning an empty list (a real table with
+    zero constraints must stay distinguishable from a typo in ``table``).
+    """
+    sch_ident = validate_catalog_identifier(schema)
+    tab_ident = validate_catalog_identifier(table) if table else None
+    params: tuple[str, str | None, str | None] = (sch_ident, tab_ident, tab_ident)
+    password = get_password(profile.name)
+    base_sql = resolve_query("list_constraints", profile)
+    sql = render_cross_db(base_sql, database=database)
+
+    connection = cast(_ConnectionLike, open_connection(profile, password))
+    try:
+        with closing(connection.cursor()) as cursor:
+            if tab_ident is not None:
+                exists_sql = render_cross_db(
+                    resolve_query("describe_table_objtype", profile), database=database
+                )
+                cursor.execute(exists_sql, (sch_ident, tab_ident))
+                if not cursor.fetchall():
+                    raise ObjectNotFoundError(
+                        detail=(
+                            f"Table {table!r} does not exist in {database}.{schema} "
+                            "or is not visible to this profile."
+                        ),
+                        object_type="table",
+                        database=database,
+                        schema=schema,
+                        table=table,
+                    )
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+    except ObjectNotFoundError:
+        raise
+    except Exception as exc:  # noqa: BLE001, RUF100
+        # Catalog/driver failures are not guaranteed to use a stable exception type.
+        raise NetezzaError(
+            operation="list_constraints",
+            database=database,
+            detail=sanitize(str(exc), known_secrets={password}),
+        ) from exc
+    finally:
+        connection.close()
+
+    return _group_constraints(rows)
+
+
+def _group_constraints(rows: list[Any]) -> list[dict[str, Any]]:
+    grouped: defaultdict[tuple[str, str, str], list[tuple[int, str]]] = defaultdict(list)
+    for row in rows:
+        relation, cname, ctype, attname, conseq = _constraint_quintuplet(row)
+        grouped[(relation, cname, ctype)].append((conseq, attname))
+    out: list[dict[str, Any]] = []
+    for relation, cname, ctype in sorted(grouped.keys()):
+        ordered = sorted(grouped[(relation, cname, ctype)], key=lambda p: p[0])
+        out.append(
+            {
+                "table": relation,
+                "name": cname,
+                "type": ctype,
+                "columns": [attname for _, attname in ordered],
+            }
+        )
+    return out
+
+
+def _constraint_quintuplet(row: Any) -> tuple[str, str, str, str, int]:
+    if isinstance(row, dict):
+        keys = {str(k).upper(): v for k, v in row.items()}
+        required = ("RELATION", "CONSTRAINTNAME", "CONTYPE", "ATTNAME", "CONSEQ")
+        if not all(k in keys for k in required):
+            raise NetezzaError(
+                operation="list_constraints",
+                detail=(
+                    "Catalog query must return RELATION, CONSTRAINTNAME, CONTYPE, "
+                    "ATTNAME, CONSEQ columns."
+                ),
+            )
+        return (
+            str(keys["RELATION"]),
+            str(keys["CONSTRAINTNAME"]),
+            str(keys["CONTYPE"]),
+            str(keys["ATTNAME"]),
+            int(keys["CONSEQ"]),
+        )
+    if is_sequence_row(row, _CONSTRAINT_ROW_MIN_ITEMS):
+        return (str(row[0]), str(row[1]), str(row[2]), str(row[3]), int(row[4]))
+    raise NetezzaError(
+        operation="list_constraints", detail="Unexpected row shape from _v_relation_keydata"
+    )

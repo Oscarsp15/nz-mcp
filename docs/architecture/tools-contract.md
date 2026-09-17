@@ -28,7 +28,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (41 tools registradas)
+## Catálogo v0.1 (42 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -1243,6 +1243,38 @@ Perfila una columna en una sola pasada de solo lectura: total de filas, nulos, %
 - Verifica la existencia de tabla y columna contra `_v_relation_column` antes de perfilar: tabla ausente o columna ausente → `OBJECT_NOT_FOUND` (con la lista de columnas visibles en el contexto de la columna ausente).
 - `hint` se rellena cuando hay más valores distintos que `top_n` (sugiere subir `top_n`).
 - `distinct` y `min`/`max` recorren la columna completa; en tablas muy grandes puede ser costoso. No usar para percentiles ni detección de outliers (fuera de alcance de este issue).
+
+---
+
+#### 42. `nz_list_constraints`
+
+Lista constraints `PRIMARY KEY`/`FOREIGN KEY`/`UNIQUE` de un esquema completo, o de una sola tabla si se da `table`. Modo `read`. Consulta `_V_RELATION_KEYDATA` (`CONTYPE IN ('p', 'f', 'u')`), agrupando filas por constraint con las columnas en el orden de la clave (`CONSEQ`).
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | BD a inspeccionar (identificador validado para interpolación `<BD>..`). |
+| `schema` | string (required) | Esquema a inspeccionar. |
+| `table` | string (optional) | Nombre exacto de tabla (no admite `LIKE`). Si se omite, todas las tablas del esquema. |
+| `max_rows` | int (default: perfil, cap `MAX_ROWS_CAP`) | Tope de constraints devueltos. |
+
+**Output**:
+```json
+{
+  "constraints": [
+    {"table": "EFE_MC_CREDITOS", "name": "PK_EFE_MC_CREDITOS", "type": "p", "columns": ["CODCREDITO"]}
+  ],
+  "truncated": false,
+  "hint": null,
+  "duration_ms": 42
+}
+```
+
+**Reglas**:
+- `type` es el código crudo del catálogo: `p` (primary key), `f` (foreign key), `u` (unique). No se traduce.
+- Sin `table`: sin constraints en el esquema → `constraints: []`, no es un error.
+- Con `table`: si la tabla **no existe** (no resuelve contra `_V_TABLE`) → `OBJECT_NOT_FOUND`. Si existe pero no tiene constraints → `constraints: []` (distingue "no existe" de "no tiene claves", el motivo original del issue #306).
+- `truncated` + `hint` cuando hay más constraints que `max_rows` (mismo patrón que `nz_list_procedures` / `nz_find_column`, ADR 0018).
+- Fuera de alcance: validación de integridad de datos (solo metadatos); referencias de FK (tabla/columnas referenciadas) — para eso, `nz_describe_table`.
 
 ---
 
