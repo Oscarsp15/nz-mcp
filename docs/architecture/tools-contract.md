@@ -47,14 +47,23 @@ Ejecuta una query `SELECT` validada por `sql_guard` contra el perfil activo.
 **Output**:
 ```json
 {
-  "columns": [{"name": "col", "type": "varchar"}],
-  "rows": [["v1", "v2"]],
+  "columns": [
+    {"name": "NOMBRE", "type": "varchar(10)"},
+    {"name": "IMPDESEMBOLSADO", "type": "numeric(14,2)"},
+    {"name": "TOTAL", "type": "bigint"}
+  ],
+  "rows": [["ANA", 12345678.9, 37466]],
   "row_count": 100,
   "truncated": false,
   "duration_ms": 243,
   "hint": null
 }
 ```
+
+**Reglas**:
+- `columns[].type` es el nombre del tipo SQL y, cuando el driver lo expone, **incluye precisión/escala o longitud**: `numeric(14,2)`, `varchar(10)`, `char(1)`, `nvarchar(5)`. Si el tipo no tiene modificador declarado, se devuelve solo el nombre base (`numeric`, `varchar`). El modificador se decodifica del `type_modifier` del protocolo (Netezza usa un offset de cabecera varlena de 16 bytes); `nz_describe_table` sigue siendo la fuente de la definición declarada de una tabla.
+- **Serialización de escalares** (misma regla en `nz_query_select` y `nz_table_sample`): `numeric`/`decimal` → número JSON (`int` si es entero, `float` si tiene fracción; valores que exceden la precisión de un `double` pueden redondearse); tipos enteros (incluido `byteint`) → número JSON; `date`/`time`/`timestamp` → string ISO; `bool` → booleano JSON; `NULL` → `null`.
+- El OID `18` mapea a `char` (columna `CONTYPE` de los catálogos `_V_RELATION_KEYDATA`), cerrando el residuo de #271 (issue #298).
 
 **Errores**: `GuardRejectedError`, `QueryTimeoutError`, `ConnectionError`, `ResultTooLargeError`.
 
