@@ -7,7 +7,13 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from nz_mcp.catalog.tables import get_table_ddl, get_table_sample, get_table_stats, list_tables
+from nz_mcp.catalog.tables import (
+    get_table_ddl,
+    get_table_sample,
+    get_table_stats,
+    list_tables,
+    summarize_partitions,
+)
 from nz_mcp.config import MAX_ROWS_CAP, get_active_profile
 from nz_mcp.i18n import resolve_locale, t
 from nz_mcp.tools.query import ColumnMeta, QuerySelectOutput, hint_from_execute_payload
@@ -303,5 +309,116 @@ def nz_get_table_ddl(
         ddl=payload["ddl"],
         reconstructed=bool(payload["reconstructed"]),
         notes=notes,
+        duration_ms=monotonic_duration_ms(start),
+    )
+
+
+class SummarizePartitionsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    database: str = Field(min_length=1, max_length=128)
+    table_schema: str = Field(
+        alias="schema",
+        min_length=1,
+        max_length=128,
+    )
+    table: str = Field(min_length=1, max_length=128)
+    partition_column: str = Field(
+        min_length=1,
+        max_length=128,
+        description=(
+            "Column that holds the period/partition key (e.g. FECCORTE, CODPERIODO). "
+            "Get the exact name with nz_describe_table."
+        ),
+    )
+    max_rows: int | None = Field(
+        default=None,
+        ge=1,
+        le=MAX_ROWS_CAP,
+        description=(
+            "Maximum number of partitions to return, newest first. Defaults to the "
+            "active profile's max_rows_default; always capped at MAX_ROWS_CAP."
+        ),
+    )
+
+
+class PartitionItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    value: str | None = Field(description="Partition value as text; null for a SQL NULL group.")
+    rows: int = Field(ge=0, description="Rows in this partition.")
+
+
+class SummarizePartitionsOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    partitions: list[PartitionItem]
+    partition_count: int = Field(ge=0, description="Total distinct partition values in the table.")
+    latest: str | None = Field(
+        default=None,
+        description="Newest partition value (DESC order), or null when the table has no rows.",
+    )
+    earliest: str | None = Field(
+        default=None,
+        description="Oldest partition value, or null when the table has no rows.",
+    )
+    truncated: bool = Field(
+        default=False,
+        description="True when the table holds more partitions than max_rows.",
+    )
+    hint: str | None = Field(
+        default=None,
+        description="Localized guidance on how to reach the partitions left out.",
+    )
+    duration_ms: int = Field(
+        ge=0, description="Wall time to run the aggregate query (milliseconds)."
+    )
+
+
+@tool(
+    name="nz_summarize_partitions",
+    description=(
+        "Summarize rows per value of a table's partition column; returns each "
+        "partition's count plus the latest and earliest value. Use to validate that a "
+        "daily load landed before delivering data. Not for comparing two partitions."
+    ),
+    mode="read",
+    input_model=SummarizePartitionsInput,
+    output_model=SummarizePartitionsOutput,
+    annotations={
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+def nz_summarize_partitions(
+    params: SummarizePartitionsInput,
+    *,
+    config_path: Path | None = None,
+) -> SummarizePartitionsOutput:
+    start = monotonic_start()
+    profile = get_active_profile(path=config_path)
+    requested = params.max_rows if params.max_rows is not None else profile.max_rows_default
+    max_rows = min(requested, MAX_ROWS_CAP)
+    raw = summarize_partitions(
+        profile,
+        database=params.database,
+        schema=params.table_schema,
+        table=params.table,
+        partition_column=params.partition_column,
+        timeout_s=profile.timeout_s_default,
+    )
+    total = int(raw["partition_count"])
+    truncated = total > max_rows
+    hint = (
+        t("HINT.PARTITION_SUMMARY_TRUNCATED", None, n=max_rows, total=total, cap=MAX_ROWS_CAP)
+        if truncated
+        else None
+    )
+    return SummarizePartitionsOutput(
+        partitions=[PartitionItem.model_validate(p) for p in raw["partitions"][:max_rows]],
+        partition_count=total,
+        latest=raw["latest"],
+        earliest=raw["earliest"],
+        truncated=truncated,
+        hint=hint,
         duration_ms=monotonic_duration_ms(start),
     )

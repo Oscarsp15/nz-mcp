@@ -28,7 +28,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (45 tools registradas)
+## Catálogo v0.1 (46 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -1408,6 +1408,46 @@ Compara el esquema de dos tablas o vistas: columnas solo en A, solo en B, discre
 
 ---
 
+#### 46. `nz_summarize_partitions`
+
+Resume las filas por valor de una columna de partición/periodo: una entrada por valor con su conteo, más la partición más reciente y la más antigua. Modo `read`. Responde a *"¿cargó bien el proceso de hoy?"* en un solo paso, sin escribir el `GROUP BY` a mano. Para comparar dos particiones concretas usar `nz_compare_rows` (#302); para el esquema de dos tablas, `nz_compare_tables`.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | BD de la tabla. Debe coincidir con la BD del perfil activo (misma regla que `nz_table_sample`: el `SELECT` corre en la BD de sesión). |
+| `schema` | string (required) | Esquema de la tabla. |
+| `table` | string (required) | Tabla. |
+| `partition_column` | string (required) | Columna de corte (`FECCORTE`, `CODPERIODO`, ...). Identificador validado. |
+| `max_rows` | int (optional, `1..1000`) | Tope de particiones devueltas (default: `max_rows_default` del perfil, cap `MAX_ROWS_CAP`). |
+
+**Output**:
+```json
+{
+  "partitions": [
+    {"value": "2026-07-06", "rows": 34},
+    {"value": "2026-06-30", "rows": 12318},
+    {"value": "2026-05-30", "rows": 12249},
+    {"value": "2026-04-30", "rows": 12865}
+  ],
+  "partition_count": 4,
+  "latest": "2026-07-06",
+  "earliest": "2026-04-30",
+  "truncated": false,
+  "hint": null,
+  "duration_ms": 860
+}
+```
+
+**Reglas**:
+- Una query agregada: `SELECT <col>, COUNT(*) FROM <schema>.<tabla> GROUP BY <col> ORDER BY <col> DESC`. Identificadores validados (`validate_catalog_identifier`) y SQL pasado por `sql_guard` antes de llegar al driver.
+- `latest` es la primera partición (orden `DESC`) y `earliest` la última; ambos `null` si la tabla no tiene filas. `partition_count` es el total exacto de valores distintos.
+- Valores `NULL` se devuelven como `value: null` (un grupo `NULL` es un dato válido del análisis de cargas).
+- **Tope duro**: si la columna tiene `MAX_ROWS_CAP` (1000) o más valores distintos → `INPUT_TOO_BROAD` con hint: no parece una columna de partición y no se devuelve un resumen parcial. Mismo principio que `nz_find_table_references` (#308): en análisis de cargas un parcial silencioso es peor que un fallo ruidoso.
+- `truncated` + `hint` cuando hay más particiones que `max_rows` (mismo patrón que `nz_list_procedures` / `nz_find_column`, ADR 0018).
+- Fuera de alcance: detectar cargas parciales o umbrales de anomalía; comparar particiones entre sí; crear o borrar particiones (solo lectura). Ver #338.
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -1416,7 +1456,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
 |---|---|---|---|
-| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_find_column`, `nz_compare_tables`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
+| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_summarize_partitions`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_find_column`, `nz_compare_tables`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
 | `nz_insert` | false | false | false |
 | `nz_insert_select` | false | false | false |
 | `nz_update`, `nz_delete` | false | true | false |

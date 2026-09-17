@@ -341,6 +341,14 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Lista truncada en {n} de {total} vistas. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
         "en": "List truncated at {n} of {total} views. Narrow it with 'pattern' or raise 'max_rows' (max {cap}).",
     },
+    "HINT.PARTITION_SUMMARY_TRUNCATED": {
+        "es": "Resumen truncado en {n} de {total} particiones. Sube 'max_rows' (máx {cap}) para ver el resto.",
+        "en": "Summary truncated at {n} of {total} partitions. Raise 'max_rows' (max {cap}) to see the rest.",
+    },
+    "HINT.PARTITION_COLUMN_TOO_MANY_VALUES": {
+        "es": "La columna '{column}' tiene {cap} o más valores distintos, así que no parece una columna de partición/periodo. Comprueba el nombre exacto con nz_describe_table.",
+        "en": "Column '{column}' has {cap} or more distinct values, so it does not look like a partition/period column. Check the exact name with nz_describe_table.",
+    },
     "HINT.SCHEMA_LIST_TRUNCATED": {
         "es": "Lista truncada en {n} de {total} esquemas. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
         "en": "List truncated at {n} of {total} schemas. Narrow it with 'pattern' or raise 'max_rows' (max {cap}).",
