@@ -198,7 +198,7 @@ def test_tool_handler_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
     out = nz_maintenance(
         MaintenanceInput(
             database="DEV",
-            schema="PUBLIC",
+            table_schema="PUBLIC",
             table="T",
             action="groom",
         ),
