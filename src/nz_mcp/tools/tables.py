@@ -8,7 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from nz_mcp.catalog.tables import get_table_ddl, get_table_sample, get_table_stats, list_tables
-from nz_mcp.config import get_active_profile
+from nz_mcp.config import MAX_ROWS_CAP, get_active_profile
 from nz_mcp.i18n import resolve_locale, t
 from nz_mcp.tools.query import ColumnMeta, QuerySelectOutput, hint_from_execute_payload
 from nz_mcp.tools.registry import tool
@@ -34,6 +34,15 @@ class ListTablesInput(BaseModel):
             "not included in any case — use nz_list_views."
         ),
     )
+    max_rows: int | None = Field(
+        default=None,
+        ge=1,
+        le=MAX_ROWS_CAP,
+        description=(
+            "Maximum number of tables to return. Defaults to the active profile's "
+            "max_rows_default; always capped at MAX_ROWS_CAP."
+        ),
+    )
 
 
 class TableItem(BaseModel):
@@ -45,6 +54,14 @@ class TableItem(BaseModel):
 class ListTablesOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     tables: list[TableItem]
+    truncated: bool = Field(
+        default=False,
+        description="True when the schema holds more tables than max_rows.",
+    )
+    hint: str | None = Field(
+        default=None,
+        description="Localized guidance on how to reach the tables left out.",
+    )
     duration_ms: int = Field(ge=0, description="Wall time to run the catalog query (milliseconds).")
 
 
@@ -124,7 +141,9 @@ class GetTableDdlOutput(BaseModel):
     description=(
         "List Netezza tables in a schema (base tables and/or external tables, not views). "
         "object_type filters by catalog OBJTYPE: TABLE (default), EXTERNAL TABLE, or ALL. "
-        "Use before describing columns or sampling. "
+        "Use before describing columns or sampling. The result is capped by max_rows "
+        "(profile default); when truncated, narrow the search with pattern instead of "
+        "raising max_rows blindly. "
         "Do not use for views (nz_list_views) or procedures (nz_list_procedures)."
     ),
     mode="read",
@@ -139,6 +158,8 @@ def nz_list_tables(
 ) -> ListTablesOutput:
     start = monotonic_start()
     profile = get_active_profile(path=config_path)
+    requested = params.max_rows if params.max_rows is not None else profile.max_rows_default
+    max_rows = min(requested, MAX_ROWS_CAP)
     rows = list_tables(
         profile,
         database=params.database,
@@ -146,8 +167,17 @@ def nz_list_tables(
         pattern=params.pattern,
         object_type=params.object_type,
     )
+    total = len(rows)
+    truncated = total > max_rows
+    hint = (
+        t("HINT.TABLE_LIST_TRUNCATED", None, n=max_rows, total=total, cap=MAX_ROWS_CAP)
+        if truncated
+        else None
+    )
     return ListTablesOutput(
-        tables=[TableItem.model_validate(row) for row in rows],
+        tables=[TableItem.model_validate(row) for row in rows[:max_rows]],
+        truncated=truncated,
+        hint=hint,
         duration_ms=monotonic_duration_ms(start),
     )
 
