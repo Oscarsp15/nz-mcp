@@ -20,6 +20,7 @@ from nz_mcp.tools import (
     find_column,  # noqa: F401  (registers nz_find_column)
     find_duplicates,  # noqa: F401  (registers nz_find_duplicates)
     list_constraints,  # noqa: F401  (registers nz_list_constraints)
+    maintenance,  # noqa: F401  (registers nz_maintenance)
     procedures,  # noqa: F401  (registers procedure tools)
     profiling,  # noqa: F401  (registers nz_profile_column)
     query,  # noqa: F401  (registers nz_query_select, nz_explain)

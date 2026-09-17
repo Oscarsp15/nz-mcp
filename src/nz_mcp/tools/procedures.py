@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from nz_mcp.catalog.execute import RESPONSE_BYTES_CAP
 from nz_mcp.catalog.nzplsql_parser import StatementKind, strip_comments
 from nz_mcp.catalog.procedures import (
+    FIND_TABLE_REFERENCES_SCAN_CAP,
     PROCEDURE_SECTION_MAX_LINES,
     describe_procedure,
     find_table_references,
@@ -21,7 +22,7 @@ from nz_mcp.catalog.procedures import (
     list_procedures,
     truncate_procedure_ddl,
 )
-from nz_mcp.config import MAX_ROWS_CAP, get_active_profile
+from nz_mcp.config import MAX_ROWS_CAP, TIMEOUT_S_CAP, get_active_profile
 from nz_mcp.errors import ResponseTooLargeError
 from nz_mcp.i18n import t
 from nz_mcp.tools.registry import tool
@@ -743,6 +744,29 @@ class GetFindTableReferencesInput(BaseModel):
         max_length=128,
         description="Optional LIKE filter on procedure names to narrow the scan universe.",
     )
+    timeout_s: int | None = Field(
+        default=None,
+        ge=1,
+        le=TIMEOUT_S_CAP,
+        description=(
+            "Opt-in wall-clock budget in seconds for the batch fetch and the scan. "
+            "When omitted the active profile's socket timeout applies and the scan is "
+            "not deadline-bound. When set, a scan that runs past it returns what it has "
+            "with timed_out=true. Raise it (max TIMEOUT_S_CAP) for a wide schema that "
+            "needs longer."
+        ),
+    )
+    max_procedures: int | None = Field(
+        default=None,
+        ge=1,
+        le=FIND_TABLE_REFERENCES_SCAN_CAP,
+        description=(
+            "Maximum number of procedures to scan. Defaults to the hard cap "
+            f"({FIND_TABLE_REFERENCES_SCAN_CAP}). Checked with a cheap pre-count, so "
+            "exceeding it fails fast with INPUT_TOO_BROAD instead of paying for the "
+            "whole fetch and returning a silently partial scan."
+        ),
+    )
 
 
 class TableReferenceItem(BaseModel):
@@ -761,6 +785,16 @@ class GetFindTableReferencesOutput(BaseModel):
     scanned_count: int = Field(ge=0)
     match_count: int = Field(ge=0)
     truncated: bool
+    timed_out: bool = Field(
+        default=False,
+        description="True when timeout_s was reached mid-scan; results may be incomplete.",
+    )
+    hint: str | None = Field(
+        default=None,
+        description=(
+            "Localized guidance when the scan universe is large or the deadline cut it short."
+        ),
+    )
     duration_ms: int = Field(ge=0, description="Wall time to scan procedures (milliseconds).")
 
 
@@ -769,8 +803,9 @@ class GetFindTableReferencesOutput(BaseModel):
     description=(
         "Find which stored procedures in a schema read or write a given table. "
         "Returns each procedure with read/write occurrence counts. Use for impact "
-        "analysis before changing a table. Do not use for views, dynamic SQL, or "
-        "column-level analysis."
+        "analysis before changing a table. Wide schemas can take tens of seconds: "
+        "narrow the universe with pattern, or bound it with max_procedures/timeout_s. "
+        "Do not use for views, dynamic SQL, or column-level analysis."
     ),
     mode="read",
     input_model=GetFindTableReferencesInput,
@@ -792,11 +827,17 @@ def nz_find_table_references(
         table_database=params.table_database,
         table_schema=params.table_schema,
         pattern=params.pattern,
+        timeout_s=params.timeout_s,
+        max_procedures=params.max_procedures,
     )
+    hint_key = raw.get("hint_key")
+    hint = t(str(hint_key), None, **raw["hint_fmt"]) if hint_key else None
     return GetFindTableReferencesOutput(
         references=[TableReferenceItem(**r) for r in raw["references"]],
         scanned_count=int(raw["scanned_count"]),
         match_count=int(raw["match_count"]),
         truncated=bool(raw["truncated"]),
+        timed_out=bool(raw["timed_out"]),
+        hint=hint,
         duration_ms=monotonic_duration_ms(start),
     )

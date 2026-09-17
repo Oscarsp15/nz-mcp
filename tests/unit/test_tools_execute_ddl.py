@@ -583,6 +583,66 @@ def test_validate_compile_arg_mismatch_is_inconclusive(monkeypatch: pytest.Monke
     assert out["compile_error"] is None
 
 
+# Real Netezza text captured live on NPS 11.2.1.11-IF1 (issue #319).
+_REAL_ARG_MISMATCH_ERROR = (
+    "ERROR:  Function 'DWIGHT_319_MM()' does not exist\n"
+    "\tUnable to identify a function that satisfies the given argument types\n"
+    "\tYou may need to add explicit typecasts\n\x00"
+)
+
+
+def test_arg_mismatch_pattern_matches_real_netezza_text() -> None:
+    from nz_mcp.catalog.execute_ddl import _ARG_MISMATCH_PATTERN
+
+    assert _ARG_MISMATCH_PATTERN.search(_REAL_ARG_MISMATCH_ERROR)
+
+
+def test_validate_compile_real_arg_mismatch_is_inconclusive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The REAL Netezza overload-not-found text must be inconclusive, not compiled=True."""
+    call_count = 0
+
+    class _RealArgMismatchCursor:
+        def execute(self, sql: str, params: object = None) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return  # CREATE succeeds
+            raise RuntimeError(_REAL_ARG_MISMATCH_ERROR)
+
+        def close(self) -> None:
+            pass
+
+    class _RealArgMismatchConn:
+        def __init__(self) -> None:
+            self._c = _RealArgMismatchCursor()
+
+        def cursor(self) -> _RealArgMismatchCursor:
+            return self._c
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        "nz_mcp.catalog.execute_ddl.open_connection",
+        lambda _p, _w: _RealArgMismatchConn(),
+    )
+    monkeypatch.setattr("nz_mcp.catalog.execute_ddl.get_password", lambda _n: "pw")
+    out = execute_ddl(
+        _profile(),
+        sql=_PROC,
+        input_path=None,
+        statement_type="procedure",
+        dry_run=False,
+        confirm=True,
+        validate_compile=True,
+    )
+    assert out["executed"] is True
+    assert out["compiled"] is None
+    assert out["compile_error"] is None
+
+
 def test_validate_compile_runtime_error_means_body_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     """Non-compile, non-mismatch error (body ran with NULL and errored) → compiled=True."""
     call_count = 0

@@ -102,6 +102,10 @@ una acción no se identifica positivamente como aditiva, se rechaza. Ver issue #
 
 ``sqlglot`` no parsea ``CALL`` (cae a un ``Command`` genérico y emite warning a stderr). El guard lo intercepta con un patrón dedicado que **solo acepta placeholders ``?`` como argumentos**: ``CALL esquema.proc(?, …)``. Un argumento literal (``CALL P(1)``) **no** matchea y se rechaza como ``UNKNOWN_STATEMENT``, forzando la parametrización vía bind params del driver. Es una operación **EXECUTE** (el SP ejecuta código arbitrario) y se gatea a ``admin``, mismo tier que la DDL. Ver [`../adr/0015-sql-guard-call-statement.md`](../adr/0015-sql-guard-call-statement.md).
 
+#### DDL de mantenimiento (``GENERATE STATISTICS`` / ``GROOM`` / ``VACUUM``)
+
+``sqlglot`` tampoco modela el mantenimiento de tablas de Netezza (cae a ``Command``), así que el guard lo reconoce con un patrón dedicado de **allowlist cerrada** (default-deny): acepta exactamente ``GENERATE STATISTICS ON esquema.tabla``, ``GROOM TABLE esquema.tabla`` y ``VACUUM esquema.tabla``, con ambos identificadores validados por las reglas de catálogo, sin apilado y sin comentarios que escondan una segunda sentencia. Cualquier otra forma (``VACUUM TABLE``/``VACUUM FULL``, ``GENERATE STATISTICS`` sin ``ON``, listas de columnas, identificadores entrecomillados, ``;`` extra) cae a ``UNKNOWN_STATEMENT``. Son operaciones que reescriben almacenamiento/estadísticas → tier ``admin``, mismo que la DDL. La sintaxis ``VACUUM esquema.tabla`` (sin ``TABLE`` ni ``FULL``) está verificada en vivo contra NPS 11.2.1.11-IF1; ``VACUUM`` exige privilegios elevados en el servidor y puede devolver ``permission denied`` con una cuenta de servicio (grant del usuario, no una relajación del guard). Ver issue #307.
+
 ### Reglas por modo
 
 | Statement kind | `read` | `write` | `admin` |
@@ -120,6 +124,7 @@ una acción no se identifica positivamente como aditiva, se rechaza. Ver issue #
 | `ALTER TABLE` aditivo (ADD COLUMN / SET DEFAULT / DROP DEFAULT / RENAME COLUMN) | ❌ | ❌ | ✅ |
 | `ALTER TABLE` no aditivo (DROP COLUMN, RENAME TO, cambio de tipo, ADD CONSTRAINT, …) y `ALTER VIEW` | ❌ | ❌ | ❌ |
 | `CALL schema.proc(?, …)` (EXECUTE; solo placeholders) | ❌ | ❌ | ✅ |
+| Mantenimiento: `GENERATE STATISTICS ON schema.table`, `GROOM TABLE schema.table`, `VACUUM schema.table` (solo formas exactas) | ❌ | ❌ | ✅ |
 | `DROP DATABASE`, `DROP USER`, `GRANT`, `REVOKE` | ❌ | ❌ | ❌ |
 | Stacked (`; ...;`) | ❌ | ❌ | ❌ |
 | Comentarios `--` o `/* */` con statements dentro | sanear antes de parsear | | |

@@ -112,7 +112,9 @@ def get_view_ddl(
     before the SELECT. Each call opens a fresh nzpy connection (no pool), so
     the catalog change does not leak into subsequent queries.
     """
-    params: tuple[str, str] = (schema, view)
+    schema_ident = validate_catalog_identifier(schema)
+    view_ident = validate_catalog_identifier(view)
+    params: tuple[str, str] = (schema_ident, view_ident)
     password = get_password(profile.name)
     base_sql = resolve_query("get_view_ddl", profile)
     sql = render_cross_db(base_sql, database=database)
@@ -147,7 +149,7 @@ def get_view_ddl(
             detail="No view definition returned for the given schema and view name.",
         )
     definition = _row_to_definition(row)
-    return f"CREATE OR REPLACE VIEW {schema.upper()}.{view.upper()} AS\n{definition}"
+    return f"CREATE OR REPLACE VIEW {schema_ident}.{view_ident} AS\n{definition}"
 
 
 def _row_to_view_list_item(row: Any) -> dict[str, str]:
