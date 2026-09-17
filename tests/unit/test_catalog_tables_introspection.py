@@ -18,7 +18,7 @@ from nz_mcp.catalog.tables import (
     skew_class,
 )
 from nz_mcp.config import Profile
-from nz_mcp.errors import InvalidInputError, NetezzaError, ObjectNotFoundError
+from nz_mcp.errors import GuardRejectedError, InvalidInputError, NetezzaError, ObjectNotFoundError
 
 
 def _profile_dev() -> Profile:
@@ -79,6 +79,73 @@ def test_get_table_sample_runs_guarded_select(monkeypatch: pytest.MonkeyPatch) -
     assert out["row_count"] == 1
     assert "PUBLIC.T" in str(captured["sql"]).upper()
     assert captured["max_rows"] == 3
+
+
+def test_get_table_sample_composes_where_and_order_by(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _exec(
+        _profile: object,
+        sql: str,
+        *,
+        max_rows: int,
+        timeout_s: int,
+    ) -> dict[str, object]:
+        captured["sql"] = sql
+        return {
+            "columns": [],
+            "rows": [],
+            "row_count": 0,
+            "truncated": False,
+            "duration_ms": 1,
+            "hint_key": None,
+            "hint_fmt": {},
+        }
+
+    monkeypatch.setattr(tables_mod, "execute_select", _exec)
+
+    get_table_sample(
+        _profile_dev(),
+        database="DEV",
+        schema="PUBLIC",
+        table="T",
+        rows=5,
+        timeout_s=30,
+        where="ID > 10",
+        order_by="ID DESC",
+    )
+    sql = str(captured["sql"]).upper()
+    assert "WHERE ID > 10" in sql
+    assert "ORDER BY ID DESC" in sql
+    assert "LIMIT 5" in sql
+
+
+def test_get_table_sample_rejects_stacked_where_fragment() -> None:
+    with pytest.raises(GuardRejectedError) as exc:
+        get_table_sample(
+            _profile_dev(),
+            database="DEV",
+            schema="PUBLIC",
+            table="T",
+            rows=5,
+            timeout_s=30,
+            where="1=1; DROP TABLE PUBLIC.T",
+        )
+    assert exc.value.code == "STACKED_NOT_ALLOWED"
+
+
+def test_get_table_sample_rejects_stacked_order_by_fragment() -> None:
+    with pytest.raises(GuardRejectedError) as exc:
+        get_table_sample(
+            _profile_dev(),
+            database="DEV",
+            schema="PUBLIC",
+            table="T",
+            rows=5,
+            timeout_s=30,
+            order_by="ID; DELETE FROM PUBLIC.T",
+        )
+    assert exc.value.code == "STACKED_NOT_ALLOWED"
 
 
 def test_parse_table_stats_tuple() -> None:

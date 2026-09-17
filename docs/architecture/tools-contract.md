@@ -28,7 +28,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (45 tools registradas)
+## Catálogo v0.1 (46 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -194,8 +194,15 @@ Devuelve una muestra pequeña (10 filas) para entender el shape. El `database` d
 | `schema` | string (required) | |
 | `table` | string (required) | |
 | `rows` | int (default 10, cap 50) | |
+| `where` | string (optional, max 2048) | Predicado SQL crudo para una muestra dirigida (p. ej. `FECDESEMBOLSO >= '2026-01-01'`). |
+| `order_by` | string (optional, max 2048) | Fragmento `ORDER BY` crudo para una muestra reproducible (p. ej. `FECDESEMBOLSO DESC, ID`). |
 
 **Output**: mismo formato que `nz_query_select` (incl. `columns`, `rows`, `row_count`, `truncated`, `duration_ms`, `hint`).
+
+**Reglas**:
+- `where` y `order_by` son **fragmentos SQL crudos**, no identificadores. La sentencia compuesta (`SELECT * FROM schema.table [WHERE …] [ORDER BY …]`) se valida entera con `sql_guard.validate(mode="read")`: se rechazan sentencias apiladas (`STACKED_NOT_ALLOWED`), tipos que no sean `SELECT` y CTEs con mutación. Un fragmento inválido o no read-only → `GUARD_REJECTED`.
+- El `LIMIT` se inyecta/acota al final con el cap `rows` (si el fragmento ya trae `LIMIT`, se reescribe a `rows` si es mayor).
+- El guard de misma-BD y el cap `rows` siguen intactos.
 
 ---
 
@@ -1351,9 +1358,60 @@ Recorre dependencias de objeto (vistas/tablas) en modo `read`, en una dirección
 
 ---
 
-#### 45. `nz_table_stats_batch`
+#### 45. `nz_compare_tables`
+
+Compara el esquema de dos tablas o vistas: columnas solo en A, solo en B, discrepancias de tipo/nullability y discrepancias de posición ordinal. Modo `read`. Útil antes de migraciones, conciliaciones de datos o validación entre capas (ej. staging vs final).
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | BD de la tabla A (y default para tabla B si `database_b` no se especifica). |
+| `schema_a` | string (required) | Esquema de la tabla A. |
+| `table_a` | string (required) | Nombre de la tabla/vista A. |
+| `database_b` | string (optional) | BD de la tabla B (default: `database`). |
+| `schema_b` | string (optional) | Esquema de la tabla B (default: `schema_a`). |
+| `table_b` | string (required) | Nombre de la tabla/vista B. |
+
+**Output**:
+```json
+{
+  "identical": false,
+  "columns_in_a": 33,
+  "columns_in_b": 19,
+  "columns_in_common": 4,
+  "only_in_a": [
+    {"column": "FECCORTE", "type": "CHARACTER VARYING(10)", "nullable": true, "position": 1}
+  ],
+  "only_in_b": [
+    {"column": "FECHACORTE", "type": "CHARACTER VARYING(10)", "nullable": true, "position": 1}
+  ],
+  "type_mismatches": [
+    {
+      "column": "NUMDOCUMENTO",
+      "type_a": "CHARACTER VARYING(12)",
+      "type_b": "CHARACTER VARYING(4000)",
+      "nullable_a": true,
+      "nullable_b": false
+    }
+  ],
+  "position_mismatches": [
+    {"column": "CODCREDITO", "position_a": 1, "position_b": 4}
+  ],
+  "duration_ms": 74
+}
+```
+
+**Reglas**:
+- `identical` es `true` cuando ambos esquemas coinciden exactamente en columnas, tipos, nullability y posiciones.
+- La comparación de nombres de columna es case-insensitive (mayúsculas de catálogo).
+- Si `table_a` o `table_b` no existe, falla con `ObjectNotFoundError` (`code: OBJECT_NOT_FOUND`).
+- No compara datos entre tablas (fuera de alcance de esta tool).
+
+---
+
+#### 46. `nz_table_stats_batch`
 
 Estadísticas de almacenamiento de **todas** las tablas de un esquema en una sola llamada, ordenadas por tamaño o por filas, desde `_V_TABLE` + `_V_TABLE_STORAGE_STAT` (las mismas vistas que `nz_table_stats`). Pensada para capacity planning: evita N llamadas de `nz_table_stats` cuando el esquema tiene cientos de objetos.
+
 | Input | Tipo | Descripción |
 |---|---|---|
 | `database` | string (required) | |
@@ -1404,7 +1462,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
 |---|---|---|---|
-| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_table_stats_batch`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
+| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_table_stats_batch`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_find_column`, `nz_compare_tables`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
 | `nz_insert` | false | false | false |
 | `nz_insert_select` | false | false | false |
 | `nz_update`, `nz_delete` | false | true | false |
