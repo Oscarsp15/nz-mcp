@@ -40,6 +40,10 @@ _FK_SCHEMA_MIN: Final[int] = 5
 _FK_REL_MIN: Final[int] = 6
 _FK_ATT_MIN: Final[int] = 7
 _STATS_ROW_MIN: Final[int] = 5
+_STATS_BATCH_ROW_MIN: Final[int] = 6
+
+# Default top-N for nz_table_stats_batch; the tool caps it at MAX_ROWS_CAP.
+TABLE_STATS_BATCH_TOP_N_DEFAULT: Final[int] = 20
 
 # Rule-of-thumb skew bands (Netezza): document-only, not policy thresholds.
 _SKEW_BALANCED_LT: Final[float] = 0.1
@@ -622,6 +626,22 @@ def _parse_table_stats_row(row: Any) -> dict[str, Any]:
             detail="Unexpected row shape from table_stats catalog query.",
         )
 
+    # NPS 11.x _V_STATISTIC has no LASTUPDATETIMESTAMP; do not surface a fake timestamp.
+    return {**_normalize_stats_metrics(rc, used, alloc, skew, created), "stats_last_analyzed": None}
+
+
+def _normalize_stats_metrics(
+    rc: Any,
+    used: Any,
+    alloc: Any,
+    skew: Any,
+    created: Any,
+) -> dict[str, Any]:
+    """Normalize the scalar metrics shared by single-table and batch stats rows.
+
+    ``stats_last_analyzed`` is deliberately not included: NPS 11.x has no stable
+    timestamp in ``_V_STATISTIC``, so only the single-table tool surfaces that key.
+    """
     skew_out: float | None = None if skew is None else float(skew)
 
     created_out: str | None
@@ -631,16 +651,92 @@ def _parse_table_stats_row(row: Any) -> dict[str, Any]:
         iso = getattr(created, "isoformat", None)
         created_out = iso() if callable(iso) else str(created)
 
-    # NPS 11.x _V_STATISTIC has no LASTUPDATETIMESTAMP; do not surface a fake timestamp.
-    out: dict[str, Any] = {
+    return {
         "row_count": 0 if rc is None else int(rc),
         "size_bytes_used": 0 if used is None else int(used),
         "size_bytes_allocated": 0 if alloc is None else int(alloc),
         "skew": skew_out,
         "table_created": created_out,
-        "stats_last_analyzed": None,
     }
-    return out
+
+
+def get_table_stats_batch(
+    profile: Profile,
+    database: str,
+    schema: str,
+    order_by: Literal["size", "rows"],
+) -> list[dict[str, Any]]:
+    """Return storage metrics for every table in ``schema``, ranked by size or rows.
+
+    The SQL only filters by schema and orders by name; ranking and the top-N cut happen
+    in the caller, so ``top_n`` never becomes dynamic SQL. A schema with no visible
+    tables yields an empty list, matching the other ``nz_list_*`` tools.
+    """
+    schema_ident = validate_catalog_identifier(schema)
+    password = get_password(profile.name)
+    sql = render_cross_db(resolve_query("table_stats_batch", profile), database=database)
+
+    connection = cast(_DescribeConnectionLike, open_connection(profile, password))
+    try:
+        with closing(connection.cursor()) as cursor:
+            cursor.execute(sql, (schema_ident,))
+            fetched = cursor.fetchall()
+    except Exception as exc:  # noqa: BLE001, RUF100
+        raise NetezzaError(
+            operation="get_table_stats_batch",
+            database=database,
+            detail=sanitize(str(exc), known_secrets={password}),
+        ) from exc
+    finally:
+        connection.close()
+
+    rows = [_parse_table_stats_batch_row(row) for row in fetched]
+    for row in rows:
+        used = int(row["size_bytes_used"])
+        allocated = int(row["size_bytes_allocated"])
+        row["size_used_human"] = format_bytes_iec(used)
+        row["size_allocated_human"] = format_bytes_iec(allocated)
+        row["skew_class"] = skew_class(row["skew"])
+
+    sort_key = "size_bytes_used" if order_by == "size" else "row_count"
+    rows.sort(key=lambda r: (-int(r[sort_key]), str(r["name"]).upper()))
+    return rows
+
+
+def _parse_table_stats_batch_row(row: Any) -> dict[str, Any]:
+    """Normalize driver row shapes for the ``table_stats_batch`` query aliases."""
+    if isinstance(row, dict):
+        keys = {str(k).upper(): v for k, v in row.items()}
+        name = keys.get("TABLE_NAME")
+        rc = keys.get("ROW_COUNT")
+        used = keys.get("SIZE_BYTES_USED")
+        alloc = keys.get("SIZE_BYTES_ALLOCATED")
+        skew = keys.get("SKEW")
+        created = keys.get("TABLE_CREATED")
+        if name is None:
+            raise NetezzaError(
+                operation="get_table_stats_batch",
+                detail="Column row must include TABLE_NAME.",
+            )
+    elif is_sequence_row(row, _STATS_BATCH_ROW_MIN):
+        name, rc, used, alloc, skew, created = (
+            row[0],
+            row[1],
+            row[2],
+            row[3],
+            row[4],
+            row[5],
+        )
+    else:
+        raise NetezzaError(
+            operation="get_table_stats_batch",
+            detail="Unexpected row shape from table_stats_batch catalog query.",
+        )
+
+    return {
+        "name": str(name),
+        **_normalize_stats_metrics(rc, used, alloc, skew, created),
+    }
 
 
 def get_table_ddl(

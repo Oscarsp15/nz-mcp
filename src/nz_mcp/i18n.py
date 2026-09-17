@@ -401,6 +401,10 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Mostrando los {shown} valores más frecuentes de {distinct} distintos. Sube 'top_n' (máx {cap}) para ver más.",
         "en": "Showing the top {shown} of {distinct} distinct values. Raise 'top_n' (max {cap}) to see more.",
     },
+    "HINT.TABLE_STATS_BATCH_TRUNCATED": {
+        "es": "Mostrando las {n} tablas mayores de {total} en el esquema. Sube 'top_n' (máx {cap}) para incluir más.",
+        "en": "Showing the {n} largest of {total} tables in the schema. Raise 'top_n' (max {cap}) to include more.",
+    },
     "NOTE.DDL_RECONSTRUCTED": {
         "es": "DDL reconstruido desde catálogo (SHOW TABLE no disponible en este servidor).",
         "en": "DDL reconstructed from catalogs (SHOW TABLE not available on this server).",

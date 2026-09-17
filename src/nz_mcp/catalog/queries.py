@@ -199,6 +199,25 @@ TABLE_STATS: Final[CatalogQuery] = CatalogQuery(
     cross_database=True,
 )
 
+TABLE_STATS_BATCH: Final[CatalogQuery] = CatalogQuery(
+    id="table_stats_batch",
+    sql=(
+        "SELECT t.TABLENAME AS TABLE_NAME, t.RELTUPLES AS ROW_COUNT, "
+        "ts.USED_BYTES AS SIZE_BYTES_USED, ts.ALLOCATED_BYTES AS SIZE_BYTES_ALLOCATED, "
+        "ts.SKEW, t.CREATEDATE AS TABLE_CREATED "
+        "FROM <BD>.._V_TABLE t "
+        "JOIN <BD>.._V_TABLE_STORAGE_STAT ts ON t.OBJID = ts.OBJID "
+        "WHERE t.SCHEMA = UPPER(?) ORDER BY t.TABLENAME"
+    ),
+    catalog_views=("_V_TABLE", "_V_TABLE_STORAGE_STAT"),
+    description=(
+        "Returns row estimate and storage metrics for every table in a schema, ordered "
+        "by name; the caller ranks by size or rows and applies its own top-N cut."
+    ),
+    tested_versions=(NPS_112_IF1,),
+    cross_database=True,
+)
+
 LIST_PROCEDURES: Final[CatalogQuery] = CatalogQuery(
     id="list_procedures",
     sql=(
@@ -301,6 +320,7 @@ ALL_QUERIES: Final[tuple[CatalogQuery, ...]] = (
     DESCRIBE_TABLE_PK,
     DESCRIBE_TABLE_FK,
     TABLE_STATS,
+    TABLE_STATS_BATCH,
     LIST_PROCEDURES,
     GET_PROCEDURE_DDL,
     GET_PROCEDURE_SECTION,
