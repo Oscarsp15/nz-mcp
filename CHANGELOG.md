@@ -8,6 +8,10 @@ Cada entrada se documenta en **español** y **english**.
 
 ## [Unreleased]
 
+### Fixed
+- ES: **`nz-mcp version` ya no puede desincronizarse del paquete instalado** — `__version__` se resuelve ahora de `importlib.metadata` (la constante queda solo como fallback para correr desde el código fuente), así que `nz-mcp version`, `doctor` y el handshake MCP reportan siempre la versión del paquete realmente instalado, no una constante que hay que acordarse de subir en cada release. Un test verifica que el fallback coincida con `pyproject.toml` para que la omisión no pueda repetirse (la sufrieron 0.1.0a4 y 0.1.0a5). Refs #352.
+- EN: **`nz-mcp version` can no longer drift from the installed package** — `__version__` is now resolved from `importlib.metadata` (the constant remains only as a fallback for running from source), so `nz-mcp version`, `doctor` and the MCP handshake always report the version of the package actually installed, not a constant someone has to remember to bump on every release. A test asserts the fallback matches `pyproject.toml` so the omission cannot happen again (0.1.0a4 and 0.1.0a5 shipped it). Refs #352.
+
 ## [0.1.0a5] - 2026-09-17
 
 ### Added

@@ -15,7 +15,7 @@ import keyring
 from keyring.backends.fail import Keyring as FailKeyring
 from pydantic import BaseModel, ConfigDict
 
-from nz_mcp import __version__
+from nz_mcp import current_version
 from nz_mcp.cli_output import TerminalLevel, terminal_level
 from nz_mcp.config import (
     config_dir,
@@ -123,7 +123,7 @@ def collect_diagnostic(
     kr_name, kr_ok = _probe_keyring()
 
     return DiagnosticReport(
-        nz_mcp_version=__version__,
+        nz_mcp_version=current_version(),
         python_version=py_ver,
         platform=plat,
         config_dir=str(cfg),
