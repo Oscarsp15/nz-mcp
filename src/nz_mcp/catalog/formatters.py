@@ -15,9 +15,10 @@ def format_timestamp_iso(value: Any) -> str | None:
     Handles four driver representations:
     - ``None`` → ``None``
     - A ``datetime`` (or any object with ``.isoformat()``) → ``isoformat()``
-    - An integer or numeric string (Unix epoch in seconds) → UTC ISO-8601
-    - A naive ``'YYYY-MM-DD HH:MM:SS'`` string (nzpy TIMESTAMP columns) → UTC ISO-8601
-      (Netezza SaaS server runs in UTC; verified 2026-09-17)
+    - An integer (nzpy JOIN epoch, already offset by client TZ) → UTC ISO-8601
+      via ``fromtimestamp(epoch).replace(UTC)`` to cancel the client offset
+    - A naive ``'YYYY-MM-DD HH:MM:SS'`` string (nzpy TIMESTAMP columns or ABSTIME
+      in simple SELECT) → UTC ISO-8601; Netezza SaaS runs in UTC (verified 2026-09-17)
     """
     if value is None:
         return None
@@ -26,7 +27,11 @@ def format_timestamp_iso(value: Any) -> str | None:
         return str(iso())
     try:
         epoch = int(value)
-        return datetime.fromtimestamp(epoch, tz=UTC).isoformat()
+        # nzpy delivers _V_TABLE.CREATEDATE as a TZ-offset-adjusted integer in JOIN
+        # queries (epoch = true_epoch - local_utc_offset). Using fromtimestamp()
+        # without an explicit tz interprets it as local time, which numerically
+        # equals the server's UTC wall clock. replace(tzinfo=UTC) then stamps it.
+        return datetime.fromtimestamp(epoch).replace(tzinfo=UTC).isoformat()
     except (TypeError, ValueError):
         pass
     try:
