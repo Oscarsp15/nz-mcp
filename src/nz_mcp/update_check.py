@@ -30,8 +30,8 @@ from urllib.request import urlopen
 
 from packaging.version import InvalidVersion, Version
 
-from nz_mcp import __version__
 from nz_mcp import cli_output as out
+from nz_mcp import current_version
 from nz_mcp.config import config_dir
 from nz_mcp.i18n import Locale, resolve_locale, t
 
@@ -58,16 +58,6 @@ _FALSE_SPELLINGS: Final[frozenset[str]] = frozenset({"", "0", "false", "no"})
 def _disabled() -> bool:
     value = os.environ.get(NO_UPDATE_CHECK_ENV, "").strip().lower()
     return value not in _FALSE_SPELLINGS
-
-
-def installed_version() -> str:
-    """Version of the running distribution, or the packaged constant when not installed.
-
-    ``__version__`` is resolved once from ``importlib.metadata`` (see
-    :func:`nz_mcp.current_version`), so it is what ``uv tool`` / ``pip`` actually installed;
-    the packaged constant only applies when running from a source checkout.
-    """
-    return __version__
 
 
 def _parse_latest(payload: object) -> str | None:
@@ -256,7 +246,7 @@ def run_update_check(*, locale: Locale | None = None) -> None:
     if _disabled():
         return
     try:
-        notice = update_notice(installed_version(), latest_version(), resolve_locale(locale))
+        notice = update_notice(current_version(), latest_version(), resolve_locale(locale))
     except (OSError, ValueError, KeyError, TypeError):
         return
     if notice is not None:
@@ -282,7 +272,6 @@ __all__: Final[tuple[str, ...]] = (
     "NO_UPDATE_CHECK_ENV",
     "Installer",
     "detect_installer",
-    "installed_version",
     "latest_version",
     "run_update_check",
     "start_update_check",
