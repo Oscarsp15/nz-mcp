@@ -155,10 +155,12 @@ Lista **tablas** (base y/o externas; no vistas, no procedimientos). Para vistas 
 | Input | Tipo | Descripción |
 |---|---|---|
 | `database` | string (required) | |
-| `schema` | string (required) | |
-| `table` | string (required) | |
+| `schema` | string (required) | Se **ignora** cuando `table` es una vista de catálogo `_V_*`. |
+| `table` | string (required) | Tabla, tabla externa, vista, o vista de catálogo `_V_*` (p. ej. `_V_RELATION_COLUMN`). |
 
 Funciona con tablas, tablas externas y vistas: `kind` refleja el tipo real (issue #295). `distribution` solo aparece cuando `kind` es `TABLE` o `EXTERNAL TABLE`; se omite (no aparece la clave) para vistas, porque Netezza no distribuye vistas.
+
+Las **vistas de catálogo** (`_V_*`, p. ej. `_V_RELATION_COLUMN`, `_V_SESSION`) se resuelven en `DEFINITION_SCHEMA`; el `schema` del input se ignora para esos nombres (issue #315). Así un DE puede descubrir las columnas de las vistas de sistema antes de consultarlas.
 
 **Output** (tabla base):
 ```json
@@ -1595,6 +1597,46 @@ Compara los conjuntos de claves entre dos tablas usando `EXCEPT` / `INTERSECT` +
 
 ---
 
+#### 50. `nz_summarize_partitions`
+
+Resume las filas por valor de una columna de partición/periodo: una entrada por valor con su conteo, más la partición más reciente y la más antigua. Modo `read`. Responde a *"¿cargó bien el proceso de hoy?"* en un solo paso, sin escribir el `GROUP BY` a mano. Para comparar dos particiones concretas usar `nz_compare_rows` (#302); para el esquema de dos tablas, `nz_compare_tables`.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | BD de la tabla. Debe coincidir con la BD del perfil activo (misma regla que `nz_table_sample`: el `SELECT` corre en la BD de sesión). |
+| `schema` | string (required) | Esquema de la tabla. |
+| `table` | string (required) | Tabla. |
+| `partition_column` | string (required) | Columna de corte (`FECCORTE`, `CODPERIODO`, ...). Identificador validado. |
+| `max_rows` | int (optional, `1..1000`) | Tope de particiones devueltas (default: `max_rows_default` del perfil, cap `MAX_ROWS_CAP`). |
+
+**Output**:
+```json
+{
+  "partitions": [
+    {"value": "2026-07-06", "rows": 34},
+    {"value": "2026-06-30", "rows": 12318},
+    {"value": "2026-05-30", "rows": 12249},
+    {"value": "2026-04-30", "rows": 12865}
+  ],
+  "partition_count": 4,
+  "latest": "2026-07-06",
+  "earliest": "2026-04-30",
+  "truncated": false,
+  "hint": null,
+  "duration_ms": 860
+}
+```
+
+**Reglas**:
+- Una query agregada: `SELECT <col>, COUNT(*) FROM <schema>.<tabla> GROUP BY <col> ORDER BY <col> DESC`. Identificadores validados (`validate_catalog_identifier`) y SQL pasado por `sql_guard` antes de llegar al driver.
+- `latest` es la primera partición (orden `DESC`) y `earliest` la última; ambos `null` si la tabla no tiene filas. `partition_count` es el total exacto de valores distintos.
+- Valores `NULL` se devuelven como `value: null` (un grupo `NULL` es un dato válido del análisis de cargas).
+- **Tope duro**: si la columna tiene `MAX_ROWS_CAP` (1000) o más valores distintos → `INPUT_TOO_BROAD` con hint: no parece una columna de partición y no se devuelve un resumen parcial. Mismo principio que `nz_find_table_references` (#308): en análisis de cargas un parcial silencioso es peor que un fallo ruidoso.
+- `truncated` + `hint` cuando hay más particiones que `max_rows` (mismo patrón que `nz_list_procedures` / `nz_find_column`, ADR 0018).
+- Fuera de alcance: detectar cargas parciales o umbrales de anomalía; comparar particiones entre sí; crear o borrar particiones (solo lectura). Ver #338.
+
+---
+
 #### 51. `nz_find_table`
 
 Busca **tablas y vistas por patrón de nombre** a través de las bases visibles (o de una sola si se indica `database`), devolviendo `{database, schema, name, kind}`. Resuelve el "¿dónde está el dato?" cuando hay decenas de bases con nombres casi idénticos: antes había que iterar BD × esquema a mano con `nz_list_tables`.
@@ -1637,7 +1679,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
 |---|---|---|---|
-| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_table_stats_batch`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_find_column`, `nz_find_table`, `nz_find_duplicates`, `nz_compare_rows`, `nz_compare_tables`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
+| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_table_stats_batch`, `nz_summarize_partitions`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_find_column`, `nz_find_table`, `nz_find_duplicates`, `nz_compare_rows`, `nz_compare_tables`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
 | `nz_insert` | false | false | false |
 | `nz_insert_select` | false | false | false |
 | `nz_update`, `nz_delete` | false | true | false |
