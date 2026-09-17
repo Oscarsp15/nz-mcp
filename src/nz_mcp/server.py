@@ -15,7 +15,7 @@ from mcp.server.stdio import stdio_server
 from pydantic import BaseModel, ValidationError
 
 import nz_mcp.tools  # noqa: F401  (side effect: register tools)
-from nz_mcp import __version__
+from nz_mcp import current_version
 from nz_mcp.config import Profile, get_active_profile
 from nz_mcp.error_hints import (
     hints_for_error,
@@ -217,7 +217,7 @@ def _i18n_key_for(code: str) -> str | None:
 
 def build_mcp_server(*, config_path: Path | None = None) -> Server[Any, Any]:
     """Build a low-level MCP server that delegates to the internal dispatcher."""
-    server: Server[Any, Any] = Server(name="nz-mcp", version=__version__)
+    server: Server[Any, Any] = Server(name="nz-mcp", version=current_version())
 
     @server.list_tools()  # type: ignore[no-untyped-call,untyped-decorator]
     async def _handle_list_tools() -> list[types.Tool]:

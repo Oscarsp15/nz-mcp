@@ -42,8 +42,8 @@ import typer
 # without this project importing click directly.
 from typer.core import TyperGroup
 
-from nz_mcp import __version__
 from nz_mcp import cli_output as out
+from nz_mcp import current_version
 from nz_mcp.auth import delete_password, get_password, store_password
 from nz_mcp.catalog.probe import (
     ProbeResult,
@@ -396,7 +396,7 @@ def probe_catalog_cmd(
 @app.command("version", help=_help("CLI.HELP.VERSION"), rich_help_panel=_COMMANDS_PANEL)
 def version_cmd() -> None:
     """Print the installed nz-mcp version."""
-    out.emit(__version__)
+    out.emit(current_version())
 
 
 @app.command("serve", help=_help("CLI.HELP.SERVE"), rich_help_panel=_COMMANDS_PANEL)

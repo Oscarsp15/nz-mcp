@@ -24,7 +24,6 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from importlib import metadata
 from pathlib import Path
 from typing import Final, Literal
 from urllib.request import urlopen
@@ -64,13 +63,11 @@ def _disabled() -> bool:
 def installed_version() -> str:
     """Version of the running distribution, or the packaged constant when not installed.
 
-    ``importlib.metadata`` is what ``uv tool`` / ``pip`` actually installed; running from a
-    source checkout there is no distribution metadata, so the constant in the package wins.
+    ``__version__`` is resolved once from ``importlib.metadata`` (see
+    :func:`nz_mcp.current_version`), so it is what ``uv tool`` / ``pip`` actually installed;
+    the packaged constant only applies when running from a source checkout.
     """
-    try:
-        return metadata.version(_PACKAGE_NAME)
-    except metadata.PackageNotFoundError:
-        return __version__
+    return __version__
 
 
 def _parse_latest(payload: object) -> str | None:
