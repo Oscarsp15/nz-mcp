@@ -27,7 +27,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (39 tools registradas)
+## Catálogo v0.1 (40 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -1125,6 +1125,43 @@ Devuelve el estado actual de un job lanzado por `nz_call_procedure_async`. Modo 
 
 ---
 
+#### 40. `nz_profile_column`
+
+Perfila una columna en una sola pasada de solo lectura: total de filas, nulos, % de nulos, distintos, mínimo/máximo y los `top_n` valores más frecuentes. Es el paso previo al análisis de una tabla nueva, que hasta ahora exigía escribir los agregados a mano para cada columna.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | Debe coincidir con la BD del perfil activo (los `SELECT` de datos corren en la sesión; misma regla que `nz_table_sample`). |
+| `schema` | string (required) | |
+| `table` | string (required) | |
+| `column` | string (required) | Columna a perfilar. |
+| `top_n` | int (default 10, cap 50) | Nº de valores más frecuentes a devolver. |
+
+**Output**:
+```json
+{
+  "total": 37466,
+  "nulls": 0,
+  "null_pct": 0.0,
+  "distinct": 33677,
+  "min": "2026-04-01",
+  "max": "2026-06-30",
+  "top_values": [{"value": "PENDIENTE", "count": 123}],
+  "hint": null,
+  "duration_ms": 820
+}
+```
+
+**Reglas**:
+- Ejecuta dos queries `SELECT` validadas por `sql_guard` (`mode: read`): una de agregados (`COUNT`/`SUM CASE`/`COUNT DISTINCT`/`MIN`/`MAX`) y una de `GROUP BY` + `ORDER BY count DESC` + `LIMIT top_n` para los valores más frecuentes.
+- Los `NULL` no entran en `top_values` (se reportan aparte en `nulls`).
+- `min`/`max` se serializan como texto (`YYYY-MM-DD`, `YYYY-MM-DD HH:MM:SS`, etc.).
+- Verifica la existencia de tabla y columna contra `_v_relation_column` antes de perfilar: tabla ausente o columna ausente → `OBJECT_NOT_FOUND` (con la lista de columnas visibles en el contexto de la columna ausente).
+- `hint` se rellena cuando hay más valores distintos que `top_n` (sugiere subir `top_n`).
+- `distinct` y `min`/`max` recorren la columna completa; en tablas muy grandes puede ser costoso. No usar para percentiles ni detección de outliers (fuera de alcance de este issue).
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -1133,7 +1170,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
 |---|---|---|---|
-| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_export_ddl`, `nz_current_profile` | true | false | true |
+| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
 | `nz_insert` | false | false | false |
 | `nz_insert_select` | false | false | false |
 | `nz_update`, `nz_delete` | false | true | false |

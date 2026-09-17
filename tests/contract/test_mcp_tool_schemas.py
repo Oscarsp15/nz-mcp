@@ -41,6 +41,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_list_schemas",
     "nz_list_tables",
     "nz_list_views",
+    "nz_profile_column",
     "nz_query_select",
     "nz_switch_database",
     "nz_switch_profile",
@@ -96,6 +97,19 @@ def test_nz_alter_table_schema_and_annotations() -> None:
         "readOnlyHint": False,
         "destructiveHint": True,
         "idempotentHint": False,
+        "openWorldHint": False,
+    }
+
+
+@pytest.mark.contract
+def test_nz_profile_column_schema_and_annotations() -> None:
+    spec = TOOLS["nz_profile_column"]
+    props = spec.input_model.model_json_schema()["properties"]
+    assert set(props) == {"database", "schema", "table", "column", "top_n"}
+    assert spec.mode == "read"
+    assert spec.annotations == {
+        "readOnlyHint": True,
+        "idempotentHint": True,
         "openWorldHint": False,
     }
 
