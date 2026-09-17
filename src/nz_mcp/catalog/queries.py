@@ -94,6 +94,38 @@ GET_VIEW_DDL: Final[CatalogQuery] = CatalogQuery(
     cross_database=True,
 )
 
+RELATION_KIND: Final[CatalogQuery] = CatalogQuery(
+    id="relation_kind",
+    sql=(
+        "SELECT CAST(OBJTYPE AS VARCHAR(64)) AS KIND FROM <BD>.._V_TABLE "
+        "WHERE SCHEMA = UPPER(?) AND TABLENAME = UPPER(?) "
+        "UNION ALL "
+        "SELECT CAST('VIEW' AS VARCHAR(64)) AS KIND FROM <BD>.._V_VIEW "
+        "WHERE SCHEMA = UPPER(?) AND VIEWNAME = UPPER(?)"
+    ),
+    catalog_views=("_V_TABLE", "_V_VIEW"),
+    description=(
+        "Resolves a relation's real kind (TABLE/EXTERNAL TABLE/VIEW) in one round trip; "
+        "no row means the object is not visible. Used by view lineage tools."
+    ),
+    tested_versions=(NPS_112_IF1,),
+    cross_database=True,
+)
+
+LIST_VIEW_DEFINITIONS: Final[CatalogQuery] = CatalogQuery(
+    id="list_view_definitions",
+    sql=(
+        "SELECT VIEWNAME, DEFINITION FROM <BD>.._V_VIEW WHERE SCHEMA = UPPER(?) ORDER BY VIEWNAME"
+    ),
+    catalog_views=("_V_VIEW",),
+    description=(
+        "Returns every view name and definition in a schema; used to resolve reverse "
+        "dependencies (which views reference an object) by parsing each definition."
+    ),
+    tested_versions=(NPS_112_IF1,),
+    cross_database=True,
+)
+
 DESCRIBE_TABLE_COLUMNS: Final[CatalogQuery] = CatalogQuery(
     id="describe_table_columns",
     sql=(
@@ -261,6 +293,8 @@ ALL_QUERIES: Final[tuple[CatalogQuery, ...]] = (
     LIST_TABLES,
     LIST_VIEWS,
     GET_VIEW_DDL,
+    RELATION_KIND,
+    LIST_VIEW_DEFINITIONS,
     DESCRIBE_TABLE_COLUMNS,
     DESCRIBE_TABLE_OBJTYPE,
     DESCRIBE_TABLE_DISTRIBUTION,
