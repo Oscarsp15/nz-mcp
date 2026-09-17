@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from nz_mcp.catalog.call import call_procedure
+from nz_mcp.catalog.call import ReturnScalar, call_procedure
 from nz_mcp.config import TIMEOUT_S_CAP, get_active_profile
 from nz_mcp.tools.registry import tool
 
@@ -30,7 +30,7 @@ class CallProcedureOutput(BaseModel):
     dry_run: bool
     call_sql: str
     executed: bool
-    return_value: str | None = None
+    return_value: ReturnScalar = None
     messages: list[str] = Field(default_factory=list)
     duration_ms: int
 

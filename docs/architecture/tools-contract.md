@@ -28,7 +28,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (44 tools registradas)
+## Catálogo v0.1 (45 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -203,8 +203,15 @@ Devuelve una muestra pequeña (10 filas) para entender el shape. El `database` d
 | `schema` | string (required) | |
 | `table` | string (required) | |
 | `rows` | int (default 10, cap 50) | |
+| `where` | string (optional, max 2048) | Predicado SQL crudo para una muestra dirigida (p. ej. `FECDESEMBOLSO >= '2026-01-01'`). |
+| `order_by` | string (optional, max 2048) | Fragmento `ORDER BY` crudo para una muestra reproducible (p. ej. `FECDESEMBOLSO DESC, ID`). |
 
 **Output**: mismo formato que `nz_query_select` (incl. `columns`, `rows`, `row_count`, `truncated`, `duration_ms`, `hint`).
+
+**Reglas**:
+- `where` y `order_by` son **fragmentos SQL crudos**, no identificadores. La sentencia compuesta (`SELECT * FROM schema.table [WHERE …] [ORDER BY …]`) se valida entera con `sql_guard.validate(mode="read")`: se rechazan sentencias apiladas (`STACKED_NOT_ALLOWED`), tipos que no sean `SELECT` y CTEs con mutación. Un fragmento inválido o no read-only → `GUARD_REJECTED`.
+- El `LIMIT` se inyecta/acota al final con el cap `rows` (si el fragmento ya trae `LIMIT`, se reescribe a `rows` si es mayor).
+- El guard de misma-BD y el cap `rows` siguen intactos.
 
 ---
 
@@ -522,6 +529,8 @@ Análisis **inverso** de impacto: dado `(database, schema, table)`, devuelve los
 | `table_database` | string (optional) | Filtra referencias prefijadas con esta BD; si se omite, acepta cualquier BD o sin prefijo. |
 | `table_schema` | string (optional) | Análogo a `table_database`. |
 | `pattern` | string (optional) | Filtro `LIKE` sobre el nombre del SP para acotar el escaneo. Match case-insensitive. |
+| `timeout_s` | int (optional, `1..300`) | Opt-in. Fija el timeout de socket de la descarga en lote **y** un deadline para el escaneo en proceso. Si se omite, manda el timeout de socket del perfil activo y el escaneo no tiene deadline (comportamiento previo a #308). Si el deadline salta a mitad de escaneo, se devuelven las referencias ya encontradas con `timed_out: true`. |
+| `max_procedures` | int (optional, `1..5000`) | Tope del universo a escanear. Default: `5000`. Se comprueba con un **pre-conteo barato** (solo nombres, sin `PROCEDURESOURCE`), así que superarlo falla rápido con `INPUT_TOO_BROAD` sin pagar la descarga completa ni devolver un parcial silencioso. |
 
 **Output**:
 ```json
@@ -539,6 +548,8 @@ Análisis **inverso** de impacto: dado `(database, schema, table)`, devuelve los
   "scanned_count": 142,
   "match_count": 1,
   "truncated": false,
+  "timed_out": false,
+  "hint": null,
   "duration_ms": 820
 }
 ```
@@ -548,11 +559,12 @@ Análisis **inverso** de impacto: dado `(database, schema, table)`, devuelve los
 - **Detección write**: `INSERT INTO <tabla>`, `UPDATE <tabla>`, `DELETE FROM <tabla>`, `MERGE INTO <tabla>`, `TRUNCATE TABLE <tabla>`, `DROP TABLE [IF EXISTS] <tabla>`, `CREATE [TEMP|TEMPORARY] TABLE [IF NOT EXISTS] <tabla>` (CTAS estándar), y `... INTO <tabla>` (cubre `SELECT INTO`).
 - Match case-insensitive sobre el nombre, con respeto de límites de token (`Foo` no engancha `FooBar`). Acepta `tabla`, `schema.tabla`, `bd.schema.tabla` y la sintaxis Netezza `bd..tabla`.
 - Comentarios (`--`, `/* */`) y literales `'…'` se filtran antes del scan.
-- **Caps**:
-  - Hard cap: `scanned_count <= 5000`. Si el `pattern` no acota suficiente → `INPUT_TOO_BROAD` con sugerencia de usar `pattern`.
+- **Caps y coste** (issue #308):
+  - Hard cap: `scanned_count <= max_procedures` (default `5000`). Si el `pattern` no acota suficiente → `INPUT_TOO_BROAD` con sugerencia de usar `pattern`. Con `max_procedures` explícito, el rechazo llega por pre-conteo, **antes** de la descarga en lote.
   - Soft cap: `references` truncadas a 1000 entradas, ordenadas desc por `occurrences_read + occurrences_write` (desempate por nombre); en ese caso `truncated: true`.
-  - Timeout default: 60 s.
-- **Out of scope v1**: vistas (`_v_view.DEFINITION`), dynamic SQL (`EXECUTE IMMEDIATE 'INSERT INTO ' || …`), análisis de columnas, cross-schema/cross-database, exportación a archivo. Documentado en [`../adr/0012-tool-find-table-references.md`](../adr/0012-tool-find-table-references.md).
+  - `timeout_s` es opt-in: fija el timeout de socket de la descarga y un deadline para el escaneo. Si el deadline salta a mitad de escaneo, se devuelven las referencias ya encontradas con `timed_out: true` (un análisis de impacto parcial sigue siendo útil si el cliente sabe que lo es). Si el socket expira durante la descarga, la llamada falla con `QUERY_TIMEOUT` y un `hint` para acotar. Omitirlo conserva el comportamiento previo — timeout de socket del perfil y sin deadline — para no convertir un escaneo ancho normal en un parcial.
+  - `hint`: presente (y localizado) cuando el universo escaneado alcanza el umbral `200` procedimientos (`HINT.FIND_TABLE_REFERENCES_LARGE_SCAN`, sugiere `pattern`/`max_procedures`) o cuando `timed_out` es `true` (`HINT.FIND_TABLE_REFERENCES_TIMEOUT`). `null` en escaneos pequeños.
+- **Out of scope v1**: vistas (`_v_view.DEFINITION`), dynamic SQL (`EXECUTE IMMEDIATE 'INSERT INTO ' || …`), análisis de columnas, cross-schema/cross-database, exportación a archivo, caché persistente de referencias. Documentado en [`../adr/0012-tool-find-table-references.md`](../adr/0012-tool-find-table-references.md).
 
 Implementación: una sola query a `_v_procedure` (mismo helper que `nz_get_procedures_ddl_batch`), seguida de `iter_statements` + `iter_table_references_in_statement` en `catalog/nzplsql_parser.py`.
 
@@ -972,7 +984,7 @@ Ejecuta un procedimiento almacenado vía `CALL schema.proc(args)` y devuelve el 
   "dry_run": false,
   "call_sql": "CALL DBO.NZMCP_SMOKE_CALL(?)",
   "executed": true,
-  "return_value": "50",
+  "return_value": 50,
   "messages": ["nz-mcp: recibido 5", "nz-mcp: paso 2 ok"],
   "duration_ms": 110
 }
@@ -981,7 +993,7 @@ Ejecuta un procedimiento almacenado vía `CALL schema.proc(args)` y devuelve el 
 **Reglas**:
 - `sql_guard` clasifica `CALL` (kind `CALL`) y lo permite **solo en `admin`** (rechazo `STATEMENT_NOT_ALLOWED` en read/write). Ruta dedicada de regex que **solo acepta placeholders `?`**: un argumento literal se rechaza (`UNKNOWN_STATEMENT`), forzando parametrización.
 - Guarda de entorno `assert_env_safe`: un `CALL` a un SP `PROD_*` desde un perfil no productivo → `PROD_REF_IN_NONPROD`.
-- `return_value` es el valor devuelto por el SP (o `null` si no hay result set); `messages` son los `NOTICE`/`RAISE` capturados de `cursor.notices`.
+- `return_value` es el valor devuelto por el SP con su **tipo nativo** (un `INT` sale como número `50`, no como `"50"`; `null` si no hay result set), para que `return_value == 0` no exija parseo en el cliente (issue #310). Un `NUMERIC`/`DECIMAL` se normaliza a `int` si es entero o a `float` si no; un tipo que JSON no puede llevar (`DATE`/`TIMESTAMP`, `bytes`) se serializa a string. `messages` son los `NOTICE`/`RAISE` capturados de `cursor.notices`.
 - Si el SP falla tras emitir NOTICEs, los mensajes previos al fallo se devuelven en `error.context["partial_notices"]` (el campo `messages` del output feliz sigue siendo la lista completa).
 - Un timeout de socket lanza `QueryTimeoutError` (código `QUERY_TIMEOUT`) con `context["orphan_session_risk"]=true` y `context["partial_notices"]`; el servidor puede seguir ejecutando el SP (nzpy no expone `cancel()`).
 - No usar para crear un SP (`nz_execute_ddl`) ni para leer su DDL (`nz_get_procedure_ddl`).
@@ -1172,7 +1184,7 @@ Devuelve el estado actual de un job lanzado por `nz_call_procedure_async`. Modo 
   "elapsed_ms": 185400,
   "poll_after_s": null,
   "partial_notices": ["NOTICE: paso 1 ok", "NOTICE: paso 2 ok"],
-  "return_value": "OK",
+  "return_value": 1,
   "messages": ["NOTICE: paso 1 ok", "NOTICE: paso 2 ok"],
   "duration_ms": 185100,
   "error": null
@@ -1184,6 +1196,7 @@ Devuelve el estado actual de un job lanzado por `nz_call_procedure_async`. Modo 
 - **Dos duraciones, no confundirlas**: `elapsed_ms` es tiempo de reloj desde que se llamó a `nz_call_procedure_async` (incluye abrir la conexión, sigue creciendo en cada sondeo); `duration_ms` es lo que tardó el `CALL` dentro de Netezza y solo se rellena cuando `status == "done"` — es el número que responde "¿cuánto tardó el SP?".
 - `poll_after_s` sugiere el próximo intervalo de sondeo en segundos, adaptado al tiempo transcurrido (crece hasta un tope de 30 s); es `null` cuando el job ya terminó (`done`/`failed`/`cancelled`) porque no hace falta volver a sondear.
 - `partial_notices` puede llegar vacío mientras el SP corre: nzpy entrega los `NOTICE` junto con el resultset al terminar, no de forma incremental. `messages` solo está completo cuando `status == "done"`.
+- `return_value` usa el **tipo nativo** del SP, igual que `nz_call_procedure` (un `INT` sale como número, `null` si no hay result set) — ver § 33 (issue #310).
 - `error` tiene forma `{code, detail, partial_notices}` cuando `status == "failed"`.
 - **El job store es en memoria**: si el servidor MCP reinicia, todos los jobs desaparecen. Guarda el `job_id` en otra parte si el SP es crítico.
 
@@ -1360,6 +1373,56 @@ Recorre dependencias de objeto (vistas/tablas) en modo `read`, en una dirección
 
 ---
 
+#### 45. `nz_compare_tables`
+
+Compara el esquema de dos tablas o vistas: columnas solo en A, solo en B, discrepancias de tipo/nullability y discrepancias de posición ordinal. Modo `read`. Útil antes de migraciones, conciliaciones de datos o validación entre capas (ej. staging vs final).
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | BD de la tabla A (y default para tabla B si `database_b` no se especifica). |
+| `schema_a` | string (required) | Esquema de la tabla A. |
+| `table_a` | string (required) | Nombre de la tabla/vista A. |
+| `database_b` | string (optional) | BD de la tabla B (default: `database`). |
+| `schema_b` | string (optional) | Esquema de la tabla B (default: `schema_a`). |
+| `table_b` | string (required) | Nombre de la tabla/vista B. |
+
+**Output**:
+```json
+{
+  "identical": false,
+  "columns_in_a": 33,
+  "columns_in_b": 19,
+  "columns_in_common": 4,
+  "only_in_a": [
+    {"column": "FECCORTE", "type": "CHARACTER VARYING(10)", "nullable": true, "position": 1}
+  ],
+  "only_in_b": [
+    {"column": "FECHACORTE", "type": "CHARACTER VARYING(10)", "nullable": true, "position": 1}
+  ],
+  "type_mismatches": [
+    {
+      "column": "NUMDOCUMENTO",
+      "type_a": "CHARACTER VARYING(12)",
+      "type_b": "CHARACTER VARYING(4000)",
+      "nullable_a": true,
+      "nullable_b": false
+    }
+  ],
+  "position_mismatches": [
+    {"column": "CODCREDITO", "position_a": 1, "position_b": 4}
+  ],
+  "duration_ms": 74
+}
+```
+
+**Reglas**:
+- `identical` es `true` cuando ambos esquemas coinciden exactamente en columnas, tipos, nullability y posiciones.
+- La comparación de nombres de columna es case-insensitive (mayúsculas de catálogo).
+- Si `table_a` o `table_b` no existe, falla con `ObjectNotFoundError` (`code: OBJECT_NOT_FOUND`).
+- No compara datos entre tablas (fuera de alcance de esta tool).
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -1368,7 +1431,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
 |---|---|---|---|
-| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
+| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_find_column`, `nz_compare_tables`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
 | `nz_insert` | false | false | false |
 | `nz_insert_select` | false | false | false |
 | `nz_update`, `nz_delete` | false | true | false |

@@ -7,6 +7,10 @@ from typing import Any
 
 import pytest
 
+from nz_mcp.catalog.procedures import (
+    FIND_TABLE_REFERENCES_HINT_THRESHOLD,
+    FIND_TABLE_REFERENCES_SCAN_CAP,
+)
 from nz_mcp.errors import InputTooBroadError
 from nz_mcp.tools.procedures import (
     GetFindTableReferencesInput,
@@ -34,28 +38,48 @@ def _patch_get_all(
     procedures: list[dict[str, Any]],
     *,
     captured_pattern: list[str | None] | None = None,
+    captured_timeout: list[int | None] | None = None,
+    captured_fetch: list[str] | None = None,
 ) -> None:
+    def _kept(pattern: str | None) -> list[dict[str, Any]]:
+        # Mimic the catalog ``LIKE`` filter so tests can verify the wiring.
+        if pattern:
+            return [
+                p for p in procedures if pattern.replace("%", "").lower() in str(p["name"]).lower()
+            ]
+        return list(procedures)
+
     def _fake(
         _profile: object,
         _database: str,
         _schema: str,
         pattern: str | None = None,
+        *,
+        timeout_s: int | None = None,
     ) -> dict[str, Any]:
         if captured_pattern is not None:
             captured_pattern.append(pattern)
-        # Mimic the catalog ``LIKE`` filter so tests can verify the wiring.
-        if pattern:
-            kept = [
-                p for p in procedures if pattern.replace("%", "").lower() in str(p["name"]).lower()
-            ]
-        else:
-            kept = list(procedures)
+        if captured_timeout is not None:
+            captured_timeout.append(timeout_s)
+        if captured_fetch is not None:
+            captured_fetch.append("ddl")
+        kept = _kept(pattern)
         return {
             "procedures": kept,
             "total_size_bytes": sum(int(p["size_bytes"]) for p in kept),
         }
 
+    def _fake_list(
+        _profile: object,
+        _database: str,
+        _schema: str,
+        pattern: str | None = None,
+    ) -> list[dict[str, Any]]:
+        # The cheap pre-count only needs names, never PROCEDURESOURCE.
+        return [{"name": p["name"]} for p in _kept(pattern)]
+
     monkeypatch.setattr("nz_mcp.catalog.procedures.get_all_procedures_ddl", _fake)
+    monkeypatch.setattr("nz_mcp.catalog.procedures.list_procedures", _fake_list)
 
 
 def test_input_accepts_schema_alias_and_defaults() -> None:
@@ -357,3 +381,172 @@ def test_duration_ms_non_negative(monkeypatch: pytest.MonkeyPatch, two_profiles:
         config_path=two_profiles,
     )
     assert out.duration_ms >= 0
+
+
+# ── issue #308: cost warning, scan cap and timeout ───────────────────────────
+
+
+class _FakeClock:
+    """Stand-in for the ``time`` module: ``monotonic`` walks a scripted sequence."""
+
+    def __init__(self, values: list[float]) -> None:
+        self._values = iter(values)
+
+    def monotonic(self) -> float:
+        return next(self._values)
+
+
+def test_no_hint_on_a_small_scan(monkeypatch: pytest.MonkeyPatch, two_profiles: Path) -> None:
+    procs = [_proc("SP_ONE", "BEGIN_PROC\nSELECT 1 FROM foo;\nEND_PROC;")]
+    _patch_get_all(monkeypatch, procs)
+
+    out = nz_find_table_references(
+        GetFindTableReferencesInput(database="D", procedure_schema="PUBLIC", table="foo"),
+        config_path=two_profiles,
+    )
+    assert out.timed_out is False
+    assert out.hint is None
+
+
+def test_hint_when_scan_universe_reaches_threshold(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    procs = [
+        _proc(f"SP_{i:04d}", "BEGIN_PROC\nSELECT 1 FROM foo;\nEND_PROC;")
+        for i in range(FIND_TABLE_REFERENCES_HINT_THRESHOLD)
+    ]
+    _patch_get_all(monkeypatch, procs)
+
+    out = nz_find_table_references(
+        GetFindTableReferencesInput(database="D", procedure_schema="PUBLIC", table="foo"),
+        config_path=two_profiles,
+    )
+    assert out.scanned_count == FIND_TABLE_REFERENCES_HINT_THRESHOLD
+    assert out.timed_out is False
+    assert out.hint is not None
+    # The hint names the universe size and the way out.
+    assert str(FIND_TABLE_REFERENCES_HINT_THRESHOLD) in out.hint
+    assert "pattern" in out.hint
+
+
+def test_max_procedures_tightens_the_cap(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    procs = [_proc(f"SP_{i}", "BEGIN_PROC\nSELECT 1 FROM foo;\nEND_PROC;") for i in range(3)]
+    _patch_get_all(monkeypatch, procs)
+
+    with pytest.raises(InputTooBroadError) as exc:
+        nz_find_table_references(
+            GetFindTableReferencesInput(
+                database="D", procedure_schema="PUBLIC", table="foo", max_procedures=2
+            ),
+            config_path=two_profiles,
+        )
+    assert exc.value.context.get("scanned") == 3
+    assert exc.value.context.get("cap") == 2
+
+
+def test_max_procedures_fails_fast_without_fetching_ddl(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """The over-wide case must not pay for the batch DDL fetch (issue #308)."""
+    fetched: list[str] = []
+    procs = [_proc(f"SP_{i}", "BEGIN_PROC\nSELECT 1 FROM foo;\nEND_PROC;") for i in range(3)]
+    _patch_get_all(monkeypatch, procs, captured_fetch=fetched)
+
+    with pytest.raises(InputTooBroadError):
+        nz_find_table_references(
+            GetFindTableReferencesInput(
+                database="D", procedure_schema="PUBLIC", table="foo", max_procedures=2
+            ),
+            config_path=two_profiles,
+        )
+    assert fetched == []
+
+
+def test_max_procedures_within_cap_still_scans(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """A cap that the universe respects must not block the scan."""
+    procs = [_proc(f"SP_{i}", "BEGIN_PROC\nSELECT 1 FROM foo;\nEND_PROC;") for i in range(2)]
+    _patch_get_all(monkeypatch, procs)
+
+    out = nz_find_table_references(
+        GetFindTableReferencesInput(
+            database="D", procedure_schema="PUBLIC", table="foo", max_procedures=10
+        ),
+        config_path=two_profiles,
+    )
+    assert out.scanned_count == 2
+    assert out.match_count == 2
+
+
+def test_default_scan_is_not_deadline_bound(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """Without an explicit timeout_s a wide scan returns everything, not a partial."""
+    captured: list[int | None] = []
+    procs = [_proc("SP_A", "BEGIN_PROC\nSELECT 1 FROM foo;\nEND_PROC;")]
+    _patch_get_all(monkeypatch, procs, captured_timeout=captured)
+
+    out = nz_find_table_references(
+        GetFindTableReferencesInput(database="D", procedure_schema="PUBLIC", table="foo"),
+        config_path=two_profiles,
+    )
+    # Nothing is forced onto the driver: open_connection keeps the profile default.
+    assert captured == [None]
+    assert out.timed_out is False
+    assert out.match_count == 1
+
+
+def test_max_procedures_above_the_hard_cap_is_rejected() -> None:
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        GetFindTableReferencesInput.model_validate(
+            {
+                "database": "D",
+                "schema": "PUBLIC",
+                "table": "FOO",
+                "max_procedures": FIND_TABLE_REFERENCES_SCAN_CAP + 1,
+            }
+        )
+
+
+def test_timeout_s_is_forwarded_to_the_batch_fetch(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    captured: list[int | None] = []
+    procs = [_proc("SP_X", "BEGIN_PROC\nSELECT 1 FROM foo;\nEND_PROC;")]
+    _patch_get_all(monkeypatch, procs, captured_timeout=captured)
+
+    nz_find_table_references(
+        GetFindTableReferencesInput(
+            database="D", procedure_schema="PUBLIC", table="foo", timeout_s=7
+        ),
+        config_path=two_profiles,
+    )
+    assert captured == [7]
+
+
+def test_timed_out_when_scan_deadline_is_exceeded(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    procs = [_proc("SP_A", "BEGIN_PROC\nSELECT 1 FROM foo;\nEND_PROC;")]
+    _patch_get_all(monkeypatch, procs)
+    # First monotonic() sets the deadline (0 + 1s); the scan then reads 1000s and stops.
+    monkeypatch.setattr(
+        "nz_mcp.catalog.procedures.time",
+        _FakeClock([0.0, 1000.0, 1000.0, 1000.0]),
+    )
+
+    out = nz_find_table_references(
+        GetFindTableReferencesInput(
+            database="D", procedure_schema="PUBLIC", table="foo", timeout_s=1
+        ),
+        config_path=two_profiles,
+    )
+    assert out.timed_out is True
+    assert out.match_count == 0
+    assert out.hint is not None
+    assert "1" in out.hint

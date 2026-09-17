@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from nz_mcp.catalog.call import ReturnScalar
 from nz_mcp.catalog.call_async import launch_call_procedure, poll_job
 from nz_mcp.config import get_active_profile
 from nz_mcp.tools.registry import tool
@@ -112,7 +113,7 @@ class JobPollOutput(BaseModel):
         "null once the job is done/failed/cancelled — no need to poll again.",
     )
     partial_notices: list[str] = Field(default_factory=list)
-    return_value: str | None = None
+    return_value: ReturnScalar = None
     messages: list[str] = Field(default_factory=list)
     duration_ms: int | None = Field(
         default=None,
