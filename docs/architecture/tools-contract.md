@@ -882,8 +882,9 @@ Compila un `CREATE [OR REPLACE] PROCEDURE` (NZPLSQL) **completo** o un `CREATE [
 | `confirm` | bool (**required if** `dry_run=false`) | |
 | `allow_prod_reads` | bool (default **false**) | Si `true`, **omite solo** la guarda `PROD_REF_IN_NONPROD`. El caller certifica que ya volteó todas las **escrituras** a la BD activa y que los `PROD_*` restantes son **solo lecturas**. Aplica igual en `dry_run` y en compilación real. El resto de validaciones (statement único, cabecera, modo admin, `statement_type`) siguen vigentes. |
 | `echo_sql` | bool (default **true**) | Si `false`, la respuesta de ejecución real omite `sql_to_execute` (queda `null`); en `dry_run` siempre se devuelve el SQL como preview. |
+| `validate_compile` | bool (default **false**) | Si `true` y `statement_type="procedure"`, tras el `CREATE` ejecuta `CALL schema.proc()` para forzar la compilación del cuerpo NZPLSQL. Un error de compilación aparece en `compile_error` y `compiled=false`; cualquier otro error (p.ej. nro. de args incorrecto) significa que el cuerpo compiló bien. Ver nota sobre efectos secundarios abajo. |
 
-**Output**:
+**Output** (dry-run):
 ```json
 {
   "dry_run": true,
@@ -893,13 +894,16 @@ Compila un `CREATE [OR REPLACE] PROCEDURE` (NZPLSQL) **completo** o un `CREATE [
 }
 ```
 
-**Output** (ejecución real con `echo_sql=false`):
+**Output** (ejecución real, `statement_type="procedure"`, con `validate_compile=true` y cuerpo inválido):
 ```json
 {
   "dry_run": false,
-  "sql_to_execute": null,
+  "sql_to_execute": "CREATE OR REPLACE PROCEDURE ...",
   "executed": true,
-  "duration_ms": 42
+  "duration_ms": 42,
+  "compile_warning": "DDL accepted by server. NZPLSQL body compilation is deferred to the first CALL — a syntax error will only surface then. Pass validate_compile=true to force a check now.",
+  "compile_error": "plpgsql: ERROR during compile of PROC_NAME near line 1",
+  "compiled": false
 }
 ```
 
@@ -907,6 +911,8 @@ Compila un `CREATE [OR REPLACE] PROCEDURE` (NZPLSQL) **completo** o un `CREATE [
 - Guarda de entorno (`assert_env_safe`): si la BD del perfil activo **no** empieza con `PROD_`, cualquier identificador `PROD_*` en el SQL → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD`. Evita compilar en desarrollo código que apunta a producción. Es un escaneo conservador (un literal con `PROD_` también dispara; falla cerrado).
 - `allow_prod_reads=true` desactiva **únicamente** esa guarda: compilar un `CREATE` es inerte (las escrituras reales solo ocurren en `CALL`), así que el flag relaja el escaneo textual de compilación, no el comportamiento en ejecución. El default `false` conserva el bloqueo (falla cerrado). No se intenta distinguir lecturas de escrituras: el flag es la certificación explícita del caller.
 - `echo_sql` controla **solo** la ejecución real: con `false`, `sql_to_execute` queda `null` y la respuesta se reduce a metadatos (`executed`, `duration_ms`), para compilar en lote sin arrastrar el DDL completo al contexto. En `dry_run` el SQL se devuelve **siempre**, porque el preview es el objetivo de ese modo.
+- **Compilación perezosa NZPLSQL**: Netezza acepta el DDL aunque el cuerpo sea inválido — compila en el primer `CALL`. Por eso `executed=true` **no implica que el SP sea válido**. Para `statement_type="procedure"`, la respuesta siempre lleva `compile_warning` explicando esto.
+- `validate_compile=true`: fuerza la compilación ejecutando `CALL schema.proc()` sin argumentos. Si el SP acepta 0 argumentos y el cuerpo es válido, el SP **se ejecuta** de verdad (efecto secundario). El caller acepta este riesgo al pasar el flag.
 - Todo el SQL pasa por `sql_guard.validate(mode="admin")`; se exige `CREATE`.
 - Ejecuta contra la BD del perfil activo (no acepta `database` cross-DB).
 - No usar para tablas (`nz_create_table`) ni para ejecutar un procedimiento (`nz_call_procedure`).
