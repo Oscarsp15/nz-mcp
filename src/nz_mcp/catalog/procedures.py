@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 from contextlib import closing
 from dataclasses import dataclass
 from typing import Any, Final, Protocol, cast
@@ -21,7 +22,7 @@ from nz_mcp.catalog.nzplsql_parser import (
 )
 from nz_mcp.catalog.resolver import resolve_query
 from nz_mcp.catalog.row_shape import is_sequence_row
-from nz_mcp.config import Profile
+from nz_mcp.config import TIMEOUT_S_CAP, Profile
 from nz_mcp.connection import open_connection
 from nz_mcp.errors import (
     InputTooBroadError,
@@ -29,8 +30,10 @@ from nz_mcp.errors import (
     NetezzaError,
     ObjectNotFoundError,
     OverloadAmbiguousError,
+    QueryTimeoutError,
     SectionNotFoundError,
 )
+from nz_mcp.i18n import both
 from nz_mcp.logging_utils import sanitize
 
 
@@ -61,6 +64,10 @@ _ROW_LIST_MIN: Final[int] = 6
 FIND_TABLE_REFERENCES_SCAN_CAP: Final[int] = 5000
 FIND_TABLE_REFERENCES_RESULT_CAP: Final[int] = 1000
 
+# Soft threshold above which ``nz_find_table_references`` warns about scan cost
+# (issue #308). Below it the hint would be noise on every small-schema call.
+FIND_TABLE_REFERENCES_HINT_THRESHOLD: Final[int] = 200
+
 # Column order from ``GET_PROCEDURE_DDL`` / ``GET_PROCEDURE_SECTION`` SELECT.
 _DDL_TUPLE_INDEX: Final[dict[str, int]] = {
     "PROCEDURE": 0,
@@ -71,6 +78,18 @@ _DDL_TUPLE_INDEX: Final[dict[str, int]] = {
     "PROCEDURESIGNATURE": 5,
     "CREATEDATE": 6,
 }
+
+
+def _is_socket_timeout(exc: BaseException) -> bool:
+    """Return True when *exc* looks like a socket read timeout from the driver.
+
+    Mirrors the detector in :mod:`nz_mcp.catalog.call`: ``TimeoutError`` covers
+    ``socket.timeout`` (same class in Python 3.11+), and nzpy may surface it as a
+    bare ``OSError``, so the message is matched as a fallback.
+    """
+    if isinstance(exc, TimeoutError):
+        return True
+    return isinstance(exc, OSError) and "timed out" in str(exc).lower()
 
 
 class _ListCursor(Protocol):
@@ -382,8 +401,17 @@ def get_all_procedures_ddl(
     database: str,
     schema: str,
     pattern: str | None = None,
+    *,
+    timeout_s: int | None = None,
 ) -> dict[str, Any]:
-    """Batch fetch all procedure DDLs for a given schema."""
+    """Batch fetch all procedure DDLs for a given schema.
+
+    ``timeout_s`` caps the socket read timeout of the batch query. When omitted the
+    profile default applies. A socket read timeout is surfaced as a
+    :class:`QueryTimeoutError` carrying a narrowing hint (issue #308) instead of the
+    generic driver error, because for a wide schema the caller's only way out is to
+    narrow the scan.
+    """
     validate_catalog_identifier(schema)
     like_pattern = pattern if pattern else None
     params: tuple[str, str | None, str | None] = (schema, like_pattern, like_pattern)
@@ -391,12 +419,26 @@ def get_all_procedures_ddl(
     base_sql = resolve_query("get_all_procedures_ddl", profile)
     sql = render_cross_db(base_sql, database=database)
 
-    connection = cast(_ConnectionList, open_connection(profile, password))
+    connection = cast(
+        _ConnectionList,
+        open_connection(profile, password)
+        if timeout_s is None
+        else open_connection(profile, password, timeout=timeout_s),
+    )
     try:
         with closing(connection.cursor()) as cursor:
             cursor.execute(sql, params)
             rows = cursor.fetchall()
     except Exception as exc:  # noqa: BLE001, RUF100
+        if _is_socket_timeout(exc):
+            hints = both("HINT.CATALOG_SCAN_TIMEOUT", timeout_s=timeout_s, cap=TIMEOUT_S_CAP)
+            raise QueryTimeoutError(
+                operation="get_all_procedures_ddl",
+                database=database,
+                timeout_s=timeout_s,
+                hint_es=hints["es"],
+                hint_en=hints["en"],
+            ) from exc
         raise NetezzaError(
             operation="get_all_procedures_ddl",
             database=database,
@@ -774,6 +816,8 @@ def find_table_references(
     table_database: str | None = None,
     table_schema: str | None = None,
     pattern: str | None = None,
+    timeout_s: int | None = None,
+    max_procedures: int | None = None,
 ) -> dict[str, Any]:
     """Return procedures in ``schema`` that read or write ``table``.
 
@@ -783,26 +827,59 @@ def find_table_references(
 
     The ``pattern`` (``LIKE`` filter on procedure name) is applied at the
     catalog query level. After filtering, the candidate set must still be
-    within :data:`FIND_TABLE_REFERENCES_SCAN_CAP`; otherwise an
-    :class:`InputTooBroadError` is raised.
+    within the effective scan cap; otherwise an :class:`InputTooBroadError`
+    is raised.
 
-    Returns a ``dict`` shaped to match ``GetFindTableReferencesOutput``
-    minus the ``duration_ms`` field, which the tool layer fills in.
+    ``timeout_s`` is opt-in: when given it sets the socket read timeout of the
+    batch fetch *and* a deadline for the in-process scan. When omitted, the
+    profile's socket timeout applies and the scan is not deadline-bound, which
+    is exactly the behaviour before issue #308 — the default must not turn a
+    normal wide scan into a partial result.
+
+    ``max_procedures`` lets the caller tighten the scan universe below
+    :data:`FIND_TABLE_REFERENCES_SCAN_CAP`. It is enforced by a cheap
+    pre-count (no ``PROCEDURESOURCE``) so an over-wide scan fails fast instead
+    of paying for the whole DDL fetch first. Exceeding it raises instead of
+    truncating: for impact analysis a silently partial result is worse than a
+    loud failure.
+
+    Returns a ``dict`` shaped to match ``GetFindTableReferencesOutput`` minus
+    ``duration_ms`` (filled by the tool layer) and plus ``hint_key`` /
+    ``hint_fmt``, which the tool layer localizes.
     """
     validate_catalog_identifier(schema)
 
-    raw = get_all_procedures_ddl(profile, database, schema, pattern=pattern)
+    scan_cap = (
+        FIND_TABLE_REFERENCES_SCAN_CAP
+        if max_procedures is None
+        else min(max_procedures, FIND_TABLE_REFERENCES_SCAN_CAP)
+    )
+    if max_procedures is not None:
+        # Cheap pre-count: names only, no PROCEDURESOURCE, so the expensive fetch
+        # is never paid when the caller already declared a tighter universe.
+        candidate_count = len(list_procedures(profile, database, schema, pattern=pattern))
+        if candidate_count > scan_cap:
+            raise InputTooBroadError(scanned=candidate_count, cap=scan_cap)
+
+    deadline = None if timeout_s is None else time.monotonic() + timeout_s
+
+    raw = get_all_procedures_ddl(profile, database, schema, pattern=pattern, timeout_s=timeout_s)
     procedures = raw["procedures"]
     scanned = len(procedures)
 
-    if scanned > FIND_TABLE_REFERENCES_SCAN_CAP:
+    # Safety net: the universe may have grown between the pre-count and the fetch.
+    if scanned > scan_cap:
         raise InputTooBroadError(
             scanned=scanned,
-            cap=FIND_TABLE_REFERENCES_SCAN_CAP,
+            cap=scan_cap,
         )
 
     references: list[dict[str, Any]] = []
+    timed_out = False
     for proc in procedures:
+        if deadline is not None and time.monotonic() > deadline:
+            timed_out = True
+            break
         # ``ddl`` includes the reconstructed CREATE OR REPLACE header. The
         # reference detection must scan the full reconstructed DDL because
         # signatures and bodies both live in user space — but in practice
@@ -847,9 +924,25 @@ def find_table_references(
     if truncated:
         references = references[:FIND_TABLE_REFERENCES_RESULT_CAP]
 
+    hint_key: str | None = None
+    hint_fmt: dict[str, object] = {}
+    if timed_out:
+        hint_key = "HINT.FIND_TABLE_REFERENCES_TIMEOUT"
+        hint_fmt = {"timeout_s": timeout_s, "cap": TIMEOUT_S_CAP}
+    elif scanned >= FIND_TABLE_REFERENCES_HINT_THRESHOLD:
+        hint_key = "HINT.FIND_TABLE_REFERENCES_LARGE_SCAN"
+        hint_fmt = {
+            "scanned": scanned,
+            "threshold": FIND_TABLE_REFERENCES_HINT_THRESHOLD,
+            "cap": scan_cap,
+        }
+
     return {
         "references": references,
         "scanned_count": scanned,
         "match_count": len(references),
         "truncated": truncated,
+        "timed_out": timed_out,
+        "hint_key": hint_key,
+        "hint_fmt": hint_fmt,
     }
