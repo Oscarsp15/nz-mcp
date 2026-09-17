@@ -28,7 +28,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (45 tools registradas)
+## Catálogo v0.1 (46 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -1408,6 +1408,39 @@ Compara el esquema de dos tablas o vistas: columnas solo en A, solo en B, discre
 
 ---
 
+#### 46. `nz_find_duplicates`
+
+Cuenta grupos de clave duplicados en una tabla y muestrea las claves ofensoras (modo `read`). Netezza no enforcea PK/UNIQUE (issue #134), así que el catálogo no avisa: esta tool es el control del analista para una carga que corrió dos veces o un join que multiplicó filas. Ejecuta dos `SELECT` validados por `sql_guard`: uno de conteo (`COUNT(*)` de grupos con `HAVING COUNT(*) > 1` y suma de filas) y uno de muestra (`GROUP BY ... HAVING COUNT(*) > 1 ORDER BY CNT DESC LIMIT limit`). Exige que la BD coincida con la del perfil activo (misma regla que `nz_table_sample`).
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | Debe coincidir con la BD del perfil activo. |
+| `schema` | string (required) | |
+| `table` | string (required) | |
+| `key_columns` | array of string (required) | Columnas que forman la clave lógica (≥ 1). |
+| `limit` | int (default 10, cap 100) | Máx. de grupos duplicados a muestrear. |
+
+**Output**:
+```json
+{
+  "duplicate_groups": 3,
+  "duplicate_rows": 7,
+  "sample": [{"key": ["12345"], "count": 3}],
+  "truncated": false,
+  "hint": null,
+  "duration_ms": 420
+}
+```
+
+**Reglas**:
+- `duplicate_groups` = número de combinaciones de `key_columns` que aparecen más de una vez; `duplicate_rows` = total de filas que caen en esos grupos (suma de conteos).
+- `sample` devuelve hasta `limit` grupos ordenados por conteo descendente; `truncated=true` + `hint` cuando hay más grupos que `limit`.
+- Si la tabla no existe o no es visible → `OBJECT_NOT_FOUND`. Si alguna columna de `key_columns` no existe → `INVALID_INPUT` (con las columnas disponibles en el `detail`); `key_columns` vacío o con columnas repetidas → `INVALID_INPUT`.
+- Los valores de `key` se serializan a texto (`null` se conserva como `null`).
+- Fuera de alcance: comparar dos tablas (`nz_compare_rows`, #302), comparar filas completas, o borrar/corregir duplicados.
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -1416,7 +1449,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
 |---|---|---|---|
-| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_find_column`, `nz_compare_tables`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
+| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_find_column`, `nz_find_duplicates`, `nz_compare_tables`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
 | `nz_insert` | false | false | false |
 | `nz_insert_select` | false | false | false |
 | `nz_update`, `nz_delete` | false | true | false |

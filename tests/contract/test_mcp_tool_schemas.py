@@ -30,6 +30,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_execute_ddl",
     "nz_explain",
     "nz_export_ddl",
+    "nz_find_duplicates",
     "nz_find_table_references",
     "nz_get_procedure_ddl",
     "nz_get_procedure_section",
