@@ -194,8 +194,15 @@ Devuelve una muestra pequeña (10 filas) para entender el shape. El `database` d
 | `schema` | string (required) | |
 | `table` | string (required) | |
 | `rows` | int (default 10, cap 50) | |
+| `where` | string (optional, max 2048) | Predicado SQL crudo para una muestra dirigida (p. ej. `FECDESEMBOLSO >= '2026-01-01'`). |
+| `order_by` | string (optional, max 2048) | Fragmento `ORDER BY` crudo para una muestra reproducible (p. ej. `FECDESEMBOLSO DESC, ID`). |
 
 **Output**: mismo formato que `nz_query_select` (incl. `columns`, `rows`, `row_count`, `truncated`, `duration_ms`, `hint`).
+
+**Reglas**:
+- `where` y `order_by` son **fragmentos SQL crudos**, no identificadores. La sentencia compuesta (`SELECT * FROM schema.table [WHERE …] [ORDER BY …]`) se valida entera con `sql_guard.validate(mode="read")`: se rechazan sentencias apiladas (`STACKED_NOT_ALLOWED`), tipos que no sean `SELECT` y CTEs con mutación. Un fragmento inválido o no read-only → `GUARD_REJECTED`.
+- El `LIMIT` se inyecta/acota al final con el cap `rows` (si el fragmento ya trae `LIMIT`, se reescribe a `rows` si es mayor).
+- El guard de misma-BD y el cap `rows` siguen intactos.
 
 ---
 
