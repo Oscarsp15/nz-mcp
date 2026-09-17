@@ -333,6 +333,22 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Lista truncada en {n} de {total} procedimientos. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
         "en": "List truncated at {n} of {total} procedures. Narrow it with 'pattern' or raise 'max_rows' (max {cap}).",
     },
+    "HINT.TABLE_LIST_TRUNCATED": {
+        "es": "Lista truncada en {n} de {total} tablas. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
+        "en": "List truncated at {n} of {total} tables. Narrow it with 'pattern' or raise 'max_rows' (max {cap}).",
+    },
+    "HINT.VIEW_LIST_TRUNCATED": {
+        "es": "Lista truncada en {n} de {total} vistas. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
+        "en": "List truncated at {n} of {total} views. Narrow it with 'pattern' or raise 'max_rows' (max {cap}).",
+    },
+    "HINT.SCHEMA_LIST_TRUNCATED": {
+        "es": "Lista truncada en {n} de {total} esquemas. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
+        "en": "List truncated at {n} of {total} schemas. Narrow it with 'pattern' or raise 'max_rows' (max {cap}).",
+    },
+    "HINT.DATABASE_LIST_TRUNCATED": {
+        "es": "Lista truncada en {n} de {total} bases de datos. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
+        "en": "List truncated at {n} of {total} databases. Narrow it with 'pattern' or raise 'max_rows' (max {cap}).",
+    },
     "HINT.COLUMN_SEARCH_TRUNCATED": {
         "es": (
             "Resultado truncado en {n} de {total} columnas. Acota con 'schema_pattern' o "

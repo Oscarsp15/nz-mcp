@@ -8,8 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from nz_mcp.catalog.ddl import execute_drop_view
 from nz_mcp.catalog.views import get_view_ddl, list_views
-from nz_mcp.config import get_active_profile
+from nz_mcp.config import MAX_ROWS_CAP, get_active_profile
 from nz_mcp.errors import InvalidInputError
+from nz_mcp.i18n import t
 from nz_mcp.tools.registry import tool
 from nz_mcp.tools.timing import monotonic_duration_ms, monotonic_start
 
@@ -23,6 +24,15 @@ class ListViewsInput(BaseModel):
         max_length=128,
     )
     pattern: str | None = Field(default=None, min_length=1, max_length=128)
+    max_rows: int | None = Field(
+        default=None,
+        ge=1,
+        le=MAX_ROWS_CAP,
+        description=(
+            "Maximum number of views to return. Defaults to the active profile's "
+            "max_rows_default; always capped at MAX_ROWS_CAP."
+        ),
+    )
 
 
 class ViewItem(BaseModel):
@@ -34,6 +44,14 @@ class ViewItem(BaseModel):
 class ListViewsOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     views: list[ViewItem]
+    truncated: bool = Field(
+        default=False,
+        description="True when the schema holds more views than max_rows.",
+    )
+    hint: str | None = Field(
+        default=None,
+        description="Localized guidance on how to reach the views left out.",
+    )
     duration_ms: int = Field(ge=0, description="Wall time to run the catalog query (milliseconds).")
 
 
@@ -74,6 +92,8 @@ class DropViewOutput(BaseModel):
     description=(
         "List Netezza views in a schema. "
         "Use to discover view names before fetching DDL. "
+        "The result is capped by max_rows (profile default); when truncated, "
+        "narrow the search with pattern instead of raising max_rows blindly. "
         "Do not use for tables, materialized views, or procedures."
     ),
     mode="read",
@@ -88,14 +108,25 @@ def nz_list_views(
 ) -> ListViewsOutput:
     start = monotonic_start()
     profile = get_active_profile(path=config_path)
+    requested = params.max_rows if params.max_rows is not None else profile.max_rows_default
+    max_rows = min(requested, MAX_ROWS_CAP)
     rows = list_views(
         profile,
         database=params.database,
         schema=params.view_schema,
         pattern=params.pattern,
     )
+    total = len(rows)
+    truncated = total > max_rows
+    hint = (
+        t("HINT.VIEW_LIST_TRUNCATED", None, n=max_rows, total=total, cap=MAX_ROWS_CAP)
+        if truncated
+        else None
+    )
     return ListViewsOutput(
-        views=[ViewItem(name=r["name"], owner=r["owner"]) for r in rows],
+        views=[ViewItem(name=r["name"], owner=r["owner"]) for r in rows[:max_rows]],
+        truncated=truncated,
+        hint=hint,
         duration_ms=monotonic_duration_ms(start),
     )
 
