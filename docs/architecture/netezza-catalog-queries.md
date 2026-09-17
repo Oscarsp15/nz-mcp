@@ -33,6 +33,7 @@ Baseline actual de validación:
 | `nz_list_views` | ✅ validada |
 | `nz_get_view_ddl` | ✅ validada |
 | `nz_describe_table` (columns) | ✅ validada |
+| `nz_describe_table` (kind) | ✅ validada |
 | `nz_describe_table` (distribution) | ✅ validada |
 | `nz_describe_table` (primary key) | ✅ validada |
 | `nz_describe_table` (foreign keys) | ✅ validada |
@@ -92,12 +93,17 @@ ORDER BY SCHEMA;
 Vistas: `<BD>.._V_TABLE`
 
 ```sql
-SELECT TABLENAME AS NAME, OWNER
+SELECT TABLENAME AS NAME, OWNER, OBJTYPE
 FROM <BD>.._V_TABLE
-WHERE SCHEMA = UPPER(?) AND OBJTYPE='TABLE'
+WHERE SCHEMA = UPPER(?) AND (? IS NULL OR OBJTYPE = UPPER(?))
   AND (? IS NULL OR TABLENAME LIKE UPPER(?))
 ORDER BY TABLENAME;
 ```
+
+`OBJTYPE` real: `TABLE` o `EXTERNAL TABLE` (issue #295). El parámetro `object_type` de la
+tool controla el filtro: `TABLE` (default) pasa `'TABLE'`, `EXTERNAL TABLE` pasa
+`'EXTERNAL TABLE'`, `ALL` pasa `NULL` (sin filtrar). `kind` en el output es el `OBJTYPE`
+real de cada fila, no un valor fijo.
 
 ### `nz_list_views`
 
@@ -143,9 +149,27 @@ WHERE SCHEMA = UPPER(?) AND NAME = UPPER(?)
 ORDER BY ATTNUM;
 ```
 
+### `nz_describe_table` (kind real)
+
+Vistas: `<BD>.._V_TABLE`
+
+```sql
+SELECT OBJTYPE
+FROM <BD>.._V_TABLE
+WHERE SCHEMA = UPPER(?) AND TABLENAME = UPPER(?);
+```
+
+Comportamiento (issue #295):
+
+- `>=1` fila: el objeto es tabla; `kind` = `OBJTYPE` real (`TABLE` o `EXTERNAL TABLE`).
+- `0` filas: el objeto no está en `_V_TABLE`, así que es una vista (`kind = "VIEW"`); no
+  se consulta `_V_TABLE_DIST_MAP` y el output omite `distribution`.
+
 ### `nz_describe_table` (distribución)
 
 Vistas: `<BD>.._V_TABLE_DIST_MAP`
+
+Solo se consulta cuando `kind` es `TABLE` o `EXTERNAL TABLE`.
 
 ```sql
 SELECT ATTNAME, DISTSEQNO

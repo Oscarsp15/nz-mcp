@@ -29,6 +29,10 @@ class _RoutingCursor:
         sql_l = self.executed_sql[-1].lower()
         if "_v_relation_column" in sql_l:
             return list(self._buckets.get("columns", []))
+        if "objtype" in sql_l:
+            # No explicit "objtype" bucket means "this is a plain base table",
+            # preserving old behaviour for every test that predates issue #295.
+            return list(self._buckets.get("objtype", [("TABLE",)]))
         if "_v_table_dist_map" in sql_l:
             return list(self._buckets.get("dist", []))
         if "contype = 'f'" in sql_l:
@@ -83,6 +87,7 @@ def test_describe_table_one_connection_four_queries(monkeypatch: pytest.MonkeyPa
         "resolve_query",
         lambda qid, _p: {
             "describe_table_columns": "SELECT ... FROM <BD>.._V_RELATION_COLUMN WHERE ...",
+            "describe_table_objtype": "SELECT OBJTYPE FROM <BD>.._V_TABLE WHERE ...",
             "describe_table_distribution": "SELECT ... FROM <BD>.._V_TABLE_DIST_MAP WHERE ...",
             "describe_table_pk": (
                 "SELECT ... FROM <BD>.._V_RELATION_KEYDATA WHERE ... AND CONTYPE = 'p' ..."
@@ -95,11 +100,12 @@ def test_describe_table_one_connection_four_queries(monkeypatch: pytest.MonkeyPa
 
     out = describe_table(_profile(), database="DB", schema="PUBLIC", table="T")
 
-    assert len(cursor.executed_sql) == 4
+    assert len(cursor.executed_sql) == 5
     assert cursor.executed_params[0] == ("PUBLIC", "T")
-    assert cursor.executed_params[1] == ("DB", "PUBLIC", "T")
-    assert cursor.executed_params[2] == ("PUBLIC", "T")
+    assert cursor.executed_params[1] == ("PUBLIC", "T")
+    assert cursor.executed_params[2] == ("DB", "PUBLIC", "T")
     assert cursor.executed_params[3] == ("PUBLIC", "T")
+    assert cursor.executed_params[4] == ("PUBLIC", "T")
     assert out["name"] == "T"
     assert out["kind"] == "TABLE"
     assert len(out["columns"]) == 2
@@ -127,6 +133,7 @@ def test_describe_table_orders_hash_columns_by_distseq(monkeypatch: pytest.Monke
         "resolve_query",
         lambda qid, _p: {
             "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_objtype": "_V_TABLE OBJTYPE",
             "describe_table_distribution": "_V_TABLE_DIST_MAP",
             "describe_table_pk": "CONTYPE = 'p'",
             "describe_table_fk": "CONTYPE = 'f'",
@@ -152,6 +159,7 @@ def test_describe_table_random_distribution(monkeypatch: pytest.MonkeyPatch) -> 
         "resolve_query",
         lambda qid, _p: {
             "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_objtype": "_V_TABLE OBJTYPE",
             "describe_table_distribution": "_V_TABLE_DIST_MAP",
             "describe_table_pk": "CONTYPE = 'p'",
             "describe_table_fk": "CONTYPE = 'f'",
@@ -200,6 +208,7 @@ def test_describe_table_foreign_key_cross_database(monkeypatch: pytest.MonkeyPat
         "resolve_query",
         lambda qid, _p: {
             "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_objtype": "_V_TABLE OBJTYPE",
             "describe_table_distribution": "_V_TABLE_DIST_MAP",
             "describe_table_pk": "CONTYPE = 'p'",
             "describe_table_fk": "CONTYPE = 'f'",
@@ -278,6 +287,7 @@ def test_describe_table_routing_detects_pk_query(monkeypatch: pytest.MonkeyPatch
         "resolve_query",
         lambda qid, _p: {
             "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_objtype": "_V_TABLE OBJTYPE",
             "describe_table_distribution": "_V_TABLE_DIST_MAP",
             "describe_table_pk": ("FROM <BD>.._V_RELATION_KEYDATA WHERE ... CONTYPE = 'p' ..."),
             "describe_table_fk": ("FROM <BD>.._V_RELATION_KEYDATA WHERE ... CONTYPE = 'f' ..."),
@@ -331,6 +341,7 @@ def test_describe_table_dict_shaped_catalog_rows(monkeypatch: pytest.MonkeyPatch
         "resolve_query",
         lambda qid, _p: {
             "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_objtype": "_V_TABLE OBJTYPE",
             "describe_table_distribution": "_V_TABLE_DIST_MAP",
             "describe_table_pk": "CONTYPE = 'p'",
             "describe_table_fk": "CONTYPE = 'f'",
@@ -364,6 +375,7 @@ def test_describe_table_pk_lexicographic_constraint_choice(monkeypatch: pytest.M
         "resolve_query",
         lambda qid, _p: {
             "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_objtype": "_V_TABLE OBJTYPE",
             "describe_table_distribution": "_V_TABLE_DIST_MAP",
             "describe_table_pk": "CONTYPE = 'p'",
             "describe_table_fk": "CONTYPE = 'f'",
@@ -389,6 +401,7 @@ def test_describe_table_distribution_bad_dict_raises(monkeypatch: pytest.MonkeyP
         "resolve_query",
         lambda qid, _p: {
             "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_objtype": "_V_TABLE OBJTYPE",
             "describe_table_distribution": "_V_TABLE_DIST_MAP",
             "describe_table_pk": "CONTYPE = 'p'",
             "describe_table_fk": "CONTYPE = 'f'",
@@ -416,6 +429,7 @@ def test_describe_table_column_bad_dict_raises(monkeypatch: pytest.MonkeyPatch) 
         "resolve_query",
         lambda qid, _p: {
             "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_objtype": "_V_TABLE OBJTYPE",
             "describe_table_distribution": "_V_TABLE_DIST_MAP",
             "describe_table_pk": "CONTYPE = 'p'",
             "describe_table_fk": "CONTYPE = 'f'",
@@ -445,6 +459,7 @@ def test_describe_table_pk_bad_dict_raises(monkeypatch: pytest.MonkeyPatch) -> N
         "resolve_query",
         lambda qid, _p: {
             "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_objtype": "_V_TABLE OBJTYPE",
             "describe_table_distribution": "_V_TABLE_DIST_MAP",
             "describe_table_pk": "CONTYPE = 'p'",
             "describe_table_fk": "CONTYPE = 'f'",
@@ -474,6 +489,7 @@ def test_describe_table_fk_bad_row_missing_constraint_raises(
         "resolve_query",
         lambda qid, _p: {
             "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_objtype": "_V_TABLE OBJTYPE",
             "describe_table_distribution": "_V_TABLE_DIST_MAP",
             "describe_table_pk": "CONTYPE = 'p'",
             "describe_table_fk": "CONTYPE = 'f'",
@@ -501,6 +517,7 @@ def test_describe_table_column_tuple_too_short_raises(monkeypatch: pytest.Monkey
         "resolve_query",
         lambda qid, _p: {
             "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_objtype": "_V_TABLE OBJTYPE",
             "describe_table_distribution": "_V_TABLE_DIST_MAP",
             "describe_table_pk": "CONTYPE = 'p'",
             "describe_table_fk": "CONTYPE = 'f'",
@@ -532,6 +549,7 @@ def test_describe_table_not_null_zero_and_f_string(monkeypatch: pytest.MonkeyPat
         "resolve_query",
         lambda qid, _p: {
             "describe_table_columns": "_V_RELATION_COLUMN",
+            "describe_table_objtype": "_V_TABLE OBJTYPE",
             "describe_table_distribution": "_V_TABLE_DIST_MAP",
             "describe_table_pk": "CONTYPE = 'p'",
             "describe_table_fk": "CONTYPE = 'f'",
@@ -541,3 +559,96 @@ def test_describe_table_not_null_zero_and_f_string(monkeypatch: pytest.MonkeyPat
     out = describe_table(_profile(), database="DB", schema="S", table="T")
     assert out["columns"][0]["nullable"] is True
     assert out["columns"][1]["nullable"] is True
+
+
+# ── issue #295: real ``kind`` and no ``distribution`` for views ─────────────
+
+
+def _resolve_query_map(qid: str, _profile: object) -> str:
+    mapping = {
+        "describe_table_columns": "_V_RELATION_COLUMN",
+        "describe_table_objtype": "_V_TABLE OBJTYPE",
+        "describe_table_distribution": "_V_TABLE_DIST_MAP",
+        "describe_table_pk": "CONTYPE = 'p'",
+        "describe_table_fk": "CONTYPE = 'f'",
+    }
+    return mapping[qid]
+
+
+def test_describe_table_view_kind_omits_distribution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Issue #295: a view has no row in _V_TABLE, so kind is VIEW and distribution is absent."""
+    buckets = {
+        "columns": [("ID", "INTEGER", True, None, 1)],
+        "objtype": [],
+        "pk": [],
+        "fk": [],
+    }
+    cursor = _RoutingCursor(buckets)
+    monkeypatch.setattr(tables_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(tables_mod, "open_connection", lambda *_a, **_k: _FakeConn(cursor))
+    monkeypatch.setattr(tables_mod, "resolve_query", _resolve_query_map)
+
+    out = describe_table(_profile(), database="DB", schema="DBO", table="V_MODELOVERSION")
+
+    assert out["kind"] == "VIEW"
+    assert "distribution" not in out
+    # The distribution catalog query must not even be issued for a view.
+    assert not any("_v_table_dist_map" in sql.lower() for sql in cursor.executed_sql)
+
+
+def test_describe_table_external_table_kind_keeps_distribution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #295: an external table's OBJTYPE is reported as-is and distribution stays."""
+    buckets = {
+        "columns": [("ID", "INTEGER", True, None, 1)],
+        "objtype": [("EXTERNAL TABLE",)],
+        "dist": [],
+        "pk": [],
+        "fk": [],
+    }
+    cursor = _RoutingCursor(buckets)
+    monkeypatch.setattr(tables_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(tables_mod, "open_connection", lambda *_a, **_k: _FakeConn(cursor))
+    monkeypatch.setattr(tables_mod, "resolve_query", _resolve_query_map)
+
+    out = describe_table(_profile(), database="DB", schema="DBO", table="STG_S3_ORDERS")
+
+    assert out["kind"] == "EXTERNAL TABLE"
+    assert out["distribution"] == {"type": "RANDOM", "columns": []}
+
+
+def test_describe_table_objtype_dict_shaped_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    buckets = {
+        "columns": [("ID", "INTEGER", True, None, 1)],
+        "objtype": [{"OBJTYPE": "TABLE"}],
+        "dist": [],
+        "pk": [],
+        "fk": [],
+    }
+    cursor = _RoutingCursor(buckets)
+    monkeypatch.setattr(tables_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(tables_mod, "open_connection", lambda *_a, **_k: _FakeConn(cursor))
+    monkeypatch.setattr(tables_mod, "resolve_query", _resolve_query_map)
+
+    out = describe_table(_profile(), database="DB", schema="DBO", table="T")
+    assert out["kind"] == "TABLE"
+
+
+def test_describe_table_objtype_bad_dict_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    buckets = {
+        "columns": [("ID", "INTEGER", True, None, 1)],
+        "objtype": [{"NOT_OBJTYPE": "TABLE"}],
+        "dist": [],
+        "pk": [],
+        "fk": [],
+    }
+    cursor = _RoutingCursor(buckets)
+    monkeypatch.setattr(tables_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(tables_mod, "open_connection", lambda *_a, **_k: _FakeConn(cursor))
+    monkeypatch.setattr(tables_mod, "resolve_query", _resolve_query_map)
+
+    with pytest.raises(NetezzaError) as exc:
+        describe_table(_profile(), database="DB", schema="DBO", table="T")
+
+    assert "OBJTYPE" in exc.value.context["detail"]

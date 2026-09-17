@@ -16,12 +16,12 @@ class _FakeCursor:
         self.rows = rows
         self.closed = False
         self.executed_sql: str | None = None
-        self.executed_params: tuple[str, str | None, str | None] | None = None
+        self.executed_params: tuple[str | None, ...] | None = None
 
     def execute(
         self,
         sql: str,
-        params: tuple[str, str | None, str | None],
+        params: tuple[str | None, ...],
     ) -> None:
         self.executed_sql = sql
         self.executed_params = params
@@ -57,7 +57,7 @@ def _profile() -> Profile:
 
 
 def test_list_tables_queries_catalog_with_optional_like(monkeypatch: pytest.MonkeyPatch) -> None:
-    cursor = _FakeCursor(rows=[("T1", "OWN"), ("T2", "OWN")])
+    cursor = _FakeCursor(rows=[("T1", "OWN", "TABLE"), ("T2", "OWN", "TABLE")])
     connection = _FakeConnection(cursor)
 
     monkeypatch.setattr("nz_mcp.catalog.tables.get_password", lambda _name: "pw")
@@ -68,8 +68,8 @@ def test_list_tables_queries_catalog_with_optional_like(monkeypatch: pytest.Monk
     monkeypatch.setattr(
         "nz_mcp.catalog.tables.resolve_query",
         lambda _query_id, _profile: (
-            "SELECT TABLENAME AS NAME, OWNER FROM <BD>.._V_TABLE "
-            "WHERE SCHEMA = UPPER(?) AND OBJTYPE='TABLE' "
+            "SELECT TABLENAME AS NAME, OWNER, OBJTYPE FROM <BD>.._V_TABLE "
+            "WHERE SCHEMA = UPPER(?) AND (? IS NULL OR OBJTYPE = UPPER(?)) "
             "AND (? IS NULL OR TABLENAME LIKE UPPER(?)) ORDER BY TABLENAME"
         ),
     )
@@ -84,13 +84,74 @@ def test_list_tables_queries_catalog_with_optional_like(monkeypatch: pytest.Monk
     assert "_v_table" in cursor.executed_sql.lower()
     assert "<bd>" not in cursor.executed_sql.lower()
     assert "ANALYTICS.." in cursor.executed_sql
-    assert cursor.executed_params == ("PUBLIC", "T%", "T%")
+    assert cursor.executed_params == ("PUBLIC", "TABLE", "TABLE", "T%", "T%")
     assert cursor.closed is True
     assert connection.closed is True
 
 
+def test_list_tables_object_type_all_passes_null_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+    cursor = _FakeCursor(rows=[("T1", "OWN", "TABLE"), ("X1", "OWN", "EXTERNAL TABLE")])
+    connection = _FakeConnection(cursor)
+
+    monkeypatch.setattr("nz_mcp.catalog.tables.get_password", lambda _name: "pw")
+    monkeypatch.setattr(
+        "nz_mcp.catalog.tables.open_connection",
+        lambda *_args, **_kwargs: connection,
+    )
+    monkeypatch.setattr(
+        "nz_mcp.catalog.tables.resolve_query",
+        lambda _query_id, _profile: (
+            "SELECT TABLENAME AS NAME, OWNER, OBJTYPE FROM <BD>.._V_TABLE "
+            "WHERE SCHEMA = UPPER(?) AND (? IS NULL OR OBJTYPE = UPPER(?)) "
+            "AND (? IS NULL OR TABLENAME LIKE UPPER(?)) ORDER BY TABLENAME"
+        ),
+    )
+
+    out = list_tables(
+        _profile(),
+        database="ANALYTICS",
+        schema="DBO",
+        object_type="ALL",
+    )
+
+    assert out == [
+        {"name": "T1", "kind": "TABLE"},
+        {"name": "X1", "kind": "EXTERNAL TABLE"},
+    ]
+    assert cursor.executed_params == ("DBO", None, None, None, None)
+
+
+def test_list_tables_object_type_external_table_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+    cursor = _FakeCursor(rows=[("X1", "OWN", "EXTERNAL TABLE")])
+    connection = _FakeConnection(cursor)
+
+    monkeypatch.setattr("nz_mcp.catalog.tables.get_password", lambda _name: "pw")
+    monkeypatch.setattr(
+        "nz_mcp.catalog.tables.open_connection",
+        lambda *_args, **_kwargs: connection,
+    )
+    monkeypatch.setattr(
+        "nz_mcp.catalog.tables.resolve_query",
+        lambda _query_id, _profile: (
+            "SELECT TABLENAME AS NAME, OWNER, OBJTYPE FROM <BD>.._V_TABLE "
+            "WHERE SCHEMA = UPPER(?) AND (? IS NULL OR OBJTYPE = UPPER(?)) "
+            "AND (? IS NULL OR TABLENAME LIKE UPPER(?)) ORDER BY TABLENAME"
+        ),
+    )
+
+    out = list_tables(
+        _profile(),
+        database="ANALYTICS",
+        schema="DBO",
+        object_type="EXTERNAL TABLE",
+    )
+
+    assert out == [{"name": "X1", "kind": "EXTERNAL TABLE"}]
+    assert cursor.executed_params == ("DBO", "EXTERNAL TABLE", "EXTERNAL TABLE", None, None)
+
+
 def test_list_tables_accepts_dict_rows_with_name_alias(monkeypatch: pytest.MonkeyPatch) -> None:
-    cursor = _FakeCursor(rows=[{"NAME": "T1", "OWNER": "O"}])
+    cursor = _FakeCursor(rows=[{"NAME": "T1", "OWNER": "O", "OBJTYPE": "TABLE"}])
     connection = _FakeConnection(cursor)
     monkeypatch.setattr("nz_mcp.catalog.tables.get_password", lambda _name: "pw")
     monkeypatch.setattr(
@@ -99,7 +160,7 @@ def test_list_tables_accepts_dict_rows_with_name_alias(monkeypatch: pytest.Monke
     )
     monkeypatch.setattr(
         "nz_mcp.catalog.tables.resolve_query",
-        lambda _query_id, _profile: "SELECT TABLENAME AS NAME, OWNER FROM <BD>.._V_TABLE",
+        lambda _query_id, _profile: "SELECT TABLENAME AS NAME, OWNER, OBJTYPE FROM <BD>.._V_TABLE",
     )
 
     out = list_tables(_profile(), database="DB", schema="S", pattern=None)
@@ -107,7 +168,7 @@ def test_list_tables_accepts_dict_rows_with_name_alias(monkeypatch: pytest.Monke
 
 
 def test_list_tables_accepts_dict_rows_with_tablename(monkeypatch: pytest.MonkeyPatch) -> None:
-    cursor = _FakeCursor(rows=[{"TABLENAME": "T1", "OWNER": "O"}])
+    cursor = _FakeCursor(rows=[{"TABLENAME": "T1", "OWNER": "O", "OBJTYPE": "EXTERNAL TABLE"}])
     connection = _FakeConnection(cursor)
     monkeypatch.setattr("nz_mcp.catalog.tables.get_password", lambda _name: "pw")
     monkeypatch.setattr(
@@ -116,11 +177,11 @@ def test_list_tables_accepts_dict_rows_with_tablename(monkeypatch: pytest.Monkey
     )
     monkeypatch.setattr(
         "nz_mcp.catalog.tables.resolve_query",
-        lambda _query_id, _profile: "SELECT TABLENAME, OWNER FROM <BD>.._V_TABLE",
+        lambda _query_id, _profile: "SELECT TABLENAME, OWNER, OBJTYPE FROM <BD>.._V_TABLE",
     )
 
     out = list_tables(_profile(), database="DB", schema="S", pattern=None)
-    assert out == [{"name": "T1", "kind": "TABLE"}]
+    assert out == [{"name": "T1", "kind": "EXTERNAL TABLE"}]
 
 
 def test_list_tables_wraps_driver_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -128,7 +189,7 @@ def test_list_tables_wraps_driver_errors(monkeypatch: pytest.MonkeyPatch) -> Non
         def execute(
             self,
             sql: str,
-            params: tuple[str, str | None, str | None],
+            params: tuple[str | None, ...],
         ) -> None:
             _ = (sql, params)
             raise RuntimeError("catalog unavailable")
@@ -187,26 +248,26 @@ class _CaseInsensitiveLikeCursor:
     def __init__(self, names: list[str]) -> None:
         self._names = names
         self.executed_sql: str | None = None
-        self.executed_params: tuple[str, str | None, str | None] | None = None
+        self.executed_params: tuple[str | None, ...] | None = None
         self.closed = False
 
-    def execute(self, sql: str, params: tuple[str, str | None, str | None]) -> None:
+    def execute(self, sql: str, params: tuple[str | None, ...]) -> None:
         self.executed_sql = sql
         self.executed_params = params
 
-    def fetchall(self) -> list[tuple[str, str]]:
+    def fetchall(self) -> list[tuple[str, str, str]]:
         if self.executed_params is None:
             return []
-        _, marker, pattern = self.executed_params
+        _, _type_a, _type_b, marker, pattern = self.executed_params
         if marker is None or pattern is None:
-            return [(n, "OWN") for n in self._names]
+            return [(n, "OWN", "TABLE") for n in self._names]
         # Netezza's LIKE here is ``TABLENAME LIKE UPPER(?)``; the only wildcard
         # in test cases is ``%``, used as anchor stripping for substring match.
         upper_pattern = pattern.upper()
         if "%" not in upper_pattern:
-            return [(n, "OWN") for n in self._names if n == upper_pattern]
+            return [(n, "OWN", "TABLE") for n in self._names if n == upper_pattern]
         needle = upper_pattern.strip("%")
-        return [(n, "OWN") for n in self._names if needle in n]
+        return [(n, "OWN", "TABLE") for n in self._names if needle in n]
 
     def close(self) -> None:
         self.closed = True
@@ -272,7 +333,26 @@ def test_list_tables_pattern_is_case_insensitive(
 
 
 def test_list_tables_rejects_dict_without_name(monkeypatch: pytest.MonkeyPatch) -> None:
-    cursor = _FakeCursor(rows=[{"OWNER": "O"}])
+    cursor = _FakeCursor(rows=[{"OWNER": "O", "OBJTYPE": "TABLE"}])
+    connection = _FakeConnection(cursor)
+    monkeypatch.setattr("nz_mcp.catalog.tables.get_password", lambda _name: "pw")
+    monkeypatch.setattr(
+        "nz_mcp.catalog.tables.open_connection",
+        lambda *_args, **_kwargs: connection,
+    )
+    monkeypatch.setattr(
+        "nz_mcp.catalog.tables.resolve_query",
+        lambda _query_id, _profile: "SELECT TABLENAME AS NAME, OWNER, OBJTYPE FROM <BD>.._V_TABLE",
+    )
+
+    with pytest.raises(NetezzaError) as exc:
+        list_tables(_profile(), database="MYDB", schema="X")
+
+    assert "Catalog query must return" in exc.value.context["detail"]
+
+
+def test_list_tables_rejects_dict_without_objtype(monkeypatch: pytest.MonkeyPatch) -> None:
+    cursor = _FakeCursor(rows=[{"NAME": "T1", "OWNER": "O"}])
     connection = _FakeConnection(cursor)
     monkeypatch.setattr("nz_mcp.catalog.tables.get_password", lambda _name: "pw")
     monkeypatch.setattr(
