@@ -69,13 +69,53 @@ def test_parse_latest_accepts_info_version_without_releases() -> None:
 # --- the notice itself --------------------------------------------------------
 
 
-def test_update_notice_names_the_upgrade_commands() -> None:
-    notice = update_check.update_notice("0.1.0a3", "0.1.0a4", "en")
+@pytest.mark.parametrize(
+    ("installer", "expected"),
+    [
+        ("uv", "uv tool upgrade nz-mcp"),
+        ("pipx", "pipx upgrade nz-mcp --pip-args=--pre"),
+        ("pip", "pip install --upgrade --pre nz-mcp"),
+    ],
+)
+def test_update_notice_names_the_command_of_the_detected_installer(
+    installer: update_check.Installer, expected: str
+) -> None:
+    notice = update_check.update_notice("0.1.0a3", "0.1.0a4", "en", installer)
     assert notice is not None
     assert "0.1.0a4" in notice
     assert "0.1.0a3" in notice
-    assert "uv tool upgrade nz-mcp" in notice
-    assert "pip install --upgrade --pre nz-mcp" in notice
+    assert expected in notice
+
+
+@pytest.mark.parametrize(
+    ("executable", "prefix", "expected"),
+    [
+        (
+            r"C:\Users\x\AppData\Local\uv\tools\nz-mcp\Scripts\python.exe",
+            r"C:\Users\x\AppData\Local\uv\tools\nz-mcp",
+            "uv",
+        ),
+        ("/home/x/.local/share/uv/tools/nz-mcp/bin/python", "/home/x", "uv"),
+        (
+            "/home/x/.local/pipx/venvs/nz-mcp/bin/python",
+            "/home/x/.local/pipx/venvs/nz-mcp",
+            "pipx",
+        ),
+        (
+            r"C:\Users\x\AppData\Local\pipx\venvs\nz-mcp\Scripts\python.exe",
+            r"C:\Users\x\AppData\Local\pipx\venvs\nz-mcp",
+            "pipx",
+        ),
+        (r"C:\venv\Scripts\python.exe", r"C:\venv", "pip"),
+        ("/usr/bin/python3", "/usr", "pip"),
+        ("/home/x/uv-projects/tools/bin/python", "/home/x/uv-projects/tools", "pip"),
+    ],
+)
+def test_detect_installer_from_its_own_paths(
+    executable: str, prefix: str, expected: str
+) -> None:
+    """The manager is read from the paths, so the notice never names the wrong tool."""
+    assert update_check.detect_installer(executable, prefix) == expected
 
 
 @pytest.mark.parametrize("latest", ["0.1.0a4", "0.1.0a2", None])
@@ -91,7 +131,8 @@ def test_update_notice_is_silent_on_an_unparseable_version() -> None:
 def test_update_notice_renders_in_both_locales(locale: Locale) -> None:
     notice = update_check.update_notice("0.1.0a3", "0.1.0a4", locale)
     assert notice is not None
-    assert "uv tool upgrade nz-mcp" in notice
+    assert "nz-mcp" in notice
+    assert "0.1.0a4" in notice
 
 
 # --- stderr only: stdout is the MCP protocol channel --------------------------

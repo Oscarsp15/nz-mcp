@@ -40,7 +40,21 @@ Sigue la convención de `NZ_MCP_NO_CONSOLE_PREP` (ADR 0033): cualquier valor cue
 
 La comparación tiene que ordenar versiones **PEP 440 con pre-releases**: el proyecto publica `0.1.0aN`, y `0.1.0a10` es posterior a `0.1.0a4` (una comparación lexicográfica diría lo contrario). La implementación correcta de esa regla es `packaging.version.Version`, que ya viene instalada de forma transitiva pero pasa a ser **dependencia directa declarada** en `pyproject.toml` (regla 5 de AGENTS.md: dependencia nueva ⇒ ADR, que es este documento). `importlib.metadata.version("nz-mcp")` da la versión instalada; en un checkout sin metadatos de distribución cae a `nz_mcp.__version__`.
 
-### 6. Módulo nuevo `src/nz_mcp/update_check.py`, no una tool
+### 6. El comando de upgrade corresponde al gestor que instaló, no a `pip`
+
+`nz-mcp` se instala con `uv tool`, `pipx` o `pip`, y **no se deben mezclar**: `pip` no actualiza una instalación de `uv tool`/`pipx`, y forzarlo rompe el aislamiento para el que existen esos gestores. El aviso nombra **un solo comando**, el del gestor detectado:
+
+| Gestor | Comando |
+|---|---|
+| `uv tool` | `uv tool upgrade nz-mcp` |
+| `pipx` | `pipx upgrade nz-mcp --pip-args=--pre` |
+| `pip` / venv / sistema | `pip install --upgrade --pre nz-mcp` |
+
+La detección es **estructural y barata**: `uv` y `pipx` guardan cada tool en su propio venv con una ruta característica (`.../uv/tools/nz-mcp/...`, `.../pipx/venvs/nz-mcp/...`), así que `detect_installer()` busca **segmentos de ruta consecutivos** en `sys.executable` y `sys.prefix` y, si no encuentra ninguno, responde `pip`. Se comparan segmentos y no una subcadena, para que un directorio que solo contenga la palabra (`uv-projects/tools`) no decida nada. `--pre` está donde aplica, porque el proyecto publica en canal alpha.
+
+Se descartó listar los tres comandos en el aviso: un aviso con tres opciones obliga a decidir y admite el error de elegir el que no toca, que es exactamente el daño que se quiere evitar. El caso incierto (una instalación que no reconocemos) cae a `pip`, que es el gestor por defecto de Python y el único que no rompe nada si la instalación era de venv.
+
+### 7. Módulo nuevo `src/nz_mcp/update_check.py`, no una tool
 
 Vive al lado de las otras utilidades transversales (`diagnostic.py`, `profile_check.py`, `jobs.py`): no registra tool, no toca SQL, no es alcanzable por `tools/call` y por tanto **no aparece** en `tools-contract.md` ni en `EXPECTED_V010A0`. Solo importa `i18n`, `cli_output`, `config` y stdlib + `packaging`.
 
@@ -63,6 +77,7 @@ Vive al lado de las otras utilidades transversales (`diagnostic.py`, `profile_ch
 | Golpear PyPI en cada reinicio | Cache de 24 h en `update-check.json` |
 | Ruido en CI o en uso automatizado | `NZ_MCP_NO_UPDATE_CHECK=1` |
 | Ordenar mal las pre-releases (`a10` vs `a4`) | `packaging.version.Version`, dependencia directa declarada |
+| El aviso sugiere el comando de un gestor distinto del que instaló | Detección por segmentos de ruta consecutivos (`uv/tools`, `pipx/venvs`); `pip` por defecto |
 | El archivo de cache queda a medias | Escritura best-effort: un `OSError` se traga y la próxima ejecución reintenta |
 
 ## Alternativas consideradas

@@ -1293,11 +1293,11 @@ MESSAGES: Final[dict[str, Message]] = {
     "CLI.UPDATE_AVAILABLE": {
         "es": (
             "Hay una versión nueva de nz-mcp: {latest} (tienes {installed}). Actualiza con "
-            "'uv tool upgrade nz-mcp' o 'pip install --upgrade --pre nz-mcp'."
+            "'{command}'."
         ),
         "en": (
             "A new nz-mcp version is available: {latest} (you have {installed}). Upgrade with "
-            "'uv tool upgrade nz-mcp' or 'pip install --upgrade --pre nz-mcp'."
+            "'{command}'."
         ),
     },
 }

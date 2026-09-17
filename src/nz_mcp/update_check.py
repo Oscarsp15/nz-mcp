@@ -19,12 +19,14 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
+import sys
 import threading
 import time
 from collections.abc import Callable
 from importlib import metadata
 from pathlib import Path
-from typing import Final
+from typing import Final, Literal
 from urllib.request import urlopen
 
 from packaging.version import InvalidVersion, Version
@@ -164,11 +166,71 @@ def latest_version(
     return fetched
 
 
-def update_notice(installed: str, latest: str | None, locale: Locale) -> str | None:
+#: How the running installation was put on disk. The upgrade command differs per manager and
+#: they must not be mixed: ``pip`` cannot upgrade a pipx or uv tool, and forcing it breaks the
+#: isolation those tools exist to provide.
+Installer = Literal["uv", "pipx", "pip"]
+
+#: Path segments that identify a manager's private venv, checked in order. Consecutive
+#: segments rather than a substring, so a directory that merely contains the word does not
+#: decide it.
+_MANAGER_MARKERS: Final[tuple[tuple[tuple[str, ...], Installer], ...]] = (
+    (("uv", "tools"), "uv"),
+    (("pipx", "venvs"), "pipx"),
+)
+
+#: The command that upgrades this installation, per manager. ``--pre`` is required because
+#: the project publishes on the alpha channel; ``pipx`` forwards it through ``--pip-args``.
+_UPGRADE_COMMANDS: Final[dict[Installer, str]] = {
+    "uv": "uv tool upgrade nz-mcp",
+    "pipx": "pipx upgrade nz-mcp --pip-args=--pre",
+    "pip": "pip install --upgrade --pre nz-mcp",
+}
+
+
+def _path_parts(value: str) -> list[str]:
+    return [part.lower() for part in re.split(r"[\\/]+", value) if part]
+
+
+def _contains_sequence(parts: list[str], marker: tuple[str, ...]) -> bool:
+    width = len(marker)
+    return any(
+        tuple(parts[index : index + width]) == marker
+        for index in range(len(parts) - width + 1)
+    )
+
+
+def detect_installer(executable: str, prefix: str) -> Installer:
+    """Which manager owns the running installation, from its own paths.
+
+    ``uv`` and ``pipx`` each keep tools in a private venv with a distinctive path
+    (``.../uv/tools/nz-mcp/...``, ``.../pipx/venvs/nz-mcp/...``); anything else — a project
+    venv, a user install, a system Python — is upgraded with ``pip``. Asking the paths
+    instead of guessing keeps the notice from recommending a command that cannot work.
+    """
+    for value in (executable, prefix):
+        parts = _path_parts(value)
+        for marker, installer in _MANAGER_MARKERS:
+            if _contains_sequence(parts, marker):
+                return installer
+    return "pip"
+
+
+def upgrade_command(installer: Installer) -> str:
+    return _UPGRADE_COMMANDS[installer]
+
+
+def update_notice(
+    installed: str,
+    latest: str | None,
+    locale: Locale,
+    installer: Installer | None = None,
+) -> str | None:
     """The one-line notice when ``latest`` is newer than ``installed``, else ``None``.
 
     Equal versions and an unparseable one are silence: this exists to announce an upgrade,
-    not to grade what is installed.
+    not to grade what is installed. ``installer`` is detected from the running paths unless
+    the caller states it.
     """
     if latest is None:
         return None
@@ -178,7 +240,14 @@ def update_notice(installed: str, latest: str | None, locale: Locale) -> str | N
         return None
     if not newer:
         return None
-    return t("CLI.UPDATE_AVAILABLE", locale, installed=installed, latest=latest)
+    command = upgrade_command(installer or detect_installer(sys.executable, sys.prefix))
+    return t(
+        "CLI.UPDATE_AVAILABLE",
+        locale,
+        installed=installed,
+        latest=latest,
+        command=command,
+    )
 
 
 def run_update_check(*, locale: Locale | None = None) -> None:
@@ -215,9 +284,12 @@ def start_update_check() -> None:
 
 __all__: Final[tuple[str, ...]] = (
     "NO_UPDATE_CHECK_ENV",
+    "Installer",
+    "detect_installer",
     "installed_version",
     "latest_version",
     "run_update_check",
     "start_update_check",
     "update_notice",
+    "upgrade_command",
 )
