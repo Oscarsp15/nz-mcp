@@ -97,7 +97,11 @@ def get_view_ddl(
     schema: str,
     view: str,
 ) -> str:
-    """Return the ``DEFINITION`` text for a view from ``_v_view``.
+    """Return a re-executable ``CREATE OR REPLACE VIEW`` statement for a view.
+
+    ``_V_VIEW.DEFINITION`` stores only the SELECT body of the view, not the
+    ``CREATE VIEW … AS`` header. This function wraps the raw body into a
+    complete, re-executable DDL statement.
 
     Issue #125: ``_V_VIEW.DEFINITION`` is computed lazily from ``_T_RULE`` of the
     session's *current* catalog. When the target view lives in a database
@@ -142,7 +146,8 @@ def get_view_ddl(
             database=database,
             detail="No view definition returned for the given schema and view name.",
         )
-    return _row_to_definition(row)
+    definition = _row_to_definition(row)
+    return f"CREATE OR REPLACE VIEW {schema.upper()}.{view.upper()} AS\n{definition}"
 
 
 def _row_to_view_list_item(row: Any) -> dict[str, str]:
