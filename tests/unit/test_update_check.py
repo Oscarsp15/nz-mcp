@@ -111,9 +111,7 @@ def test_update_notice_names_the_command_of_the_detected_installer(
         ("/home/x/uv-projects/tools/bin/python", "/home/x/uv-projects/tools", "pip"),
     ],
 )
-def test_detect_installer_from_its_own_paths(
-    executable: str, prefix: str, expected: str
-) -> None:
+def test_detect_installer_from_its_own_paths(executable: str, prefix: str, expected: str) -> None:
     """The manager is read from the paths, so the notice never names the wrong tool."""
     assert update_check.detect_installer(executable, prefix) == expected
 

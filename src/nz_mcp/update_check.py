@@ -195,8 +195,7 @@ def _path_parts(value: str) -> list[str]:
 def _contains_sequence(parts: list[str], marker: tuple[str, ...]) -> bool:
     width = len(marker)
     return any(
-        tuple(parts[index : index + width]) == marker
-        for index in range(len(parts) - width + 1)
+        tuple(parts[index : index + width]) == marker for index in range(len(parts) - width + 1)
     )
 
 
