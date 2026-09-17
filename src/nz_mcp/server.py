@@ -183,6 +183,9 @@ def _i18n_key_for(code: str) -> str | None:
         "INVALID_DATABASE_NAME": "INVALID_DATABASE_NAME",
         "CONNECTION_FAILED": "CONNECTION_FAILED",
         "NETEZZA_ERROR": "NETEZZA_ERROR",
+        # Without this the payload for a socket read timeout said literally
+        # "QUERY_TIMEOUT" (issue #308).
+        "QUERY_TIMEOUT": "QUERY_TIMEOUT",
         # Without these two the payload said literally "INVALID_INPUT" and the reason
         # only survived inside ``context`` (issue #142).
         "INVALID_INPUT": "INVALID_INPUT",

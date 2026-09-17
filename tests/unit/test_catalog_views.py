@@ -549,3 +549,32 @@ def test_get_view_ddl_validates_database_identifier_before_set_catalog(
 
     # No statements should have been issued against the cursor.
     assert cursor.statements == []
+
+
+def test_get_view_ddl_validates_schema_and_view_identifiers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #326: a malformed ``schema``/``view`` must not reach the cursor.
+
+    Both are interpolated into the reconstructed ``CREATE OR REPLACE VIEW
+    <schema>.<view>`` header, so they must pass ``validate_catalog_identifier``
+    like the sibling catalog functions do.
+    """
+    from nz_mcp.errors import InvalidInputError
+
+    cursor = _FakeDdlCursor(one=("SELECT 1",))
+    connection = _FakeDdlConnection(cursor)
+    monkeypatch.setattr("nz_mcp.catalog.views.get_password", lambda _n: "pw")
+    monkeypatch.setattr("nz_mcp.catalog.views.open_connection", lambda *_a, **_k: connection)
+    monkeypatch.setattr(
+        "nz_mcp.catalog.views.resolve_query",
+        lambda _i, _p: "SELECT DEFINITION FROM <BD>.._V_VIEW WHERE A=1",
+    )
+
+    with pytest.raises(InvalidInputError):
+        get_view_ddl(_profile(), database="DB", schema="BAD; DROP TABLE T --", view="V")
+    assert cursor.statements == []
+
+    with pytest.raises(InvalidInputError):
+        get_view_ddl(_profile(), database="DB", schema="S", view="bad-view!")
+    assert cursor.statements == []
