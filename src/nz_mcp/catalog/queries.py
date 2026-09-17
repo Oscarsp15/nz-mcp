@@ -287,6 +287,31 @@ LIST_CONSTRAINTS: Final[CatalogQuery] = CatalogQuery(
     cross_database=True,
 )
 
+FIND_TABLE: Final[CatalogQuery] = CatalogQuery(
+    id="find_table",
+    sql=(
+        "SELECT SCHEMA, NAME, KIND FROM ("
+        "SELECT SCHEMA, TABLENAME AS NAME, CAST(OBJTYPE AS VARCHAR(64)) AS KIND "
+        "FROM <BD>.._V_TABLE "
+        "WHERE TABLENAME LIKE UPPER(?) AND (? IS NULL OR SCHEMA LIKE UPPER(?)) "
+        "UNION ALL "
+        "SELECT SCHEMA, VIEWNAME AS NAME, CAST('VIEW' AS VARCHAR(64)) AS KIND "
+        "FROM <BD>.._V_VIEW "
+        "WHERE VIEWNAME LIKE UPPER(?) AND (? IS NULL OR SCHEMA LIKE UPPER(?))"
+        ") rel "
+        "WHERE (? = 'ALL' OR (? = 'VIEW' AND KIND = 'VIEW') "
+        "OR (? = 'TABLE' AND KIND = 'TABLE')) "
+        "ORDER BY SCHEMA, NAME"
+    ),
+    catalog_views=("_V_TABLE", "_V_VIEW"),
+    description=(
+        "Finds base tables and views by name pattern in a database, with optional schema "
+        "filter and an object_type switch (TABLE/VIEW/ALL)."
+    ),
+    tested_versions=(NPS_112_IF1,),
+    cross_database=True,
+)
+
 ALL_QUERIES: Final[tuple[CatalogQuery, ...]] = (
     LIST_DATABASES,
     LIST_SCHEMAS,
@@ -306,6 +331,7 @@ ALL_QUERIES: Final[tuple[CatalogQuery, ...]] = (
     GET_PROCEDURE_SECTION,
     GET_ALL_PROCEDURES_DDL,
     FIND_COLUMN,
+    FIND_TABLE,
     LIST_CONSTRAINTS,
 )
 

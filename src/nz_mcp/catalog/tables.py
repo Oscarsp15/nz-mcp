@@ -7,6 +7,7 @@ from contextlib import closing
 from typing import Any, Final, Literal, Protocol, cast
 
 from nz_mcp.auth import get_password
+from nz_mcp.catalog.databases import list_databases
 from nz_mcp.catalog.ddl_builder import build_create_table_ddl
 from nz_mcp.catalog.execute import execute_select, inject_limit
 from nz_mcp.catalog.formatters import format_bytes_iec
@@ -742,6 +743,128 @@ def _row_to_column_match(row: Any) -> dict[str, str]:
     raise NetezzaError(
         operation="find_column", detail="Unexpected row shape from _v_relation_column"
     )
+
+
+class _FindTableCursorLike(Protocol):
+    def execute(
+        self,
+        sql: str,
+        params: tuple[str, str | None, str | None, str, str | None, str | None, str, str, str],
+    ) -> None: ...
+
+    def fetchall(self) -> list[Any]: ...
+    def close(self) -> None: ...
+
+
+class _FindTableConnectionLike(Protocol):
+    def cursor(self) -> _FindTableCursorLike: ...
+    def close(self) -> None: ...
+
+
+_TABLE_MATCH_MIN_ITEMS: Final[int] = 3
+
+
+def find_tables(
+    profile: Profile,
+    *,
+    table_pattern: str,
+    database: str | None,
+    schema_pattern: str | None,
+    object_type: str,
+    max_rows: int,
+) -> tuple[list[dict[str, str]], bool]:
+    """Search base tables and views by name across the visible databases.
+
+    Returns ``(matches, truncated)``: at most ``max_rows`` matches plus a flag that says at
+    least one more exists. Databases are scanned in ``nz_list_databases`` order and the scan
+    stops as soon as one extra match is found, so a rare pattern does not read the whole
+    catalog of every database.
+    """
+    schema_like = schema_pattern if schema_pattern else None
+    targets = _target_databases(profile, database)
+    params = (
+        table_pattern,
+        schema_like,
+        schema_like,
+        table_pattern,
+        schema_like,
+        schema_like,
+        object_type,
+        object_type,
+        object_type,
+    )
+    base_sql = resolve_query("find_table", profile)
+    password = get_password(profile.name)
+    matches: list[dict[str, str]] = []
+    truncated = False
+    connection = cast(_FindTableConnectionLike, open_connection(profile, password))
+    try:
+        for db_name in targets:
+            sql = render_cross_db(base_sql, database=db_name)
+            with closing(connection.cursor()) as cursor:
+                cursor.execute(sql, params)
+                rows = cursor.fetchall()
+            for row in rows:
+                matches.append(_row_to_table_match(db_name, row))
+                if len(matches) > max_rows:
+                    truncated = True
+                    break
+            if truncated:
+                break
+    except NetezzaError:
+        raise
+    except Exception as exc:  # noqa: BLE001, RUF100
+        raise NetezzaError(
+            operation="find_table",
+            database=database or profile.database,
+            detail=sanitize(str(exc), known_secrets={password}),
+        ) from exc
+    finally:
+        connection.close()
+    return matches, truncated
+
+
+def _target_databases(profile: Profile, database: str | None) -> list[str]:
+    """Return the databases to scan: all visible ones, or the single requested database."""
+    visible = [str(entry["name"]) for entry in list_databases(profile)]
+    if database is None:
+        return visible
+    db_ident = validate_database_identifier(database)
+    if db_ident not in {name.upper() for name in visible}:
+        raise ObjectNotFoundError(
+            detail=(
+                f"Database {db_ident!r} is not visible to profile {profile.name!r}. "
+                f"Available: {', '.join(sorted(visible))}."
+            ),
+            database=db_ident,
+            available=sorted(visible),
+        )
+    return [db_ident]
+
+
+def _row_to_table_match(database: str, row: Any) -> dict[str, str]:
+    if isinstance(row, dict):
+        keys = {str(k).upper(): v for k, v in row.items()}
+        required = ("SCHEMA", "NAME", "KIND")
+        if not all(k in keys for k in required):
+            raise NetezzaError(
+                operation="find_table",
+                detail="Catalog query must return SCHEMA, NAME, KIND columns.",
+            )
+        return {
+            "database": database,
+            "schema": str(keys["SCHEMA"]),
+            "name": str(keys["NAME"]),
+            "kind": str(keys["KIND"]),
+        }
+    if is_sequence_row(row, _TABLE_MATCH_MIN_ITEMS):
+        return {
+            "database": database,
+            "schema": str(row[0]),
+            "name": str(row[1]),
+            "kind": str(row[2]),
+        }
+    raise NetezzaError(operation="find_table", detail="Unexpected row shape from _v_table/_v_view")
 
 
 _CONSTRAINT_ROW_MIN_ITEMS: Final[int] = 5

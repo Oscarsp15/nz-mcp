@@ -88,6 +88,17 @@ def dummy_params_for_query_id(query_id: str) -> tuple[Any, ...]:
         "get_all_procedures_ddl": (_DUMMY_SCHEMA, None, None),
         "get_procedure_section": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
         "find_column": (_DUMMY_OBJECT, None, None, None, None),
+        "find_table": (
+            _DUMMY_OBJECT,
+            None,
+            None,
+            _DUMMY_OBJECT,
+            None,
+            None,
+            "TABLE",
+            "TABLE",
+            "TABLE",
+        ),
         "list_constraints": (_DUMMY_SCHEMA, None, None),
     }
     if query_id not in mapping:

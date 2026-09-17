@@ -349,6 +349,10 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Lista truncada en {n} de {total} bases de datos. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
         "en": "List truncated at {n} of {total} databases. Narrow it with 'pattern' or raise 'max_rows' (max {cap}).",
     },
+    "HINT.TABLE_SEARCH_TRUNCATED": {
+        "es": "Resultado truncado en {n} coincidencias. Acota con 'database' o 'schema_pattern', o sube 'max_rows' (máx {cap}).",
+        "en": "Result truncated at {n} matches. Narrow it with 'database' or 'schema_pattern', or raise 'max_rows' (max {cap}).",
+    },
     "HINT.COLUMN_SEARCH_TRUNCATED": {
         "es": (
             "Resultado truncado en {n} de {total} columnas. Acota con 'schema_pattern' o "

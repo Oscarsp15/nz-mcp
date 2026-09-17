@@ -18,6 +18,7 @@ from nz_mcp.tools import (
     execute_ddl,  # noqa: F401  (registers nz_execute_ddl)
     export_ddl,  # noqa: F401  (registers nz_export_ddl)
     find_column,  # noqa: F401  (registers nz_find_column)
+    find_table,  # noqa: F401  (registers nz_find_table)
     list_constraints,  # noqa: F401  (registers nz_list_constraints)
     procedures,  # noqa: F401  (registers procedure tools)
     profiling,  # noqa: F401  (registers nz_profile_column)
