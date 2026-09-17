@@ -52,6 +52,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_query_select",
     "nz_switch_database",
     "nz_switch_profile",
+    "nz_summarize_partitions",
     "nz_table_sample",
     "nz_table_stats",
     "nz_table_stats_batch",
@@ -159,6 +160,20 @@ def test_nz_profile_column_schema_and_annotations() -> None:
     assert spec.mode == "read"
     assert spec.annotations == {
         "readOnlyHint": True,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+
+
+@pytest.mark.contract
+def test_nz_summarize_partitions_schema_and_annotations() -> None:
+    spec = TOOLS["nz_summarize_partitions"]
+    props = spec.input_model.model_json_schema()["properties"]
+    assert set(props) == {"database", "schema", "table", "partition_column", "max_rows"}
+    assert spec.mode == "read"
+    assert spec.annotations == {
+        "readOnlyHint": True,
+        "destructiveHint": False,
         "idempotentHint": True,
         "openWorldHint": False,
     }
