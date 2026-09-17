@@ -1091,14 +1091,16 @@ Lanza un SP vía `CALL schema.proc(args)` en un **hilo daemon** y devuelve un `j
   "job_id": "550e8400-e29b-41d4-a716-446655440000",
   "status": "running",
   "session_id": null,
-  "hint_es": "Sondea con nz_job_poll(job_id='...') cada 30 s.",
-  "hint_en": "Poll with nz_job_poll(job_id='...') every 30 s."
+  "poll_after_s": 2,
+  "hint_es": "Sondea con nz_job_poll(job_id='...') en unos 2 s; el intervalo sugerido crece mientras el job siga corriendo.",
+  "hint_en": "Poll with nz_job_poll(job_id='...') in about 2 s; the suggested interval grows while the job keeps running."
 }
 ```
 
 **Reglas**:
 - Máx **5 jobs simultáneos** en memoria; superar el límite → `JOB_LIMIT_REACHED`.
-- Captura `SELECT CURRENT_SID` inmediatamente al abrir la conexión (escalar Netezza seguro bajo concurrencia: cada sesión devuelve siempre su propio ID); `session_id` queda expuesto en `nz_job_poll` para que un DBA lo use con `nzsession` si necesita abortar el SP manualmente. **Caveat**: bajo alta concurrencia el session_id puede coincidir con otra sesión activa si CURRENT_SID no está disponible en el perfil (en ese caso permanece `null`).
+- Captura `SELECT CURRENT_SID` inmediatamente al abrir la conexión (escalar Netezza seguro bajo concurrencia: cada sesión devuelve siempre su propio ID); `session_id` queda expuesto en `nz_job_poll` para que un DBA lo use con `nzsession` si necesita abortar el SP manualmente. **Caveat**: bajo alta concurrencia el session_id puede coincidir con otra sesión activa si CURRENT_SID no está disponible en el perfil (en ese caso permanece `null`). `session_id` viene **siempre `null` en el lanzamiento**: el hilo en segundo plano todavía no abre la conexión cuando `nz_call_procedure_async` responde; aparece en la primera respuesta de `nz_job_poll`.
+- `poll_after_s` sugiere el próximo intervalo de sondeo en segundos, **no un fijo de 30 s**: arranca bajo (2 s) para no penalizar SPs cortos y crece con el tiempo transcurrido, con tope de 30 s para SPs largos. `nz_job_poll` devuelve el mismo campo recalculado en cada sondeo mientras el job siga `running`/`cancelling`.
 - Mismo conjunto de guardas que `nz_call_procedure`: `sql_guard` (kind `CALL`), `assert_env_safe` (`PROD_REF_IN_NONPROD`), solo placeholders `?`.
 - Los jobs expiran y se borran del store **1 hora** después de completar (estado `done`/`failed`/`cancelled`).
 - No usar para SPs cortos (< 30 s): `nz_call_procedure` es más simple y devuelve el resultado en el mismo llamado.
@@ -1120,6 +1122,7 @@ Devuelve el estado actual de un job lanzado por `nz_call_procedure_async`. Modo 
   "status": "running",
   "session_id": 12345,
   "elapsed_ms": 45200,
+  "poll_after_s": 30,
   "partial_notices": [],
   "return_value": null,
   "messages": [],
@@ -1135,6 +1138,7 @@ Devuelve el estado actual de un job lanzado por `nz_call_procedure_async`. Modo 
   "status": "done",
   "session_id": 12345,
   "elapsed_ms": 185400,
+  "poll_after_s": null,
   "partial_notices": ["NOTICE: paso 1 ok", "NOTICE: paso 2 ok"],
   "return_value": "OK",
   "messages": ["NOTICE: paso 1 ok", "NOTICE: paso 2 ok"],
@@ -1145,7 +1149,8 @@ Devuelve el estado actual de un job lanzado por `nz_call_procedure_async`. Modo 
 
 **Reglas**:
 - Job no encontrado (expirado o ID incorrecto) → `JOB_NOT_FOUND`.
-- No sondear más frecuentemente que cada **10 s**; para SPs de larga duración, cada **30 s** es suficiente.
+- **Dos duraciones, no confundirlas**: `elapsed_ms` es tiempo de reloj desde que se llamó a `nz_call_procedure_async` (incluye abrir la conexión, sigue creciendo en cada sondeo); `duration_ms` es lo que tardó el `CALL` dentro de Netezza y solo se rellena cuando `status == "done"` — es el número que responde "¿cuánto tardó el SP?".
+- `poll_after_s` sugiere el próximo intervalo de sondeo en segundos, adaptado al tiempo transcurrido (crece hasta un tope de 30 s); es `null` cuando el job ya terminó (`done`/`failed`/`cancelled`) porque no hace falta volver a sondear.
 - `partial_notices` puede llegar vacío mientras el SP corre: nzpy entrega los `NOTICE` junto con el resultset al terminar, no de forma incremental. `messages` solo está completo cuando `status == "done"`.
 - `error` tiene forma `{code, detail, partial_notices}` cuando `status == "failed"`.
 - **El job store es en memoria**: si el servidor MCP reinicia, todos los jobs desaparecen. Guarda el `job_id` en otra parte si el SP es crítico.
