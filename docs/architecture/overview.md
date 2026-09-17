@@ -69,6 +69,7 @@
 | `i18n.py` | Resuelve mensajes por locale (`en`, `es`) | Formatear datos |
 | `error_hints.py` | Resume el `ValidationError` de pydantic y deriva el hint accionable (ES/EN) del payload de error | Decidir el código de error |
 | `errors.py` | Excepciones tipadas: `GuardRejectedError`, `AuthError`, `TimeoutError`, etc. | Decidir cómo mostrar |
+| `update_check.py` | Aviso best-effort de versión nueva al arrancar `serve`: consulta PyPI, cachea 24 h, escribe una línea en stderr | Ejecutar SQL, registrar tools, escribir en stdout |
 
 ## Flujo de una tool (`nz_query_select` ejemplo)
 

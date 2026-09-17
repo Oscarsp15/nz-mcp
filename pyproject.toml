@@ -28,6 +28,10 @@ classifiers = [
 dependencies = [
     "mcp>=1.2.0,<2",
     "nzpy>=1.17.7",
+    # Version ordering for the startup update check (ADR 0037). PEP 440 is the whole point:
+    # this project publishes pre-releases, and comparing "0.1.0a10" with "0.1.0a4" by hand
+    # gets it wrong.
+    "packaging>=23",
     "pydantic>=2.6",
     "sqlglot>=26.0,<31",
     "keyring>=25.0",

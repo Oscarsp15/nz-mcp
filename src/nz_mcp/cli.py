@@ -95,6 +95,7 @@ from nz_mcp.profile_check import (
 from nz_mcp.secret import Secret
 from nz_mcp.server import run_stdio_server
 from nz_mcp.tools.session import SwitchProfileInput, nz_switch_profile
+from nz_mcp.update_check import start_update_check
 
 #: Language of ``--help``. Resolved once, at import time, because typer captures the ``help=``
 #: strings while the decorators run: by the time a command executes, the help screen has
@@ -404,6 +405,9 @@ def serve_cmd() -> None:
     # Logging is configured first so structlog binds the real stderr; only then is
     # descriptor 1 handed over to the protocol.
     configure_logging_for_stdio()
+    # Off the startup path and on stderr only: the handshake does not wait for it, and it
+    # can never put a byte on the protocol stream (ADR 0037).
+    start_update_check()
     with out.stdout_reserved_for_protocol() as protocol_stdout:
         run_stdio_server(protocol_stdout=protocol_stdout)
 

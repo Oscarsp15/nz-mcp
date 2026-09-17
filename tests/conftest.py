@@ -110,6 +110,18 @@ def unreserved_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(cli_output._STATE, "stdout_reserved", False)
 
 
+@pytest.fixture(autouse=True)
+def no_update_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the suite hermetic: no test may reach PyPI (testing.md, determinism).
+
+    ``serve_cmd`` starts the startup update check (ADR 0037), so any test that invokes
+    ``serve`` — in-process or as a subprocess built from ``os.environ`` — would otherwise
+    perform a real network call and write ``update-check.json`` into the developer's real
+    ``~/.nz-mcp``. Tests that exercise the check itself delete this variable explicitly.
+    """
+    monkeypatch.setenv("NZ_MCP_NO_UPDATE_CHECK", "1")
+
+
 @pytest.fixture
 def tmp_profiles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[Path, None, None]:
     """Provide an isolated profiles.toml path and point NZ_MCP_HOME to it."""
