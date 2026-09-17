@@ -28,7 +28,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (46 tools registradas)
+## Catálogo v0.1 (51 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -47,14 +47,23 @@ Ejecuta una query `SELECT` validada por `sql_guard` contra el perfil activo.
 **Output**:
 ```json
 {
-  "columns": [{"name": "col", "type": "varchar"}],
-  "rows": [["v1", "v2"]],
+  "columns": [
+    {"name": "NOMBRE", "type": "varchar(10)"},
+    {"name": "IMPDESEMBOLSADO", "type": "numeric(14,2)"},
+    {"name": "TOTAL", "type": "bigint"}
+  ],
+  "rows": [["ANA", 12345678.9, 37466]],
   "row_count": 100,
   "truncated": false,
   "duration_ms": 243,
   "hint": null
 }
 ```
+
+**Reglas**:
+- `columns[].type` es el nombre del tipo SQL y, cuando el driver lo expone, **incluye precisión/escala o longitud**: `numeric(14,2)`, `varchar(10)`, `char(1)`, `nvarchar(5)`. Si el tipo no tiene modificador declarado, se devuelve solo el nombre base (`numeric`, `varchar`). El modificador se decodifica del `type_modifier` del protocolo (Netezza usa un offset de cabecera varlena de 16 bytes); `nz_describe_table` sigue siendo la fuente de la definición declarada de una tabla.
+- **Serialización de escalares** (misma regla en `nz_query_select` y `nz_table_sample`): `numeric`/`decimal` → número JSON (`int` si es entero, `float` si tiene fracción; valores que exceden la precisión de un `double` pueden redondearse); tipos enteros (incluido `byteint`) → número JSON; `date`/`time`/`timestamp` → string ISO; `bool` → booleano JSON; `NULL` → `null`.
+- El OID `18` mapea a `char` (columna `CONTYPE` de los catálogos `_V_RELATION_KEYDATA`), cerrando el residuo de #271 (issue #298).
 
 **Errores**: `GuardRejectedError`, `QueryTimeoutError`, `ConnectionError`, `ResultTooLargeError`.
 
@@ -520,6 +529,8 @@ Análisis **inverso** de impacto: dado `(database, schema, table)`, devuelve los
 | `table_database` | string (optional) | Filtra referencias prefijadas con esta BD; si se omite, acepta cualquier BD o sin prefijo. |
 | `table_schema` | string (optional) | Análogo a `table_database`. |
 | `pattern` | string (optional) | Filtro `LIKE` sobre el nombre del SP para acotar el escaneo. Match case-insensitive. |
+| `timeout_s` | int (optional, `1..300`) | Opt-in. Fija el timeout de socket de la descarga en lote **y** un deadline para el escaneo en proceso. Si se omite, manda el timeout de socket del perfil activo y el escaneo no tiene deadline (comportamiento previo a #308). Si el deadline salta a mitad de escaneo, se devuelven las referencias ya encontradas con `timed_out: true`. |
+| `max_procedures` | int (optional, `1..5000`) | Tope del universo a escanear. Default: `5000`. Se comprueba con un **pre-conteo barato** (solo nombres, sin `PROCEDURESOURCE`), así que superarlo falla rápido con `INPUT_TOO_BROAD` sin pagar la descarga completa ni devolver un parcial silencioso. |
 
 **Output**:
 ```json
@@ -537,6 +548,8 @@ Análisis **inverso** de impacto: dado `(database, schema, table)`, devuelve los
   "scanned_count": 142,
   "match_count": 1,
   "truncated": false,
+  "timed_out": false,
+  "hint": null,
   "duration_ms": 820
 }
 ```
@@ -546,11 +559,12 @@ Análisis **inverso** de impacto: dado `(database, schema, table)`, devuelve los
 - **Detección write**: `INSERT INTO <tabla>`, `UPDATE <tabla>`, `DELETE FROM <tabla>`, `MERGE INTO <tabla>`, `TRUNCATE TABLE <tabla>`, `DROP TABLE [IF EXISTS] <tabla>`, `CREATE [TEMP|TEMPORARY] TABLE [IF NOT EXISTS] <tabla>` (CTAS estándar), y `... INTO <tabla>` (cubre `SELECT INTO`).
 - Match case-insensitive sobre el nombre, con respeto de límites de token (`Foo` no engancha `FooBar`). Acepta `tabla`, `schema.tabla`, `bd.schema.tabla` y la sintaxis Netezza `bd..tabla`.
 - Comentarios (`--`, `/* */`) y literales `'…'` se filtran antes del scan.
-- **Caps**:
-  - Hard cap: `scanned_count <= 5000`. Si el `pattern` no acota suficiente → `INPUT_TOO_BROAD` con sugerencia de usar `pattern`.
+- **Caps y coste** (issue #308):
+  - Hard cap: `scanned_count <= max_procedures` (default `5000`). Si el `pattern` no acota suficiente → `INPUT_TOO_BROAD` con sugerencia de usar `pattern`. Con `max_procedures` explícito, el rechazo llega por pre-conteo, **antes** de la descarga en lote.
   - Soft cap: `references` truncadas a 1000 entradas, ordenadas desc por `occurrences_read + occurrences_write` (desempate por nombre); en ese caso `truncated: true`.
-  - Timeout default: 60 s.
-- **Out of scope v1**: vistas (`_v_view.DEFINITION`), dynamic SQL (`EXECUTE IMMEDIATE 'INSERT INTO ' || …`), análisis de columnas, cross-schema/cross-database, exportación a archivo. Documentado en [`../adr/0012-tool-find-table-references.md`](../adr/0012-tool-find-table-references.md).
+  - `timeout_s` es opt-in: fija el timeout de socket de la descarga y un deadline para el escaneo. Si el deadline salta a mitad de escaneo, se devuelven las referencias ya encontradas con `timed_out: true` (un análisis de impacto parcial sigue siendo útil si el cliente sabe que lo es). Si el socket expira durante la descarga, la llamada falla con `QUERY_TIMEOUT` y un `hint` para acotar. Omitirlo conserva el comportamiento previo — timeout de socket del perfil y sin deadline — para no convertir un escaneo ancho normal en un parcial.
+  - `hint`: presente (y localizado) cuando el universo escaneado alcanza el umbral `200` procedimientos (`HINT.FIND_TABLE_REFERENCES_LARGE_SCAN`, sugiere `pattern`/`max_procedures`) o cuando `timed_out` es `true` (`HINT.FIND_TABLE_REFERENCES_TIMEOUT`). `null` en escaneos pequeños.
+- **Out of scope v1**: vistas (`_v_view.DEFINITION`), dynamic SQL (`EXECUTE IMMEDIATE 'INSERT INTO ' || …`), análisis de columnas, cross-schema/cross-database, exportación a archivo, caché persistente de referencias. Documentado en [`../adr/0012-tool-find-table-references.md`](../adr/0012-tool-find-table-references.md).
 
 Implementación: una sola query a `_v_procedure` (mismo helper que `nz_get_procedures_ddl_batch`), seguida de `iter_statements` + `iter_table_references_in_statement` en `catalog/nzplsql_parser.py`.
 
@@ -970,7 +984,7 @@ Ejecuta un procedimiento almacenado vía `CALL schema.proc(args)` y devuelve el 
   "dry_run": false,
   "call_sql": "CALL DBO.NZMCP_SMOKE_CALL(?)",
   "executed": true,
-  "return_value": "50",
+  "return_value": 50,
   "messages": ["nz-mcp: recibido 5", "nz-mcp: paso 2 ok"],
   "duration_ms": 110
 }
@@ -979,7 +993,7 @@ Ejecuta un procedimiento almacenado vía `CALL schema.proc(args)` y devuelve el 
 **Reglas**:
 - `sql_guard` clasifica `CALL` (kind `CALL`) y lo permite **solo en `admin`** (rechazo `STATEMENT_NOT_ALLOWED` en read/write). Ruta dedicada de regex que **solo acepta placeholders `?`**: un argumento literal se rechaza (`UNKNOWN_STATEMENT`), forzando parametrización.
 - Guarda de entorno `assert_env_safe`: un `CALL` a un SP `PROD_*` desde un perfil no productivo → `PROD_REF_IN_NONPROD`.
-- `return_value` es el valor devuelto por el SP (o `null` si no hay result set); `messages` son los `NOTICE`/`RAISE` capturados de `cursor.notices`.
+- `return_value` es el valor devuelto por el SP con su **tipo nativo** (un `INT` sale como número `50`, no como `"50"`; `null` si no hay result set), para que `return_value == 0` no exija parseo en el cliente (issue #310). Un `NUMERIC`/`DECIMAL` se normaliza a `int` si es entero o a `float` si no; un tipo que JSON no puede llevar (`DATE`/`TIMESTAMP`, `bytes`) se serializa a string. `messages` son los `NOTICE`/`RAISE` capturados de `cursor.notices`.
 - Si el SP falla tras emitir NOTICEs, los mensajes previos al fallo se devuelven en `error.context["partial_notices"]` (el campo `messages` del output feliz sigue siendo la lista completa).
 - Un timeout de socket lanza `QueryTimeoutError` (código `QUERY_TIMEOUT`) con `context["orphan_session_risk"]=true` y `context["partial_notices"]`; el servidor puede seguir ejecutando el SP (nzpy no expone `cancel()`).
 - No usar para crear un SP (`nz_execute_ddl`) ni para leer su DDL (`nz_get_procedure_ddl`).
@@ -1170,7 +1184,7 @@ Devuelve el estado actual de un job lanzado por `nz_call_procedure_async`. Modo 
   "elapsed_ms": 185400,
   "poll_after_s": null,
   "partial_notices": ["NOTICE: paso 1 ok", "NOTICE: paso 2 ok"],
-  "return_value": "OK",
+  "return_value": 1,
   "messages": ["NOTICE: paso 1 ok", "NOTICE: paso 2 ok"],
   "duration_ms": 185100,
   "error": null
@@ -1182,6 +1196,7 @@ Devuelve el estado actual de un job lanzado por `nz_call_procedure_async`. Modo 
 - **Dos duraciones, no confundirlas**: `elapsed_ms` es tiempo de reloj desde que se llamó a `nz_call_procedure_async` (incluye abrir la conexión, sigue creciendo en cada sondeo); `duration_ms` es lo que tardó el `CALL` dentro de Netezza y solo se rellena cuando `status == "done"` — es el número que responde "¿cuánto tardó el SP?".
 - `poll_after_s` sugiere el próximo intervalo de sondeo en segundos, adaptado al tiempo transcurrido (crece hasta un tope de 30 s); es `null` cuando el job ya terminó (`done`/`failed`/`cancelled`) porque no hace falta volver a sondear.
 - `partial_notices` puede llegar vacío mientras el SP corre: nzpy entrega los `NOTICE` junto con el resultset al terminar, no de forma incremental. `messages` solo está completo cuando `status == "done"`.
+- `return_value` usa el **tipo nativo** del SP, igual que `nz_call_procedure` (un `INT` sale como número, `null` si no hay result set) — ver § 33 (issue #310).
 - `error` tiene forma `{code, detail, partial_notices}` cuando `status == "failed"`.
 - **El job store es en memoria**: si el servidor MCP reinicia, todos los jobs desaparecen. Guarda el `job_id` en otra parte si el SP es crítico.
 
@@ -1408,7 +1423,179 @@ Compara el esquema de dos tablas o vistas: columnas solo en A, solo en B, discre
 
 ---
 
-#### 46. `nz_find_table`
+#### 46. `nz_maintenance`
+
+Ejecuta DDL de **mantenimiento** sobre una tabla existente (modo `admin`): refresco de estadísticas (`generate_statistics`) y recuperación de espacio (`groom`, `vacuum`). Recibe la operación como **input estructurado** (acción de una allowlist cerrada + identificadores validados), nunca SQL crudo. Cubre el hueco de que `nz_execute_ddl` solo compila `procedure|view` y `nz_alter_table` es aditivo: hasta ahora `GENERATE STATISTICS` / `GROOM TABLE` obligaban a salir a `nzsql` tras una carga por ETL. Cierra issue #307.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | Debe coincidir con la BD del perfil activo. |
+| `schema` | string (required) | |
+| `table` | string (required) | Tabla existente a mantener. |
+| `action` | `"generate_statistics"` \| `"groom"` \| `"vacuum"` (required) | Allowlist cerrada; cualquier otro valor → `INVALID_MAINTENANCE_ACTION`. |
+| `dry_run` | bool (default **true**) | Si `true`, devuelve `statements_to_execute` sin ejecutar y sin abrir conexión. |
+| `confirm` | bool (**required if** `dry_run=false`) | Debe ser `true` para ejecutar cuando `dry_run=false`. |
+| `echo_sql` | bool (default **true**) | Solo afecta a la ejecución real: con `false`, `statements_to_execute` vuelve `null` (el `dry_run` siempre devuelve el SQL, que es su razón de ser), mismo criterio que `nz_execute_ddl`. |
+
+**Output** (dry-run `true`):
+```json
+{
+  "action": "groom",
+  "dry_run": true,
+  "statements_to_execute": ["GROOM TABLE DBO.CLIENTES"],
+  "executed": false,
+  "statements_executed": 0,
+  "duration_ms": 0
+}
+```
+
+**Output** (ejecución real):
+```json
+{
+  "action": "generate_statistics",
+  "dry_run": false,
+  "statements_to_execute": ["GENERATE STATISTICS ON DBO.CLIENTES"],
+  "executed": true,
+  "statements_executed": 1,
+  "duration_ms": 412
+}
+```
+
+**Reglas**:
+- **Input estructurado**: el caller declara la acción como dato; la tool construye la única sentencia con el validador de identificadores de catálogo. No se acepta SQL crudo.
+- **Allowlist cerrada (default-deny)**: solo las tres acciones de arriba. Todo el SQL pasa por `sql_guard.validate(mode="admin")`, que clasifica un nuevo kind `MAINTENANCE` mediante un patrón dedicado (como `CALL` y el `DROP TABLE ... IF EXISTS` de Netezza): acepta **exactamente** `GENERATE STATISTICS ON schema.table`, `GROOM TABLE schema.table` y `VACUUM schema.table`, con identificadores validados y sin apilado; cualquier otra forma cae a `UNKNOWN_STATEMENT`.
+- **Sintaxis `VACUUM` de NPS**: va directo sobre la tabla (`VACUUM schema.table`), **sin** `TABLE` ni `FULL` (a diferencia de Postgres). `VACUUM TABLE ...` y `VACUUM FULL ...` son error de parseo en NPS 11.2.1.11-IF1 (verificado en vivo). Además `VACUUM` exige privilegios elevados en el servidor: con una cuenta de servicio puede devolver `VACUUM: permission denied`, que se propaga como `NETEZZA_ERROR` (es un grant del usuario, no un fallo de la tool).
+- Guarda de entorno `assert_env_safe`: si la BD del perfil activo **no** empieza con `PROD_`, cualquier identificador `PROD_*` en el SQL → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD`.
+- **Una sentencia, una conexión**: se ejecuta la única sentencia y se cierra la conexión (sin sesiones huérfanas).
+- **Solo metadatos en ejecución**: con `echo_sql=false`, el SQL no se devuelve tras ejecutar.
+- No usar para cambios de estructura (`nz_alter_table`), ni para crear/compilar objetos (`nz_execute_ddl`), ni para SQL crudo (`nz_query_select`).
+
+---
+
+#### 47. `nz_table_stats_batch`
+
+Estadísticas de almacenamiento de **todas** las tablas de un esquema en una sola llamada, ordenadas por tamaño o por filas, desde `_V_TABLE` + `_V_TABLE_STORAGE_STAT` (las mismas vistas que `nz_table_stats`). Pensada para capacity planning: evita N llamadas de `nz_table_stats` cuando el esquema tiene cientos de objetos.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | |
+| `schema` | string (required) | |
+| `order_by` | `"size"` \| `"rows"` (default: `"size"`) | Métrica de orden descendente. |
+| `top_n` | int (1..1000, default: 20) | Cuántas tablas devolver; cap `MAX_ROWS_CAP`. |
+
+**Output**:
+```json
+{
+  "tables": [
+    {
+      "name": "UMD_FED_DETALLEBASEMASIVAS",
+      "row_count": 633792555,
+      "size_bytes_used": 19403767808,
+      "size_used_human": "18.1 GiB",
+      "size_bytes_allocated": 19613614080,
+      "size_allocated_human": "18.3 GiB",
+      "skew": 4.154311,
+      "skew_class": "severe",
+      "table_created": "1789541807"
+    }
+  ],
+  "order_by": "size",
+  "truncated": true,
+  "hint": "Mostrando las 20 tablas mayores de 733 en el esquema. Sube 'top_n' (máx 1000) para incluir más.",
+  "duration_ms": 9155
+}
+```
+
+**Reglas**:
+- Orden descendente por `order_by`, con desempate por nombre ascendente (determinista). El ranking y el corte `top_n` se hacen en Python sobre las filas del esquema; la SQL solo filtra por esquema y ordena por nombre, así que `top_n` nunca es SQL dinámico.
+- `truncated=true` cuando el esquema tiene más tablas que `top_n`; `hint` explica cómo subir `top_n` (cap `MAX_ROWS_CAP`).
+- Cubre tablas base **y externas** (toda fila de `_V_TABLE` con fila en `_V_TABLE_STORAGE_STAT`); no incluye vistas. Verificado en vivo: `DESA_MODELOS.DBO` → 733 tablas (501 `TABLE` + 232 `EXTERNAL TABLE`).
+- Un esquema sin tablas visibles devuelve `tables: []` (igual que `nz_list_tables`/`nz_list_views`), no `OBJECT_NOT_FOUND`: con una sola consulta al catálogo Netezza no distingue "esquema inexistente" de "esquema vacío". Los fallos del driver (incluido permiso denegado) llegan como error tipado `NETEZZA_ERROR`.
+- `stats_last_analyzed` no se incluye: en NPS 11.x es siempre `null` (ver `nz_table_stats`) y repetirlo en cada fila solo añade ruido.
+- `table_created` se expone tal cual lo entrega el driver (vía nzpy en NPS 11.2 es epoch en segundos, p. ej. `"1789541807"`), igual que `nz_table_stats`.
+- Reutiliza `_V_TABLE` + `_V_TABLE_STORAGE_STAT`; no expone `COMMAND` de `_V_SESSION`.
+- Fuera de alcance: alertas automáticas de espacio; paginación por cursor.
+
+---
+
+#### 48. `nz_find_duplicates`
+
+Cuenta grupos de clave duplicados en una tabla y muestrea las claves ofensoras (modo `read`). Netezza no enforcea PK/UNIQUE (issue #134), así que el catálogo no avisa: esta tool es el control del analista para una carga que corrió dos veces o un join que multiplicó filas. Ejecuta dos `SELECT` validados por `sql_guard`: uno de conteo (`COUNT(*)` de grupos con `HAVING COUNT(*) > 1` y suma de filas) y uno de muestra (`GROUP BY ... HAVING COUNT(*) > 1 ORDER BY CNT DESC LIMIT limit`). Exige que la BD coincida con la del perfil activo (misma regla que `nz_table_sample`).
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | Debe coincidir con la BD del perfil activo. |
+| `schema` | string (required) | |
+| `table` | string (required) | |
+| `key_columns` | array of string (required) | Columnas que forman la clave lógica (≥ 1). |
+| `limit` | int (default 10, cap 100) | Máx. de grupos duplicados a muestrear. |
+
+**Output**:
+```json
+{
+  "duplicate_groups": 3,
+  "duplicate_rows": 7,
+  "sample": [{"key": ["12345"], "count": 3}],
+  "truncated": false,
+  "hint": null,
+  "duration_ms": 420
+}
+```
+
+**Reglas**:
+- `duplicate_groups` = número de combinaciones de `key_columns` que aparecen más de una vez; `duplicate_rows` = total de filas que caen en esos grupos (suma de conteos).
+- `sample` devuelve hasta `limit` grupos ordenados por conteo descendente; `truncated=true` + `hint` cuando hay más grupos que `limit`.
+- Si la tabla no existe o no es visible → `OBJECT_NOT_FOUND`. Si alguna columna de `key_columns` no existe → `INVALID_INPUT` (con las columnas disponibles en el `detail`); `key_columns` vacío o con columnas repetidas → `INVALID_INPUT`.
+- Los valores de `key` se serializan a texto (`null` se conserva como `null`).
+- Fuera de alcance: comparar dos tablas (`nz_compare_rows`, #302), comparar filas completas, o borrar/corregir duplicados.
+
+---
+
+#### 49. `nz_compare_rows`
+
+Compara los conjuntos de claves entre dos tablas usando `EXCEPT` / `INTERSECT` + `COUNT(*)`. Devuelve conteos exactos de claves solo-en-A, solo-en-B, en-ambas y claves nulas, más muestras acotadas de las diferencias. Modo `read`. No compara columnas completas, solo la clave indicada. Ver issue #302.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | BD. |
+| `schema_a` | string (required) | Esquema de la tabla A. |
+| `table_a` | string (required) | Tabla A. |
+| `key_a` | string (required) | Columna clave en A. |
+| `schema_b` | string (required) | Esquema de la tabla B. |
+| `table_b` | string (required) | Tabla B. |
+| `key_b` | string (required) | Columna clave en B. |
+| `limit` | int (default: 10, max: 100) | Tope de muestra de filas de diferencia. Los conteos son siempre exactos. |
+
+**Output**:
+```json
+{
+  "only_in_a": 37466,
+  "only_in_b": 0,
+  "in_both": 33000,
+  "null_keys_a": 0,
+  "null_keys_b": 0,
+  "sample_only_in_a": ["CR001", "CR002"],
+  "sample_only_in_b": [],
+  "truncated": true,
+  "hint": "Muestras limitadas a 10 claves por lado; quedan 37456 de A y 0 de B. Sube el parámetro 'limit' (máx 100) para ver más.",
+  "duration_ms": 820
+}
+```
+
+**Errores**: `GuardRejectedError`, `ObjectNotFoundError`, `NetezzaError`, `PermissionDeniedError`.
+
+**Reglas**:
+- Todos los identificadores (esquema, tabla, clave) se validan como identificadores de catálogo antes de interpolarse en SQL.
+- Si `table_a` o `table_b` no existe o no es visible → `OBJECT_NOT_FOUND` (se verifica contra `_V_RELATION_COLUMN` antes de construir el SQL, en vez de exponer el error crudo del driver).
+- Las 7 sentencias se validan con `sql_guard` (`mode="read"`) antes de ejecutarse (defensa en profundidad).
+- Las claves nulas se excluyen de los conteos de diferencias y se cuentan por separado (`null_keys_a`, `null_keys_b`).
+- `truncated` es `true` cuando alguna diferencia supera la muestra devuelta; `hint` (ES/EN) indica cuántas claves quedaron fuera y cómo subir el `limit`.
+- La tool no acepta SQL crudo; el caller solo declara coordenadas de objeto.
+- Solo compara una clave; diferencias por columnas completas quedan fuera de alcance.
+
+---
+
+#### 51. `nz_find_table`
 
 Busca **tablas y vistas por patrón de nombre** a través de las bases visibles (o de una sola si se indica `database`), devolviendo `{database, schema, name, kind}`. Resuelve el "¿dónde está el dato?" cuando hay decenas de bases con nombres casi idénticos: antes había que iterar BD × esquema a mano con `nz_list_tables`.
 
@@ -1450,7 +1637,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
 |---|---|---|---|
-| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_find_column`, `nz_find_table`, `nz_compare_tables`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
+| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_table_stats_batch`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_find_column`, `nz_find_table`, `nz_find_duplicates`, `nz_compare_rows`, `nz_compare_tables`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
 | `nz_insert` | false | false | false |
 | `nz_insert_select` | false | false | false |
 | `nz_update`, `nz_delete` | false | true | false |
@@ -1462,6 +1649,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 | `nz_truncate`, `nz_drop_table`, `nz_drop_procedure`, `nz_drop_view` | false | **true** | true |
 | `nz_switch_profile`, `nz_switch_database` | false | false | true |
 | `nz_alter_table` | false | true | false |
+| `nz_maintenance` | false | false | true |
 | `nz_call_procedure_async` | false | **true** | false |
 | `nz_job_poll` | true | false | true |
 

@@ -209,6 +209,18 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Netezza devolvió un error durante '{operation}': {detail}",
         "en": "Netezza returned an error during '{operation}': {detail}",
     },
+    "QUERY_TIMEOUT": {
+        "es": (
+            "La operación superó el tiempo de espera del socket y se abortó. "
+            "Acota el alcance (por ejemplo con 'pattern') o sube 'timeout_s' si la "
+            "tool lo admite."
+        ),
+        "en": (
+            "The operation exceeded the socket timeout and was aborted. "
+            "Narrow the scope (for example with 'pattern') or raise 'timeout_s' where "
+            "the tool supports it."
+        ),
+    },
     # One hint per Netezza error pattern the AI can actually fix (see error_hints).
     "NETEZZA_ERROR.HINT.MULTI_ROW_VALUES": {
         "es": "Netezza no acepta listas VALUES de varias filas. Inserta con nz_insert (que emite un único UNION ALL) o con nz_insert_select.",
@@ -333,6 +345,18 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Lista truncada en {n} de {total} procedimientos. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
         "en": "List truncated at {n} of {total} procedures. Narrow it with 'pattern' or raise 'max_rows' (max {cap}).",
     },
+    "HINT.CATALOG_SCAN_TIMEOUT": {
+        "es": "El escaneo de catálogo superó {timeout_s}s. Acota con 'pattern' o sube 'timeout_s' (máx {cap}).",
+        "en": "The catalog scan exceeded {timeout_s}s. Narrow it with 'pattern' or raise 'timeout_s' (max {cap}).",
+    },
+    "HINT.FIND_TABLE_REFERENCES_LARGE_SCAN": {
+        "es": "El escaneo abarcó {scanned} procedimientos (umbral {threshold}); puede tardar. Acota con 'pattern' o con 'max_procedures' (tope {cap}).",
+        "en": "The scan covered {scanned} procedures (threshold {threshold}); it can be slow. Narrow it with 'pattern' or 'max_procedures' (cap {cap}).",
+    },
+    "HINT.FIND_TABLE_REFERENCES_TIMEOUT": {
+        "es": "Se alcanzó el límite de {timeout_s}s durante el escaneo; el resultado puede estar incompleto. Acota con 'pattern' o sube 'timeout_s' (máx {cap}).",
+        "en": "The {timeout_s}s limit was reached mid-scan; results may be incomplete. Narrow it with 'pattern' or raise 'timeout_s' (max {cap}).",
+    },
     "HINT.TABLE_LIST_TRUNCATED": {
         "es": "Lista truncada en {n} de {total} tablas. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
         "en": "List truncated at {n} of {total} tables. Narrow it with 'pattern' or raise 'max_rows' (max {cap}).",
@@ -380,6 +404,14 @@ MESSAGES: Final[dict[str, Message]] = {
     "HINT.PROFILE_TOP_VALUES_LIMITED": {
         "es": "Mostrando los {shown} valores más frecuentes de {distinct} distintos. Sube 'top_n' (máx {cap}) para ver más.",
         "en": "Showing the top {shown} of {distinct} distinct values. Raise 'top_n' (max {cap}) to see more.",
+    },
+    "HINT.DUPLICATE_GROUPS_TRUNCATED": {
+        "es": "Muestra truncada a {shown} de {groups} grupos duplicados. Sube 'limit' (máx {cap}) para ver más.",
+        "en": "Sample truncated to {shown} of {groups} duplicate groups. Raise 'limit' (max {cap}) to see more.",
+    },
+    "HINT.TABLE_STATS_BATCH_TRUNCATED": {
+        "es": "Mostrando las {n} tablas mayores de {total} en el esquema. Sube 'top_n' (máx {cap}) para incluir más.",
+        "en": "Showing the {n} largest of {total} tables in the schema. Raise 'top_n' (max {cap}) to include more.",
     },
     "NOTE.DDL_RECONSTRUCTED": {
         "es": "DDL reconstruido desde catálogo (SHOW TABLE no disponible en este servidor).",
@@ -1237,6 +1269,17 @@ MESSAGES: Final[dict[str, Message]] = {
     "PROBE_CATALOG.COLUMN_ROWS": {
         "es": "Filas",
         "en": "Rows",
+    },
+    # nz_compare_rows
+    "COMPARE_ROWS.HINT.SAMPLE_CAPPED": {
+        "es": (
+            "Muestras limitadas a {limit} claves por lado; quedan {missing_a} de A y "
+            "{missing_b} de B. Sube el parámetro 'limit' (máx {cap}) para ver más."
+        ),
+        "en": (
+            "Samples capped at {limit} keys per side; {missing_a} from A and "
+            "{missing_b} from B left out. Raise the 'limit' parameter (max {cap}) to see more."
+        ),
     },
 }
 

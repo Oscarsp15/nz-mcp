@@ -17,6 +17,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_alter_table",
     "nz_call_procedure",
     "nz_clone_procedure",
+    "nz_compare_rows",
     "nz_compare_tables",
     "nz_create_table",
     "nz_create_table_as",
@@ -30,6 +31,8 @@ EXPECTED_V010A0: set[str] = {
     "nz_execute_ddl",
     "nz_explain",
     "nz_export_ddl",
+    "nz_find_column",
+    "nz_find_duplicates",
     "nz_find_table",
     "nz_find_table_references",
     "nz_get_procedure_ddl",
@@ -44,6 +47,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_list_schemas",
     "nz_list_tables",
     "nz_list_views",
+    "nz_maintenance",
     "nz_object_dependencies",
     "nz_profile_column",
     "nz_query_select",
@@ -51,6 +55,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_switch_profile",
     "nz_table_sample",
     "nz_table_stats",
+    "nz_table_stats_batch",
     "nz_truncate",
     "nz_update",
 }
@@ -146,10 +151,45 @@ def test_nz_alter_table_schema_and_annotations() -> None:
 
 
 @pytest.mark.contract
+def test_nz_maintenance_schema_and_annotations() -> None:
+    spec = TOOLS["nz_maintenance"]
+    props = spec.input_model.model_json_schema()["properties"]
+    assert set(props) == {
+        "database",
+        "schema",
+        "table",
+        "action",
+        "dry_run",
+        "confirm",
+        "echo_sql",
+    }
+    assert spec.mode == "admin"
+    assert spec.annotations == {
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+
+
+@pytest.mark.contract
 def test_nz_profile_column_schema_and_annotations() -> None:
     spec = TOOLS["nz_profile_column"]
     props = spec.input_model.model_json_schema()["properties"]
     assert set(props) == {"database", "schema", "table", "column", "top_n"}
+    assert spec.mode == "read"
+    assert spec.annotations == {
+        "readOnlyHint": True,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+
+
+@pytest.mark.contract
+def test_nz_table_stats_batch_schema_and_annotations() -> None:
+    spec = TOOLS["nz_table_stats_batch"]
+    props = spec.input_model.model_json_schema()["properties"]
+    assert set(props) == {"database", "schema", "order_by", "top_n"}
     assert spec.mode == "read"
     assert spec.annotations == {
         "readOnlyHint": True,

@@ -83,6 +83,7 @@ def dummy_params_for_query_id(query_id: str) -> tuple[Any, ...]:
         "describe_table_pk": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
         "describe_table_fk": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
         "table_stats": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
+        "table_stats_batch": (_DUMMY_SCHEMA,),
         "list_procedures": (_DUMMY_SCHEMA, None, None),
         "get_procedure_ddl": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
         "get_all_procedures_ddl": (_DUMMY_SCHEMA, None, None),

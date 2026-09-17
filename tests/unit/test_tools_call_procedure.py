@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+from decimal import Decimal
 from typing import Any, ClassVar, Literal
 
 import pytest
@@ -9,7 +11,9 @@ from nzpy import ProgrammingError
 
 from nz_mcp.catalog.call import (
     _count_signature_args,
+    _fetch_return_value,
     _is_timeout_exc,
+    _json_scalar,
     _read_notices,
     call_procedure,
 )
@@ -443,3 +447,77 @@ def test_tool_handler_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
     assert out.dry_run is True
     assert out.executed is False
     assert out.call_sql == "CALL DBO.MYPROC(?)"
+
+
+# ── issue #310: return_value keeps the procedure's native type ───────────────
+
+
+def test_json_scalar_preserves_native_numbers() -> None:
+    assert _json_scalar(42) == 42
+    assert isinstance(_json_scalar(42), int)
+    assert _json_scalar(3.5) == 3.5
+    assert _json_scalar(True) is True
+    assert _json_scalar("x") == "x"
+    assert _json_scalar(None) is None
+
+
+def test_json_scalar_normalises_decimal() -> None:
+    integral = _json_scalar(Decimal("42"))
+    assert integral == 42
+    assert isinstance(integral, int)
+    assert _json_scalar(Decimal("42.50")) == 42.5
+
+
+def test_json_scalar_serialises_other_types_to_string() -> None:
+    assert _json_scalar(date(2026, 1, 2)) == "2026-01-02"
+    assert _json_scalar(b"ab") == "ab"
+
+
+def test_fetch_return_value_keeps_int() -> None:
+    assert _fetch_return_value(_FakeCursor(row=(42,))) == 42
+
+
+def test_fetch_return_value_accepts_bare_scalar_row() -> None:
+    class _ScalarCursor(_FakeCursor):
+        def fetchone(self) -> Any:
+            return 7
+
+    assert _fetch_return_value(_ScalarCursor()) == 7
+
+
+def test_execute_returns_native_int_not_string(monkeypatch: pytest.MonkeyPatch) -> None:
+    cursor = _FakeCursor(row=(42,), notices=[])
+    monkeypatch.setattr(
+        "nz_mcp.catalog.call.open_connection", lambda _p, _w, **_kw: _FakeConn(cursor)
+    )
+    monkeypatch.setattr("nz_mcp.catalog.call.get_password", lambda _n: "pw")
+    out = call_procedure(
+        _profile(),
+        database="DESA_MODELOS",
+        schema="DBO",
+        procedure="MYPROC",
+        args=None,
+        signature=None,
+        dry_run=False,
+        confirm=True,
+        timeout_s=None,
+    )
+    assert out["return_value"] == 42
+    assert isinstance(out["return_value"], int)
+
+
+def test_tool_output_model_accepts_native_int() -> None:
+    from nz_mcp.tools.call_procedure import CallProcedureOutput
+
+    out = CallProcedureOutput.model_validate(
+        {
+            "dry_run": False,
+            "call_sql": "CALL DBO.P(?)",
+            "executed": True,
+            "return_value": 42,
+            "messages": [],
+            "duration_ms": 3,
+        }
+    )
+    assert out.return_value == 42
+    assert isinstance(out.return_value, int)

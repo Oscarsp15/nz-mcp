@@ -41,6 +41,10 @@ _FK_SCHEMA_MIN: Final[int] = 5
 _FK_REL_MIN: Final[int] = 6
 _FK_ATT_MIN: Final[int] = 7
 _STATS_ROW_MIN: Final[int] = 5
+_STATS_BATCH_ROW_MIN: Final[int] = 6
+
+# Default top-N for nz_table_stats_batch; the tool caps it at MAX_ROWS_CAP.
+TABLE_STATS_BATCH_TOP_N_DEFAULT: Final[int] = 20
 
 # Rule-of-thumb skew bands (Netezza): document-only, not policy thresholds.
 _SKEW_BALANCED_LT: Final[float] = 0.1
@@ -623,6 +627,22 @@ def _parse_table_stats_row(row: Any) -> dict[str, Any]:
             detail="Unexpected row shape from table_stats catalog query.",
         )
 
+    # NPS 11.x _V_STATISTIC has no LASTUPDATETIMESTAMP; do not surface a fake timestamp.
+    return {**_normalize_stats_metrics(rc, used, alloc, skew, created), "stats_last_analyzed": None}
+
+
+def _normalize_stats_metrics(
+    rc: Any,
+    used: Any,
+    alloc: Any,
+    skew: Any,
+    created: Any,
+) -> dict[str, Any]:
+    """Normalize the scalar metrics shared by single-table and batch stats rows.
+
+    ``stats_last_analyzed`` is deliberately not included: NPS 11.x has no stable
+    timestamp in ``_V_STATISTIC``, so only the single-table tool surfaces that key.
+    """
     skew_out: float | None = None if skew is None else float(skew)
 
     created_out: str | None
@@ -632,16 +652,92 @@ def _parse_table_stats_row(row: Any) -> dict[str, Any]:
         iso = getattr(created, "isoformat", None)
         created_out = iso() if callable(iso) else str(created)
 
-    # NPS 11.x _V_STATISTIC has no LASTUPDATETIMESTAMP; do not surface a fake timestamp.
-    out: dict[str, Any] = {
+    return {
         "row_count": 0 if rc is None else int(rc),
         "size_bytes_used": 0 if used is None else int(used),
         "size_bytes_allocated": 0 if alloc is None else int(alloc),
         "skew": skew_out,
         "table_created": created_out,
-        "stats_last_analyzed": None,
     }
-    return out
+
+
+def get_table_stats_batch(
+    profile: Profile,
+    database: str,
+    schema: str,
+    order_by: Literal["size", "rows"],
+) -> list[dict[str, Any]]:
+    """Return storage metrics for every table in ``schema``, ranked by size or rows.
+
+    The SQL only filters by schema and orders by name; ranking and the top-N cut happen
+    in the caller, so ``top_n`` never becomes dynamic SQL. A schema with no visible
+    tables yields an empty list, matching the other ``nz_list_*`` tools.
+    """
+    schema_ident = validate_catalog_identifier(schema)
+    password = get_password(profile.name)
+    sql = render_cross_db(resolve_query("table_stats_batch", profile), database=database)
+
+    connection = cast(_DescribeConnectionLike, open_connection(profile, password))
+    try:
+        with closing(connection.cursor()) as cursor:
+            cursor.execute(sql, (schema_ident,))
+            fetched = cursor.fetchall()
+    except Exception as exc:  # noqa: BLE001, RUF100
+        raise NetezzaError(
+            operation="get_table_stats_batch",
+            database=database,
+            detail=sanitize(str(exc), known_secrets={password}),
+        ) from exc
+    finally:
+        connection.close()
+
+    rows = [_parse_table_stats_batch_row(row) for row in fetched]
+    for row in rows:
+        used = int(row["size_bytes_used"])
+        allocated = int(row["size_bytes_allocated"])
+        row["size_used_human"] = format_bytes_iec(used)
+        row["size_allocated_human"] = format_bytes_iec(allocated)
+        row["skew_class"] = skew_class(row["skew"])
+
+    sort_key = "size_bytes_used" if order_by == "size" else "row_count"
+    rows.sort(key=lambda r: (-int(r[sort_key]), str(r["name"]).upper()))
+    return rows
+
+
+def _parse_table_stats_batch_row(row: Any) -> dict[str, Any]:
+    """Normalize driver row shapes for the ``table_stats_batch`` query aliases."""
+    if isinstance(row, dict):
+        keys = {str(k).upper(): v for k, v in row.items()}
+        name = keys.get("TABLE_NAME")
+        rc = keys.get("ROW_COUNT")
+        used = keys.get("SIZE_BYTES_USED")
+        alloc = keys.get("SIZE_BYTES_ALLOCATED")
+        skew = keys.get("SKEW")
+        created = keys.get("TABLE_CREATED")
+        if name is None:
+            raise NetezzaError(
+                operation="get_table_stats_batch",
+                detail="Column row must include TABLE_NAME.",
+            )
+    elif is_sequence_row(row, _STATS_BATCH_ROW_MIN):
+        name, rc, used, alloc, skew, created = (
+            row[0],
+            row[1],
+            row[2],
+            row[3],
+            row[4],
+            row[5],
+        )
+    else:
+        raise NetezzaError(
+            operation="get_table_stats_batch",
+            detail="Unexpected row shape from table_stats_batch catalog query.",
+        )
+
+    return {
+        "name": str(name),
+        **_normalize_stats_metrics(rc, used, alloc, skew, created),
+    }
 
 
 def get_table_ddl(
@@ -1149,3 +1245,198 @@ def _compare_column_descriptor(row: Any, fallback_pos: int) -> dict[str, Any]:
             "position": pos,
         }
     raise NetezzaError(operation="compare_tables", detail="Unexpected column row shape.")
+
+
+_DUPLICATE_COUNT_COLUMNS: Final[int] = 2
+_DUPLICATE_SAMPLE_MIN_CELLS: Final[int] = 2
+DUPLICATES_LIMIT_DEFAULT: Final[int] = 10
+DUPLICATES_LIMIT_CAP: Final[int] = 100
+
+
+def find_duplicates(
+    profile: Profile,
+    database: str,
+    schema: str,
+    table: str,
+    key_columns: list[str],
+    *,
+    limit: int,
+    timeout_s: int,
+) -> dict[str, Any]:
+    """Return duplicate key groups for ``key_columns`` plus a bounded sample.
+
+    Netezza does not enforce PK/UNIQUE (issue #134), so this is the analyst's only check
+    for double-run loads or fan-out joins. ``database`` must match the active profile
+    database: the queries run as real ``SELECT`` bound to the session database, same rule
+    as ``nz_table_sample``.
+    """
+    _ensure_profile_database(profile, database)
+    schema_u = validate_catalog_identifier(schema)
+    table_u = validate_catalog_identifier(table)
+    keys_u = _validate_key_columns(key_columns)
+    _ensure_columns_exist(profile, database, schema_u, table_u, keys_u)
+
+    key_list = ", ".join(keys_u)
+    groups, rows = _run_duplicate_counts(profile, schema_u, table_u, key_list, timeout_s)
+    sample = _run_duplicate_sample(profile, schema_u, table_u, keys_u, key_list, limit, timeout_s)
+    return {
+        "duplicate_groups": groups,
+        "duplicate_rows": rows,
+        "sample": sample,
+        "truncated": groups > limit,
+    }
+
+
+def _validate_key_columns(key_columns: list[str]) -> list[str]:
+    if not key_columns:
+        raise InvalidInputError(detail="key_columns must contain at least one column.")
+    validated: list[str] = []
+    for column in key_columns:
+        name = validate_catalog_identifier(column)
+        if name in validated:
+            raise InvalidInputError(detail=f"key_columns contains a duplicate column: {name}.")
+        validated.append(name)
+    return validated
+
+
+def _ensure_columns_exist(
+    profile: Profile,
+    database: str,
+    schema_u: str,
+    table_u: str,
+    columns_u: list[str],
+) -> None:
+    """Raise when the table is missing (``OBJECT_NOT_FOUND``) or a key column is not there.
+
+    A missing column is an input mistake by the caller (they named a column that does not
+    exist), so it surfaces as ``INVALID_INPUT`` with the available columns in the detail.
+    """
+    password = get_password(profile.name)
+    sql = render_cross_db(resolve_query("describe_table_columns", profile), database=database)
+    connection = cast(Any, open_connection(profile, password))
+    try:
+        with closing(connection.cursor()) as cursor:
+            cursor.execute(sql, (schema_u, table_u))
+            rows = cursor.fetchall()
+    except Exception as exc:  # noqa: BLE001, RUF100
+        raise NetezzaError(
+            operation="find_duplicates",
+            database=database,
+            detail=sanitize(str(exc), known_secrets={password}),
+        ) from exc
+    finally:
+        connection.close()
+
+    if not rows:
+        raise ObjectNotFoundError(
+            detail=(
+                f"Table {table_u!r} does not exist in {database}.{schema_u} "
+                "or is not visible to this profile."
+            ),
+            object_type="table",
+            database=database,
+            schema=schema_u,
+            table=table_u,
+        )
+    visible = {_duplicate_column_name(row) for row in rows}
+    missing = [column for column in columns_u if column not in visible]
+    if missing:
+        raise InvalidInputError(
+            detail=(
+                f"Column(s) {', '.join(missing)} do not exist in "
+                f"{database}.{schema_u}.{table_u}. Available: {', '.join(sorted(visible))}."
+            ),
+        )
+
+
+def _run_duplicate_counts(
+    profile: Profile,
+    schema_u: str,
+    table_u: str,
+    key_list: str,
+    timeout_s: int,
+) -> tuple[int, int]:
+    sql = (
+        f"SELECT COUNT(*) AS DUP_GROUPS, COALESCE(SUM(CNT), 0) AS DUP_ROWS "  # noqa: S608
+        f"FROM (SELECT COUNT(*) AS CNT FROM {schema_u}.{table_u} "
+        f"GROUP BY {key_list} HAVING COUNT(*) > 1) AS NZ_MCP_DUP"
+    )
+    parsed = guard_validate(sql, mode="read")
+    if parsed.kind is not StatementKind.SELECT:
+        raise NetezzaError(
+            operation="find_duplicates",
+            detail=f"Unexpected statement kind after validation: {parsed.kind}",
+        )
+    raw = execute_select(profile, parsed.raw, max_rows=1, timeout_s=timeout_s)
+    rows = raw["rows"]
+    if not rows or len(rows[0]) < _DUPLICATE_COUNT_COLUMNS:
+        raise NetezzaError(
+            operation="find_duplicates",
+            detail="Duplicate count query returned an unexpected row shape.",
+        )
+    cells = rows[0]
+    rows_in_groups = 0 if cells[1] is None else int(cells[1])
+    return int(cells[0]), rows_in_groups
+
+
+def _run_duplicate_sample(
+    profile: Profile,
+    schema_u: str,
+    table_u: str,
+    keys_u: list[str],
+    key_list: str,
+    limit: int,
+    timeout_s: int,
+) -> list[dict[str, Any]]:
+    select_keys = ", ".join(keys_u)
+    sql = (
+        f"SELECT {select_keys}, COUNT(*) AS CNT "  # noqa: S608
+        f"FROM {schema_u}.{table_u} "
+        f"GROUP BY {key_list} HAVING COUNT(*) > 1 "
+        f"ORDER BY CNT DESC, {key_list}"
+    )
+    parsed = guard_validate(sql, mode="read")
+    if parsed.kind is not StatementKind.SELECT:
+        raise NetezzaError(
+            operation="find_duplicates",
+            detail=f"Unexpected statement kind after validation: {parsed.kind}",
+        )
+    limited = inject_limit(parsed.raw, limit)
+    raw = execute_select(profile, limited, max_rows=limit, timeout_s=timeout_s)
+    return [_duplicate_sample_item(row) for row in raw["rows"]]
+
+
+def _duplicate_sample_item(row: Any) -> dict[str, Any]:
+    cells = list(row)
+    if len(cells) < _DUPLICATE_SAMPLE_MIN_CELLS:
+        raise NetezzaError(
+            operation="find_duplicates",
+            detail="Duplicate sample row must include the key columns and a count.",
+        )
+    return {
+        "key": [_stringify_duplicate(cell) for cell in cells[:-1]],
+        "count": int(cells[-1]),
+    }
+
+
+def _stringify_duplicate(value: Any) -> str | None:
+    if value is None:
+        return None
+    iso = getattr(value, "isoformat", None)
+    if callable(iso):
+        return str(iso())
+    return str(value)
+
+
+def _duplicate_column_name(row: Any) -> str:
+    if isinstance(row, dict):
+        name = row.get("COLUMN_NAME")
+        if name is None:
+            raise NetezzaError(
+                operation="find_duplicates",
+                detail="Column row must include COLUMN_NAME.",
+            )
+        return str(name).upper()
+    if is_sequence_row(row, 1):
+        return str(row[0]).upper()
+    raise NetezzaError(operation="find_duplicates", detail="Unexpected column row shape.")

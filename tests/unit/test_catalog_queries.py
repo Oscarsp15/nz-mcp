@@ -22,6 +22,7 @@ def test_all_queries_contains_all_exported_query_constants() -> None:
         queries.DESCRIBE_TABLE_PK,
         queries.DESCRIBE_TABLE_FK,
         queries.TABLE_STATS,
+        queries.TABLE_STATS_BATCH,
         queries.LIST_PROCEDURES,
         queries.GET_PROCEDURE_DDL,
         queries.GET_ALL_PROCEDURES_DDL,
