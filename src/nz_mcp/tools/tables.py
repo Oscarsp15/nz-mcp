@@ -8,9 +8,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from nz_mcp.catalog.tables import (
+    TABLE_STATS_BATCH_TOP_N_DEFAULT,
     get_table_ddl,
     get_table_sample,
     get_table_stats,
+    get_table_stats_batch,
     list_tables,
     summarize_partitions,
 )
@@ -129,6 +131,60 @@ class TableStatsOutput(BaseModel):
     )
     table_created: str | None
     duration_ms: int = Field(ge=0, description="Wall time to fetch statistics (milliseconds).")
+
+
+class TableStatsBatchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    database: str = Field(min_length=1, max_length=128)
+    table_schema: str = Field(
+        alias="schema",
+        min_length=1,
+        max_length=128,
+    )
+    order_by: Literal["size", "rows"] = Field(
+        default="size",
+        description="Rank tables by on-disk bytes used ('size') or estimated row count ('rows').",
+    )
+    top_n: int = Field(
+        default=TABLE_STATS_BATCH_TOP_N_DEFAULT,
+        ge=1,
+        le=MAX_ROWS_CAP,
+        description=(
+            f"How many tables to return, largest first. Defaults to "
+            f"{TABLE_STATS_BATCH_TOP_N_DEFAULT}; always capped at MAX_ROWS_CAP."
+        ),
+    )
+
+
+class TableStatsItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    row_count: int
+    size_bytes_used: int
+    size_used_human: str
+    size_bytes_allocated: int
+    size_allocated_human: str
+    skew: float | None
+    skew_class: Literal["balanced", "moderate", "severe"] | None = Field(
+        default=None,
+        description="Rule-of-thumb skew band: <0.1 balanced, ≤0.3 moderate, else severe.",
+    )
+    table_created: str | None
+
+
+class TableStatsBatchOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tables: list[TableStatsItem]
+    order_by: Literal["size", "rows"]
+    truncated: bool = Field(
+        default=False,
+        description="True when the schema holds more tables than top_n.",
+    )
+    hint: str | None = Field(
+        default=None,
+        description="Localized guidance on how to include the tables left out.",
+    )
+    duration_ms: int = Field(ge=0, description="Wall time to run the catalog query (milliseconds).")
 
 
 class GetTableDdlInput(BaseModel):
@@ -272,6 +328,52 @@ def nz_table_stats(
     )
     payload["duration_ms"] = monotonic_duration_ms(start)
     return TableStatsOutput.model_validate(payload)
+
+
+@tool(
+    name="nz_table_stats_batch",
+    description=(
+        "Return storage stats for many tables at once, ordered by size or rows. "
+        "Use for capacity planning and to find the biggest/skewed tables in a schema."
+    ),
+    mode="read",
+    input_model=TableStatsBatchInput,
+    output_model=TableStatsBatchOutput,
+    annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
+)
+def nz_table_stats_batch(
+    params: TableStatsBatchInput,
+    *,
+    config_path: Path | None = None,
+) -> TableStatsBatchOutput:
+    start = monotonic_start()
+    profile = get_active_profile(path=config_path)
+    rows = get_table_stats_batch(
+        profile,
+        database=params.database,
+        schema=params.table_schema,
+        order_by=params.order_by,
+    )
+    total = len(rows)
+    truncated = total > params.top_n
+    hint = (
+        t(
+            "HINT.TABLE_STATS_BATCH_TRUNCATED",
+            resolve_locale(),
+            n=params.top_n,
+            total=total,
+            cap=MAX_ROWS_CAP,
+        )
+        if truncated
+        else None
+    )
+    return TableStatsBatchOutput(
+        tables=[TableStatsItem.model_validate(r) for r in rows[: params.top_n]],
+        order_by=params.order_by,
+        truncated=truncated,
+        hint=hint,
+        duration_ms=monotonic_duration_ms(start),
+    )
 
 
 @tool(

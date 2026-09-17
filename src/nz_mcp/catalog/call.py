@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import time
 from contextlib import closing, suppress
+from decimal import Decimal
 from typing import Any, Final, Protocol, cast
 
 from nzpy import ProgrammingError
 
 from nz_mcp.auth import get_password
 from nz_mcp.catalog.identifier import validate_catalog_identifier, validate_database_identifier
+from nz_mcp.catalog.row_shape import is_sequence_row
 from nz_mcp.config import TIMEOUT_S_CAP, Profile
 from nz_mcp.connection import open_connection
 from nz_mcp.errors import InvalidInputError, NetezzaError, QueryTimeoutError
@@ -24,6 +26,9 @@ from nz_mcp.sql_guard import StatementKind, assert_env_safe
 from nz_mcp.sql_guard import validate as guard_validate
 
 _MAX_ARGS: Final[int] = 100
+
+# JSON-native scalar returned by a stored procedure, matching the driver's own mapping.
+ReturnScalar = int | float | bool | str | None
 
 
 class _CursorLike(Protocol):
@@ -86,8 +91,32 @@ def _is_timeout_exc(exc: BaseException) -> bool:
     return isinstance(exc, OSError) and "timed out" in str(exc).lower()
 
 
-def _fetch_return_value(cursor: _CursorLike) -> str | None:
-    """Return the CALL result value when the procedure produced a result set, else None."""
+def _json_scalar(value: Any) -> ReturnScalar:
+    """Normalise a driver scalar to a JSON-native type, keeping numbers as numbers.
+
+    ``INT``/``FLOAT``/``BOOLEAN``/text already map to Python ``int``/``float``/``bool``/
+    ``str`` and pass through unchanged. A ``Decimal`` (Netezza ``NUMERIC``) becomes an
+    ``int`` when it is integral and a ``float`` otherwise. Anything else (``datetime``,
+    ``bytes``, ...) becomes ``str`` — the same JSON shape ``nz_query_select`` produces.
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    iso = getattr(value, "isoformat", None)
+    if callable(iso):
+        return str(iso())
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _fetch_return_value(cursor: _CursorLike) -> ReturnScalar:
+    """Return the CALL result scalar with its native type, or None for a void procedure.
+
+    The value is **not** stringified (issue #310): an ``INT``-returning procedure yields an
+    ``int`` so callers compare ``return_value == 0`` without parsing a string.
+    """
     try:
         row = cursor.fetchone()
     except ProgrammingError as exc:
@@ -96,9 +125,9 @@ def _fetch_return_value(cursor: _CursorLike) -> str | None:
         raise
     if row is None:
         return None
-    if isinstance(row, (tuple, list)):
-        return None if not row or row[0] is None else str(row[0])
-    return str(row)
+    if is_sequence_row(row, 1):
+        return _json_scalar(row[0])
+    return _json_scalar(row)
 
 
 def call_procedure(

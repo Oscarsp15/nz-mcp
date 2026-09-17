@@ -35,6 +35,7 @@ class StatementKind(StrEnum):
     DROP = "DROP"
     ALTER = "ALTER"
     CALL = "CALL"
+    MAINTENANCE = "MAINTENANCE"
     UNKNOWN = "UNKNOWN"
 
 
@@ -97,6 +98,18 @@ _NETEZZA_DROP_TABLE_IF_EXISTS_SUFFIX: Final[re.Pattern[str]] = re.compile(
     r"\s+IF\s+EXISTS\s*$",
     re.IGNORECASE,
 )
+# Netezza table-maintenance DDL (``GENERATE STATISTICS`` / ``GROOM TABLE`` / ``VACUUM``)
+# is not modelled by ``sqlglot`` (it falls back to a generic ``Command``), so it gets a
+# dedicated default-deny allowlist: exactly these forms, with catalog-validated
+# identifiers, and nothing else. Any other shape stays ``UNKNOWN_STATEMENT``. NPS takes
+# ``VACUUM`` directly on the table (no ``TABLE`` keyword, no ``FULL``), unlike Postgres;
+# verified live on NPS 11.2.1.11-IF1.
+_MAINTENANCE_HEAD: Final[re.Pattern[str]] = re.compile(
+    r"^\s*(?:GENERATE\s+STATISTICS\s+ON|GROOM\s+TABLE|VACUUM)\s+"
+    r"(?P<sch>[A-Za-z][A-Za-z0-9_]*)\s*\.\s*(?P<tbl>[A-Za-z][A-Za-z0-9_]*)"
+    r"\s*;?\s*$",
+    re.IGNORECASE,
+)
 
 # Catalog overrides (``catalog_overrides`` in profiles.toml) replace a registered catalog
 # query, so they are always reads. ``<BD>..`` markers are rendered against this throwaway
@@ -136,6 +149,9 @@ def validate(
 
     if _CALL_HEAD.match(sql.strip()):
         return _validate_call(sql, mode=mode)
+
+    if _MAINTENANCE_HEAD.match(sql.strip()):
+        return _validate_maintenance(sql, mode=mode)
 
     try:
         parsed_list = sqlglot.parse(sql, read="postgres")
@@ -304,6 +320,32 @@ def _validate_call(sql: str, *, mode: PermissionMode) -> ParsedStatement:
         ) from exc
     _enforce(kind=StatementKind.CALL, has_where=False, mode=mode)
     return ParsedStatement(kind=StatementKind.CALL, has_where=False, raw=sql)
+
+
+def _validate_maintenance(sql: str, *, mode: PermissionMode) -> ParsedStatement:
+    """Validate a maintenance statement against the closed allowlist and gate to admin.
+
+    Only ``GENERATE STATISTICS ON schema.table``, ``GROOM TABLE schema.table`` and
+    ``VACUUM schema.table`` are recognized (see ``_MAINTENANCE_HEAD``); both identifiers
+    go through the same catalog rules as every other tool. Anything else falls through to
+    ``sqlglot`` and is rejected as ``UNKNOWN_STATEMENT``.
+    """
+    m = _MAINTENANCE_HEAD.match(sql.strip())
+    if not m:
+        raise GuardRejectedError(
+            code="UNKNOWN_STATEMENT",
+            detail="Malformed maintenance statement.",
+        )
+    try:
+        validate_catalog_identifier(m.group("sch"))
+        validate_catalog_identifier(m.group("tbl"))
+    except InvalidInputError as exc:
+        raise GuardRejectedError(
+            code="UNKNOWN_STATEMENT",
+            detail="Invalid maintenance identifier.",
+        ) from exc
+    _enforce(kind=StatementKind.MAINTENANCE, has_where=False, mode=mode)
+    return ParsedStatement(kind=StatementKind.MAINTENANCE, has_where=False, raw=sql)
 
 
 def _validate_netezza_drop_if_exists_suffix(sql: str, *, mode: PermissionMode) -> ParsedStatement:
@@ -581,6 +623,13 @@ def _enforce(*, kind: StatementKind, has_where: bool, mode: PermissionMode) -> N
     # CALL executes arbitrary procedure code (an EXECUTE-class operation); gate to admin,
     # same tier as DDL. See docs/adr/0015-sql-guard-call-statement.md.
     if kind is StatementKind.CALL:
+        if mode == "admin":
+            return
+        raise GuardRejectedError(code="STATEMENT_NOT_ALLOWED", kind=str(kind), mode=mode)
+
+    # Table maintenance (GENERATE STATISTICS / GROOM / VACUUM) rewrites storage and
+    # statistics, so it is an admin-tier operation, same as DDL.
+    if kind is StatementKind.MAINTENANCE:
         if mode == "admin":
             return
         raise GuardRejectedError(code="STATEMENT_NOT_ALLOWED", kind=str(kind), mode=mode)

@@ -30,6 +30,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_execute_ddl",
     "nz_explain",
     "nz_export_ddl",
+    "nz_find_column",
     "nz_find_table_references",
     "nz_get_procedure_ddl",
     "nz_get_procedure_section",
@@ -43,6 +44,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_list_schemas",
     "nz_list_tables",
     "nz_list_views",
+    "nz_maintenance",
     "nz_object_dependencies",
     "nz_profile_column",
     "nz_query_select",
@@ -51,6 +53,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_summarize_partitions",
     "nz_table_sample",
     "nz_table_stats",
+    "nz_table_stats_batch",
     "nz_truncate",
     "nz_update",
 }
@@ -126,6 +129,28 @@ def test_nz_alter_table_schema_and_annotations() -> None:
 
 
 @pytest.mark.contract
+def test_nz_maintenance_schema_and_annotations() -> None:
+    spec = TOOLS["nz_maintenance"]
+    props = spec.input_model.model_json_schema()["properties"]
+    assert set(props) == {
+        "database",
+        "schema",
+        "table",
+        "action",
+        "dry_run",
+        "confirm",
+        "echo_sql",
+    }
+    assert spec.mode == "admin"
+    assert spec.annotations == {
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+
+
+@pytest.mark.contract
 def test_nz_profile_column_schema_and_annotations() -> None:
     spec = TOOLS["nz_profile_column"]
     props = spec.input_model.model_json_schema()["properties"]
@@ -147,6 +172,19 @@ def test_nz_summarize_partitions_schema_and_annotations() -> None:
     assert spec.annotations == {
         "readOnlyHint": True,
         "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+
+
+@pytest.mark.contract
+def test_nz_table_stats_batch_schema_and_annotations() -> None:
+    spec = TOOLS["nz_table_stats_batch"]
+    props = spec.input_model.model_json_schema()["properties"]
+    assert set(props) == {"database", "schema", "order_by", "top_n"}
+    assert spec.mode == "read"
+    assert spec.annotations == {
+        "readOnlyHint": True,
         "idempotentHint": True,
         "openWorldHint": False,
     }
