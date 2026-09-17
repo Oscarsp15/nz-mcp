@@ -75,6 +75,20 @@ class TableSampleInput(BaseModel):
     )
     table: str = Field(min_length=1, max_length=128)
     rows: int = Field(default=10, ge=1, le=_TABLE_SAMPLE_ROWS_CAP)
+    where: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=2048,
+        description="Raw SQL predicate for a targeted sample; validated read-only by the guard.",
+    )
+    order_by: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=2048,
+        description=(
+            "Raw ORDER BY fragment for a reproducible sample; validated read-only by the guard."
+        ),
+    )
 
 
 class TableStatsInput(BaseModel):
@@ -186,6 +200,7 @@ def nz_list_tables(
     name="nz_table_sample",
     description=(
         "Return a small row sample from a base table (SELECT with a row cap). "
+        "Optional where/order_by are raw SQL fragments validated read-only by the guard. "
         "Use after nz_list_tables / nz_describe_table. "
         "Database must match the active profile database."
     ),
@@ -207,6 +222,8 @@ def nz_table_sample(
         table=params.table,
         rows=params.rows,
         timeout_s=profile.timeout_s_default,
+        where=params.where,
+        order_by=params.order_by,
     )
     hint = hint_from_execute_payload(raw)
     columns = [

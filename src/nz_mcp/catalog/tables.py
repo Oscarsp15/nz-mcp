@@ -502,12 +502,24 @@ def get_table_sample(
     *,
     rows: int,
     timeout_s: int,
+    where: str | None = None,
+    order_by: str | None = None,
 ) -> dict[str, Any]:
-    """Run a bounded ``SELECT *`` for sampling; SQL is validated via ``sql_guard``."""
+    """Run a bounded ``SELECT *`` for sampling; SQL is validated via ``sql_guard``.
+
+    ``where`` and ``order_by`` are raw SQL fragments, not identifiers: the composed
+    statement is classified read-only by ``sql_guard`` before execution, which rejects
+    stacked statements, non-``SELECT`` kinds and mutation CTEs. The table name stays a
+    validated identifier and ``database`` must match the active profile database.
+    """
     _ensure_profile_database(profile, database)
     schema_u = validate_catalog_identifier(schema)
     table_u = validate_catalog_identifier(table)
     sql = f"SELECT * FROM {schema_u}.{table_u}"  # noqa: S608 identifiers validated above
+    if where is not None:
+        sql = f"{sql} WHERE {where}"
+    if order_by is not None:
+        sql = f"{sql} ORDER BY {order_by}"
     parsed = guard_validate(sql, mode="read")
     if parsed.kind is not StatementKind.SELECT:
         raise NetezzaError(
