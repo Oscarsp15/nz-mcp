@@ -43,7 +43,15 @@ def test_describe_view_happy_path(monkeypatch: pytest.MonkeyPatch, two_profiles:
                     "default": None,
                 }
             ],
-            "depends_on": [{"schema": "DBO", "name": "V_CASCADASUNIVERSO", "kind": "VIEW"}],
+            "depends_on": [
+                {"schema": "DBO", "name": "V_CASCADASUNIVERSO", "kind": "VIEW"},
+                {
+                    "database": "PROD_MODELOS",
+                    "schema": "DBO",
+                    "name": "T_REMOTE",
+                    "kind": "TABLE",
+                },
+            ],
         }
 
     monkeypatch.setattr("nz_mcp.tools.views.describe_view", _fake_describe_view)
@@ -57,6 +65,9 @@ def test_describe_view_happy_path(monkeypatch: pytest.MonkeyPatch, two_profiles:
     assert out.columns[0].sql_type == "CHARACTER VARYING(10)"
     assert out.depends_on[0].name == "V_CASCADASUNIVERSO"
     assert out.depends_on[0].ref_schema == "DBO"
+    assert out.depends_on[0].database is None
+    assert out.depends_on[1].database == "PROD_MODELOS"
+    assert out.depends_on[1].name == "T_REMOTE"
     assert out.duration_ms >= 0
 
 
@@ -123,7 +134,13 @@ def test_object_dependencies_happy_path(
             "depth": 2,
             "nodes": [
                 {"schema": "DBO", "name": "V_CASCADASUNIVERSO", "kind": "VIEW", "level": 1},
-                {"schema": "DBO", "name": "T_BASE", "kind": "TABLE", "level": 2},
+                {
+                    "database": "PROD_MODELOS",
+                    "schema": "DBO",
+                    "name": "T_BASE",
+                    "kind": "TABLE",
+                    "level": 2,
+                },
             ],
             "truncated": False,
         }
@@ -144,6 +161,7 @@ def test_object_dependencies_happy_path(
     assert [node.level for node in out.nodes] == [1, 2]
     assert out.nodes[1].name == "T_BASE"
     assert out.nodes[1].kind == "TABLE"
+    assert out.nodes[1].database == "PROD_MODELOS"
     assert out.truncated is False
 
 

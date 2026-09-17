@@ -19,7 +19,7 @@ from nz_mcp.catalog.row_shape import is_sequence_row
 from nz_mcp.catalog.tables import describe_table
 from nz_mcp.config import Profile
 from nz_mcp.connection import open_connection
-from nz_mcp.errors import NetezzaError, ObjectNotFoundError
+from nz_mcp.errors import InvalidInputError, NetezzaError, ObjectNotFoundError
 from nz_mcp.logging_utils import sanitize
 
 _VIEW_LIST_MIN_ITEMS: Final[int] = 2
@@ -208,7 +208,12 @@ def resolve_object_kinds(
     default_schema: str,
     references: list[dict[str, str | None]],
 ) -> list[dict[str, str]]:
-    """Resolve each referenced relation's real kind, defaulting a missing schema."""
+    """Resolve each referenced relation's real kind, honouring its own database.
+
+    A reference qualified with another database (``OTHER_DB.SCHEMA.TABLE``) is resolved
+    against that database and reported with it, so a local homonym never masks the real
+    cross-database dependency.
+    """
     if not references:
         return []
     password = get_password(profile.name)
@@ -288,8 +293,9 @@ def object_dependencies(
     ``up`` follows each view's parsed ``DEFINITION``; ``down`` scans the views of
     ``schema`` and keeps those whose definition references the current node (reverse
     edges are not in the catalog, so they are derived from the definitions). The walk is
-    breadth-first, de-duplicated by ``(schema, name)``, capped at
-    ``_MAX_LINEAGE_DEPTH`` levels and ``_MAX_LINEAGE_NODES`` nodes.
+    breadth-first, de-duplicated by ``(database, schema, name)`` so a cross-database
+    dependency is not collapsed onto a local homonym, capped at ``_MAX_LINEAGE_DEPTH``
+    levels and ``_MAX_LINEAGE_NODES`` nodes.
     """
     db_ident = validate_database_identifier(database)
     schema_ident = validate_catalog_identifier(schema)
@@ -301,8 +307,7 @@ def object_dependencies(
     connection = cast(Any, open_connection(profile, password))
     try:
         with closing(connection.cursor()) as cursor:
-            cursor.execute(f"SET CATALOG {db_ident}")
-            root_kind = _relation_kind_on(cursor, profile, database, schema_ident, obj_ident)
+            root_kind = _relation_kind_on(cursor, profile, db_ident, schema_ident, obj_ident)
             if root_kind is None:
                 raise ObjectNotFoundError(
                     detail=(
@@ -314,24 +319,24 @@ def object_dependencies(
                     schema=schema,
                     object=obj,
                 )
-            visited = {(schema_ident, obj_ident)}
-            frontier = [(schema_ident, obj_ident, 0)]
+            visited = {(db_ident, schema_ident, obj_ident)}
+            frontier = [(db_ident, schema_ident, obj_ident, 0)]
             while frontier and not truncated:
-                next_frontier: list[tuple[str, str, int]] = []
-                for node_schema, node_name, level in frontier:
+                next_frontier: list[tuple[str, str, str, int]] = []
+                for node_db, node_schema, node_name, level in frontier:
                     if level >= max_depth:
                         continue
                     children = _lineage_children_on(
                         cursor,
                         profile,
-                        database,
+                        node_db,
                         node_schema,
                         node_name,
                         direction,
                         schema_ident,
                     )
                     for child in children:
-                        key = (child["schema"], child["name"])
+                        key = (child["database"], child["schema"], child["name"])
                         if key in visited:
                             continue
                         visited.add(key)
@@ -339,7 +344,9 @@ def object_dependencies(
                             truncated = True
                             break
                         nodes.append({**child, "level": level + 1})
-                        next_frontier.append((child["schema"], child["name"], level + 1))
+                        next_frontier.append(
+                            (child["database"], child["schema"], child["name"], level + 1)
+                        )
                     if truncated:
                         break
                 frontier = next_frontier
@@ -390,22 +397,51 @@ def _relation_kind_on(
     return _kind_from_rows(rows)
 
 
+def _set_catalog(cursor: Any, database: str) -> None:
+    """Point the session catalog at ``database``.
+
+    ``_V_VIEW.DEFINITION`` is computed lazily from the session's *current* catalog
+    (issue #125): a cross-database lookup projects the ``'Not a view'`` sentinel unless the
+    session catalog is switched first. Each lineage step binds the catalog to the database
+    of the node it is about to read.
+    """
+    cursor.execute(f"SET CATALOG {validate_database_identifier(database)}")
+
+
+def _reference_coordinates(
+    reference: dict[str, str | None],
+    context_database: str,
+    context_schema: str,
+) -> tuple[str, str, str]:
+    """Effective ``(database, schema, name)`` for a parsed reference.
+
+    A reference qualified with another database keeps it — cross-database lineage must not
+    be collapsed onto a local homonym; an unqualified one is assumed to live in the context
+    database/schema of the object that references it.
+    """
+    database = reference["database"] or context_database
+    schema = reference["schema"] or context_schema
+    return database, schema, reference["name"] or ""
+
+
 def _lineage_children_on(
     cursor: Any,
     profile: Profile,
-    database: str,
+    node_database: str,
     node_schema: str,
     node_name: str,
     direction: str,
     scan_schema: str,
 ) -> list[dict[str, str]]:
     if direction == "down":
-        return _referencing_views_on(cursor, profile, database, scan_schema, node_schema, node_name)
-    definition = _view_definition_on(cursor, profile, database, node_schema, node_name)
+        return _referencing_views_on(
+            cursor, profile, node_database, scan_schema, node_database, node_schema, node_name
+        )
+    definition = _view_definition_on(cursor, profile, node_database, node_schema, node_name)
     if definition is None:
         return []
     references = extract_object_references(definition)
-    return _resolve_references_on(cursor, profile, database, node_schema, references)
+    return _resolve_references_on(cursor, profile, node_database, node_schema, references)
 
 
 def _view_definition_on(
@@ -415,27 +451,46 @@ def _view_definition_on(
     schema: str,
     name: str,
 ) -> str | None:
+    _set_catalog(cursor, database)
     sql = render_cross_db(resolve_query("get_view_ddl", profile), database=database)
     cursor.execute(sql, (schema, name))
     row = cursor.fetchone()
     return None if row is None else _row_to_definition(row)
 
 
-def _resolve_references_on(
+def _relation_kind_in(
     cursor: Any,
     profile: Profile,
     database: str,
-    default_schema: str,
+    schema: str,
+    name: str,
+) -> str:
+    """Resolve a relation's kind in ``database`` (which may be a different database)."""
+    try:
+        sql = render_cross_db(resolve_query("relation_kind", profile), database=database)
+    except InvalidInputError:
+        return _KIND_UNKNOWN
+    cursor.execute(sql, (schema, name, schema, name))
+    return _kind_from_rows(cursor.fetchall())
+
+
+def _resolve_references_on(
+    cursor: Any,
+    profile: Profile,
+    context_database: str,
+    context_schema: str,
     references: list[dict[str, str | None]],
 ) -> list[dict[str, str]]:
-    sql = render_cross_db(resolve_query("relation_kind", profile), database=database)
     resolved: list[dict[str, str]] = []
     for reference in references:
-        schema = reference["schema"] or default_schema
-        name = reference["name"] or ""
-        cursor.execute(sql, (schema, name, schema, name))
+        database, schema, name = _reference_coordinates(reference, context_database, context_schema)
         resolved.append(
-            {"schema": schema, "name": name, "kind": _kind_from_rows(cursor.fetchall())}
+            {
+                "database": database,
+                "schema": schema,
+                "name": name,
+                "kind": _relation_kind_in(cursor, profile, database, schema, name),
+            }
         )
     return resolved
 
@@ -443,24 +498,31 @@ def _resolve_references_on(
 def _referencing_views_on(
     cursor: Any,
     profile: Profile,
-    database: str,
+    node_database: str,
     scan_schema: str,
+    target_database: str,
     target_schema: str,
     target_name: str,
 ) -> list[dict[str, str]]:
-    sql = render_cross_db(resolve_query("list_view_definitions", profile), database=database)
+    _set_catalog(cursor, node_database)
+    sql = render_cross_db(resolve_query("list_view_definitions", profile), database=node_database)
     cursor.execute(sql, (scan_schema,))
     rows = cursor.fetchall()
-    target_schema_norm = target_schema.upper()
-    target_name_norm = target_name.upper()
+    target = (target_database.upper(), target_schema.upper(), target_name.upper())
     referencing: list[dict[str, str]] = []
     for row in rows:
         view_name, definition = _view_name_and_definition(row)
         for reference in extract_object_references(definition):
-            schema = (reference["schema"] or scan_schema).upper()
-            name = (reference["name"] or "").upper()
-            if schema == target_schema_norm and name == target_name_norm:
-                referencing.append({"schema": scan_schema, "name": view_name, "kind": _KIND_VIEW})
+            database, schema, name = _reference_coordinates(reference, node_database, scan_schema)
+            if (database.upper(), schema.upper(), name.upper()) == target:
+                referencing.append(
+                    {
+                        "database": node_database,
+                        "schema": scan_schema,
+                        "name": view_name,
+                        "kind": _KIND_VIEW,
+                    }
+                )
                 break
     return referencing
 

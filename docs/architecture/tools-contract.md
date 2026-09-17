@@ -1297,8 +1297,8 @@ Describe las columnas/tipos de una vista y las relaciones que lee (`depends_on`)
     {"name": "FECCORTE", "type": "DATE", "nullable": true, "default": null}
   ],
   "depends_on": [
-    {"schema": "DBO", "name": "V_CASCADASUNIVERSO", "kind": "VIEW"},
-    {"schema": "DBO", "name": "V_CASCADASDETALLES", "kind": "VIEW"}
+    {"database": "DESA_MODELOS", "schema": "DBO", "name": "V_CASCADASUNIVERSO", "kind": "VIEW"},
+    {"database": "PROD_MODELOS", "schema": "DBO", "name": "T_REMOTE", "kind": "TABLE"}
   ],
   "duration_ms": 210
 }
@@ -1307,7 +1307,7 @@ Describe las columnas/tipos de una vista y las relaciones que lee (`depends_on`)
 **Reglas**:
 - Si el objeto no existe o no es visible → `OBJECT_NOT_FOUND`. Si existe pero **no es una vista** → `OBJECT_NOT_FOUND` con `object_type` del tipo real (`TABLE` / `EXTERNAL TABLE`); para tablas usar `nz_describe_table`.
 - `depends_on` es **best-effort**: si el `DEFINITION` no parsea con sqlglot se devuelve `[]` (no es un error); `kind` es `UNKNOWN` cuando la referencia no resuelve contra el catálogo.
-- Referencias sin esquema en el DDL se asumen del mismo esquema de la vista.
+- **Cross-database**: una referencia cualificada con otra BD (`OTRA_BD.ESQ.TABLA`) se resuelve contra **esa** BD y se reporta con su `database`, para que un homónimo local no enmascare la dependencia real. Sin cualificar, se asume la BD/esquema de la vista.
 - Fuera de alcance: lineage a nivel de columna; recorrido recursivo (para eso, `nz_object_dependencies`).
 
 ---
@@ -1332,8 +1332,8 @@ Recorre dependencias de objeto (vistas/tablas) en modo `read`, en una dirección
   "direction": "up",
   "depth": 2,
   "nodes": [
-    {"schema": "DBO", "name": "V_CASCADASUNIVERSO", "kind": "VIEW", "level": 1},
-    {"schema": "DBO", "name": "V_CASCADASDETALLES", "kind": "VIEW", "level": 1}
+    {"database": "DESA_MODELOS", "schema": "DBO", "name": "V_CASCADASUNIVERSO", "kind": "VIEW", "level": 1},
+    {"database": "PROD_MODELOS", "schema": "DBO", "name": "T_REMOTE", "kind": "TABLE", "level": 1}
   ],
   "truncated": false,
   "duration_ms": 340
@@ -1342,6 +1342,7 @@ Recorre dependencias de objeto (vistas/tablas) en modo `read`, en una dirección
 
 **Reglas**:
 - Si el objeto raíz no existe o no es visible → `OBJECT_NOT_FOUND`.
+- **Cross-database**: los nodos llevan su `database`; una referencia a otra BD se resuelve contra esa BD y no se colapsa con un homónimo local. La deduplicación del BFS usa `(database, schema, name)`, no `(schema, name)`.
 - `down` está acotado al esquema dado (no busca referencias en otros esquemas) y es más costoso: escanea y parsea el `DEFINITION` de cada vista del esquema.
 - `truncated=true` cuando se alcanza el tope de 200 nodos antes de agotar `depth`.
 - Fuera de alcance: lineage a nivel de columna; referencias dentro de SPs (para eso, `nz_find_table_references`).

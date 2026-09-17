@@ -221,6 +221,10 @@ class ViewColumnDescriptor(BaseModel):
 
 class DependencyItem(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    database: str | None = Field(
+        default=None,
+        description="Database the reference lives in (set when the definition qualifies it).",
+    )
     ref_schema: str = Field(alias="schema")
     name: str
     kind: str
@@ -249,6 +253,10 @@ class ObjectDependenciesInput(BaseModel):
 
 class ObjectDependencyNode(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    database: str | None = Field(
+        default=None,
+        description="Database the node lives in; set when it differs from the walk root.",
+    )
     node_schema: str = Field(alias="schema")
     name: str
     kind: str
