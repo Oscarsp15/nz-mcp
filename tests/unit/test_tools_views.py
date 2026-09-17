@@ -84,14 +84,14 @@ def test_nz_get_view_ddl_happy_path(monkeypatch: pytest.MonkeyPatch, two_profile
         assert database == "DEV"
         assert schema == "PUBLIC"
         assert view == "VW_A"
-        return "CREATE VIEW PUBLIC.VW_A AS SELECT 1"
+        return "CREATE OR REPLACE VIEW PUBLIC.VW_A AS\nSELECT 1"
 
     monkeypatch.setattr("nz_mcp.tools.views.get_view_ddl", _fake_get_view_ddl)
     out = nz_get_view_ddl(
         GetViewDdlInput(database="DEV", view_schema="PUBLIC", view="VW_A"),
         config_path=two_profiles,
     )
-    assert out.ddl.startswith("CREATE VIEW")
+    assert out.ddl.startswith("CREATE OR REPLACE VIEW")
 
 
 def test_nz_get_view_ddl_propagates_errors(

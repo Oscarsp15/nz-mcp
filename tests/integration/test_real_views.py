@@ -46,3 +46,8 @@ def test_real_nz_get_view_ddl(
     )
     assert isinstance(out.ddl, str)
     assert len(out.ddl) > 0
+    # Issue #303: ddl must be re-executable — starts with CREATE OR REPLACE VIEW header.
+    assert out.ddl.startswith("CREATE OR REPLACE VIEW"), (
+        f"nz_get_view_ddl must return full CREATE OR REPLACE VIEW statement, got: {out.ddl[:120]!r}"
+    )
+    assert f"{integration_schema.upper()}.{first.upper()}" in out.ddl.upper()
