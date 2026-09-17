@@ -956,6 +956,40 @@ class _FindTableConnectionLike(Protocol):
 
 _TABLE_MATCH_MIN_ITEMS: Final[int] = 3
 
+#: ``LIKE`` wildcards. A pattern made only of these matches every object in every database:
+#: the shape that turned a cross-database search into a full catalog sweep (issue #361).
+_LIKE_WILDCARDS: Final[frozenset[str]] = frozenset({"%", "_"})
+
+
+def _narrows_anything(table_pattern: str) -> bool:
+    """Whether a ``LIKE`` pattern holds at least one literal character."""
+    return any(char not in _LIKE_WILDCARDS for char in table_pattern)
+
+
+def _ensure_pattern_narrows(database: str | None, table_pattern: str) -> None:
+    """Refuse a cross-database sweep whose pattern matches everything (issue #361).
+
+    A pattern made only of wildcards matches every object of every visible database, so the
+    call is not a search: it is a sweep whose result nobody asked for. It is refused before
+    anything else runs, so the caller pays nothing — not even the connection that listing
+    the databases would open.
+
+    A named ``database`` is never refused — it bounds the sweep to one — and neither is a
+    pattern with a literal character, however wide the visible universe is: that is a real
+    search and it keeps working exactly as it did. Capping the number of databases was
+    considered and rejected: measured live, the SaaS environment has 62 visible databases,
+    so any cap low enough to bound the cost would have refused the specific-pattern search
+    this fix exists to preserve.
+    """
+    if database is not None or _narrows_anything(table_pattern):
+        return
+    hints = both("HINT.INPUT_TOO_BROAD.PATTERN_MATCHES_EVERYTHING", pattern=table_pattern)
+    raise InputTooBroadError(
+        pattern=table_pattern,
+        hint_es=hints["es"],
+        hint_en=hints["en"],
+    )
+
 
 def find_tables(
     profile: Profile,
@@ -972,8 +1006,13 @@ def find_tables(
     least one more exists. Databases are scanned in ``nz_list_databases`` order and the scan
     stops as soon as one extra match is found, so a rare pattern does not read the whole
     catalog of every database.
+
+    Without a ``database`` the call is refused by :func:`_ensure_pattern_narrows` when the
+    pattern narrows nothing, before anything is opened (issue #361); a pattern with a
+    literal character is a real search and scans every visible database as before.
     """
     schema_like = schema_pattern if schema_pattern else None
+    _ensure_pattern_narrows(database, table_pattern)
     targets = _target_databases(profile, database)
     params = (
         table_pattern,

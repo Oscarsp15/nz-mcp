@@ -350,6 +350,9 @@ def test_input_too_broad_when_scan_exceeds_cap(
     assert exc.value.code == "INPUT_TOO_BROAD"
     assert exc.value.context.get("scanned") == 5001
     assert exc.value.context.get("cap") == 5000
+    # The shared message states the fact; the escape lives in the hint pair (issue #361).
+    assert "pattern" in str(exc.value.context.get("hint_es"))
+    assert "pattern" in str(exc.value.context.get("hint_en"))
 
 
 def test_results_sorted_descending_by_total_occurrences(

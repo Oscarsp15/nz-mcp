@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from nz_mcp.errors import ObjectNotFoundError
+from nz_mcp.errors import InputTooBroadError, ObjectNotFoundError
 from nz_mcp.tools.find_table import FindTableInput, nz_find_table
 
 
@@ -79,3 +79,27 @@ def test_nz_find_table_invisible_database(
             config_path=two_profiles,
         )
     assert exc.value.code == "OBJECT_NOT_FOUND"
+
+
+def test_nz_find_table_propagates_the_cost_guard(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """The catalog guard's typed error reaches the tool boundary unchanged (issue #361)."""
+
+    def _raise(_profile: object, **_kwargs: object) -> tuple[list[dict[str, str]], bool]:
+        raise InputTooBroadError(
+            scanned=26,
+            cap=25,
+            pattern="%",
+            hint_es="Pasa 'database'.",
+            hint_en="Pass 'database'.",
+        )
+
+    monkeypatch.setattr("nz_mcp.tools.find_table.find_tables", _raise)
+
+    with pytest.raises(InputTooBroadError) as exc:
+        nz_find_table(FindTableInput(table_pattern="%"), config_path=two_profiles)
+
+    assert exc.value.code == "INPUT_TOO_BROAD"
+    assert exc.value.context["pattern"] == "%"
+    assert exc.value.context["hint_en"] == "Pass 'database'."

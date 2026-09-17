@@ -316,13 +316,10 @@ MESSAGES: Final[dict[str, Message]] = {
     },
     "INPUT_TOO_BROAD": {
         "es": (
-            "El escaneo abarcaría {scanned} procedimientos (cap {cap}). "
-            "Refina la búsqueda con el parámetro 'pattern'."
+            "La búsqueda no está lo bastante acotada para un escaneo de catálogo: acótala "
+            "antes de reintentarla."
         ),
-        "en": (
-            "The scan would cover {scanned} procedures (cap {cap}). "
-            "Narrow it with the 'pattern' parameter."
-        ),
+        "en": "The search is not narrow enough for a catalog scan: narrow it before retrying.",
     },
     # Hints
     "HINT.RESULT_TRUNCATED_BY_ROWS": {
@@ -356,6 +353,26 @@ MESSAGES: Final[dict[str, Message]] = {
     "HINT.FIND_TABLE_REFERENCES_TIMEOUT": {
         "es": "Se alcanzó el límite de {timeout_s}s durante el escaneo; el resultado puede estar incompleto. Acota con 'pattern' o sube 'timeout_s' (máx {cap}).",
         "en": "The {timeout_s}s limit was reached mid-scan; results may be incomplete. Narrow it with 'pattern' or raise 'timeout_s' (max {cap}).",
+    },
+    # One hint per way an INPUT_TOO_BROAD scan can be narrowed, named after the tool that
+    # raises it: the shared message states the fact, the hint carries the escape.
+    "HINT.INPUT_TOO_BROAD.PATTERN_MATCHES_EVERYTHING": {
+        "es": (
+            "El patrón '{pattern}' solo tiene comodines, así que abarcaría todas las bases "
+            "visibles. Pasa 'database' para acotar a una base, o un patrón con algún "
+            "carácter literal (por ejemplo 'ventas%')."
+        ),
+        "en": (
+            "The pattern '{pattern}' holds only wildcards, so it would cover every visible "
+            "database. Pass 'database' to limit it to one database, or a pattern with at "
+            "least one literal character (for example 'ventas%')."
+        ),
+    },
+    "HINT.INPUT_TOO_BROAD.NARROW_PROCEDURE_PATTERN": {
+        "es": (
+            "Refina la búsqueda con el parámetro 'pattern' o baja 'max_procedures' (tope {cap})."
+        ),
+        "en": "Narrow it with the 'pattern' parameter or lower 'max_procedures' (cap {cap}).",
     },
     "HINT.TABLE_LIST_TRUNCATED": {
         "es": "Lista truncada en {n} de {total} tablas. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
