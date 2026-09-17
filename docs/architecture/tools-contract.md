@@ -13,6 +13,7 @@
 - **`nz_table_stats`**: `skew_class` (`balanced` \| `moderate` \| `severe`) según umbrales documentados en código; `stats_last_analyzed` desde `_v_statistic` cuando exista fila/columna.
 - **`nz_get_procedure_ddl`**: `size_bytes` (UTF-8) del texto devuelto, `truncated` + `hint` cuando el DDL supera `max_bytes` (default ~100 KB), `warning` cuando el texto devuelto supera ~100 KB (solo posible si se sube `max_bytes`). Ver ADR 0018.
 - **`nz_list_procedures`**: `max_rows` opcional (default = `max_rows_default` del perfil, cap `MAX_ROWS_CAP` = 1000); `truncated` + `hint` cuando el esquema tiene más procedimientos que `max_rows`. Ver ADR 0018.
+- **`nz_list_tables` / `nz_list_views` / `nz_list_schemas` / `nz_list_databases`**: mismo patrón que `nz_list_procedures` — `max_rows` opcional (default = `max_rows_default` del perfil, cap `MAX_ROWS_CAP`); `truncated` + `hint` cuando hay más objetos que `max_rows` (issue #305).
 - **`nz_get_table_ddl`**: `notes` lista de cadenas i18n; `reconstructed` indica reconstrucción desde catálogo.
 - **`nz_export_ddl`**: respuesta MCP con `content` (bloques `EmbeddedResource` `text/sql` + `TextContent` resumen) y `meta` (incluye `resource_uri` `nz-mcp://ddl/...`, `duration_ms`, y campos opcionales alineados con table/view/procedure). Cuando se pasa `output_path`, `meta` añade `output_path`, `bytes_written`, `sha256` del archivo escrito, `preview`, `resource_in_response` y `header_included`; por default el `EmbeddedResource` se **omite** del response y el archivo lleva un header `SET CATALOG <db>;` (ver § 29).
 - **CLI**: `nz-mcp edit-profile` actualiza campos de un perfil existente (sin password).
@@ -27,7 +28,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (40 tools registradas)
+## Catálogo v0.1 (41 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -79,11 +80,19 @@ Lista bases de datos visibles para el usuario del perfil.
 | Input | Tipo | Descripción |
 |---|---|---|
 | `pattern` | string (optional) | Filtro tipo `LIKE` sobre el nombre. Match case-insensitive (los nombres del catálogo se normalizan a mayúsculas). |
+| `max_rows` | int (optional, 1..1000) | Máximo de bases de datos devueltas. Default = `max_rows_default` del perfil (100); siempre acotado a `MAX_ROWS_CAP` (1000). |
 
 **Output**:
 ```json
-{ "databases": [{"name": "DEV", "owner": "ADMIN"}], "duration_ms": 42 }
+{
+  "databases": [{"name": "DEV", "owner": "ADMIN"}],
+  "truncated": false,
+  "hint": null,
+  "duration_ms": 42
+}
 ```
+
+`truncated` + `hint` cuando hay más bases de datos que `max_rows` (mismo patrón que `nz_list_procedures`, ADR 0018).
 
 ---
 
@@ -93,8 +102,11 @@ Lista bases de datos visibles para el usuario del perfil.
 |---|---|---|
 | `database` | string (required) | BD a inspeccionar (identificador validado para interpolación `<BD>..`). |
 | `pattern` | string (optional) | Filtro tipo `LIKE` sobre el nombre de schema. Match case-insensitive. |
+| `max_rows` | int (optional, 1..1000) | Máximo de esquemas devueltos. Default = `max_rows_default` del perfil (100); siempre acotado a `MAX_ROWS_CAP` (1000). |
 
-**Output**: `{ "schemas": [{"name": "PUBLIC", "owner": "ADMIN"}], "duration_ms": 35 }`
+**Output**: `{ "schemas": [{"name": "PUBLIC", "owner": "ADMIN"}], "truncated": false, "hint": null, "duration_ms": 35 }`
+
+`truncated` + `hint` cuando la BD tiene más esquemas que `max_rows` (mismo patrón que `nz_list_procedures`, ADR 0018).
 
 ---
 
@@ -108,6 +120,7 @@ Lista **tablas** (base y/o externas; no vistas, no procedimientos). Para vistas 
 | `schema` | string (required) | |
 | `pattern` | string (optional) | Filtro `LIKE` por nombre. Match case-insensitive. |
 | `object_type` | `"TABLE"` \| `"EXTERNAL TABLE"` \| `"ALL"` (default: `"TABLE"`) | Filtra por `OBJTYPE` real del catálogo. `ALL` incluye tablas base y externas (issue #295). |
+| `max_rows` | int (optional, 1..1000) | Máximo de tablas devueltas. Default = `max_rows_default` del perfil (100); siempre acotado a `MAX_ROWS_CAP` (1000). |
 
 **Output** (solo `name` y `kind`; el conteo de filas va en `nz_table_stats`):
 
@@ -117,11 +130,14 @@ Lista **tablas** (base y/o externas; no vistas, no procedimientos). Para vistas 
     {"name": "CUSTOMERS", "kind": "TABLE"},
     {"name": "STG_S3_ORDERS", "kind": "EXTERNAL TABLE"}
   ],
+  "truncated": false,
+  "hint": null,
   "duration_ms": 28
 }
 ```
 
 `kind` refleja el `OBJTYPE` real de cada fila (`TABLE` o `EXTERNAL TABLE`), no un valor fijo.
+`truncated` + `hint` cuando el esquema tiene más tablas que `max_rows` (mismo patrón que `nz_list_procedures`, ADR 0018; issue #305).
 
 ---
 
@@ -245,14 +261,19 @@ Lista vistas (solo vistas) en un schema.
 | `database` | string (required) | |
 | `schema` | string (required) | |
 | `pattern` | string (optional) | Filtro `LIKE`. Match case-insensitive. |
+| `max_rows` | int (optional, 1..1000) | Máximo de vistas devueltas. Default = `max_rows_default` del perfil (100); siempre acotado a `MAX_ROWS_CAP` (1000). |
 
 **Output**:
 ```json
 {
   "views": [{"name": "VW_ACTIVE_CUSTOMERS", "owner": "ADMIN"}],
+  "truncated": false,
+  "hint": null,
   "duration_ms": 31
 }
 ```
+
+`truncated` + `hint` cuando el esquema tiene más vistas que `max_rows` (mismo patrón que `nz_list_procedures`, ADR 0018; issue #305).
 
 Source: `_v_view`.
 
@@ -1188,6 +1209,43 @@ Busca columnas por patrón de nombre entre **tablas y vistas** de una base de da
 
 ---
 
+#### 41. `nz_profile_column`
+
+Perfila una columna en una sola pasada de solo lectura: total de filas, nulos, % de nulos, distintos, mínimo/máximo y los `top_n` valores más frecuentes. Es el paso previo al análisis de una tabla nueva, que hasta ahora exigía escribir los agregados a mano para cada columna.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | Debe coincidir con la BD del perfil activo (los `SELECT` de datos corren en la sesión; misma regla que `nz_table_sample`). |
+| `schema` | string (required) | |
+| `table` | string (required) | |
+| `column` | string (required) | Columna a perfilar. |
+| `top_n` | int (default 10, cap 50) | Nº de valores más frecuentes a devolver. |
+
+**Output**:
+```json
+{
+  "total": 37466,
+  "nulls": 0,
+  "null_pct": 0.0,
+  "distinct": 33677,
+  "min": "2026-04-01",
+  "max": "2026-06-30",
+  "top_values": [{"value": "PENDIENTE", "count": 123}],
+  "hint": null,
+  "duration_ms": 820
+}
+```
+
+**Reglas**:
+- Ejecuta dos queries `SELECT` validadas por `sql_guard` (`mode: read`): una de agregados (`COUNT`/`SUM CASE`/`COUNT DISTINCT`/`MIN`/`MAX`) y una de `GROUP BY` + `ORDER BY count DESC` + `LIMIT top_n` para los valores más frecuentes.
+- Los `NULL` no entran en `top_values` (se reportan aparte en `nulls`).
+- `min`/`max` se serializan como texto (`YYYY-MM-DD`, `YYYY-MM-DD HH:MM:SS`, etc.).
+- Verifica la existencia de tabla y columna contra `_v_relation_column` antes de perfilar: tabla ausente o columna ausente → `OBJECT_NOT_FOUND` (con la lista de columnas visibles en el contexto de la columna ausente).
+- `hint` se rellena cuando hay más valores distintos que `top_n` (sugiere subir `top_n`).
+- `distinct` y `min`/`max` recorren la columna completa; en tablas muy grandes puede ser costoso. No usar para percentiles ni detección de outliers (fuera de alcance de este issue).
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -1196,7 +1254,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
 |---|---|---|---|
-| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_export_ddl`, `nz_current_profile` | true | false | true |
+| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
 | `nz_insert` | false | false | false |
 | `nz_insert_select` | false | false | false |
 | `nz_update`, `nz_delete` | false | true | false |
