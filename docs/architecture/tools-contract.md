@@ -28,7 +28,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (48 tools registradas)
+## Catálogo v0.1 (49 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -1551,6 +1551,50 @@ Cuenta grupos de clave duplicados en una tabla y muestrea las claves ofensoras (
 
 ---
 
+#### 49. `nz_compare_rows`
+
+Compara los conjuntos de claves entre dos tablas usando `EXCEPT` / `INTERSECT` + `COUNT(*)`. Devuelve conteos exactos de claves solo-en-A, solo-en-B, en-ambas y claves nulas, más muestras acotadas de las diferencias. Modo `read`. No compara columnas completas, solo la clave indicada. Ver issue #302.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | BD. |
+| `schema_a` | string (required) | Esquema de la tabla A. |
+| `table_a` | string (required) | Tabla A. |
+| `key_a` | string (required) | Columna clave en A. |
+| `schema_b` | string (required) | Esquema de la tabla B. |
+| `table_b` | string (required) | Tabla B. |
+| `key_b` | string (required) | Columna clave en B. |
+| `limit` | int (default: 10, max: 100) | Tope de muestra de filas de diferencia. Los conteos son siempre exactos. |
+
+**Output**:
+```json
+{
+  "only_in_a": 37466,
+  "only_in_b": 0,
+  "in_both": 33000,
+  "null_keys_a": 0,
+  "null_keys_b": 0,
+  "sample_only_in_a": ["CR001", "CR002"],
+  "sample_only_in_b": [],
+  "truncated": true,
+  "hint": "Muestras limitadas a 10 claves por lado; quedan 37456 de A y 0 de B. Sube el parámetro 'limit' (máx 100) para ver más.",
+  "duration_ms": 820
+}
+```
+
+**Errores**: `GuardRejectedError`, `ObjectNotFoundError`, `NetezzaError`, `PermissionDeniedError`.
+
+**Reglas**:
+- Todos los identificadores (esquema, tabla, clave) se validan como identificadores de catálogo antes de interpolarse en SQL.
+- Si `table_a` o `table_b` no existe o no es visible → `OBJECT_NOT_FOUND` (se verifica contra `_V_RELATION_COLUMN` antes de construir el SQL, en vez de exponer el error crudo del driver).
+- Las 7 sentencias se validan con `sql_guard` (`mode="read"`) antes de ejecutarse (defensa en profundidad).
+- Las claves nulas se excluyen de los conteos de diferencias y se cuentan por separado (`null_keys_a`, `null_keys_b`).
+- `truncated` es `true` cuando alguna diferencia supera la muestra devuelta; `hint` (ES/EN) indica cuántas claves quedaron fuera y cómo subir el `limit`.
+- La tool no acepta SQL crudo; el caller solo declara coordenadas de objeto.
+- Solo compara una clave; diferencias por columnas completas quedan fuera de alcance.
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -1559,7 +1603,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
 |---|---|---|---|
-| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_table_stats_batch`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_find_column`, `nz_find_duplicates`, `nz_compare_tables`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
+| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_table_stats_batch`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_find_column`, `nz_find_duplicates`, `nz_compare_rows`, `nz_compare_tables`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
 | `nz_insert` | false | false | false |
 | `nz_insert_select` | false | false | false |
 | `nz_update`, `nz_delete` | false | true | false |

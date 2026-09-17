@@ -1266,6 +1266,17 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Filas",
         "en": "Rows",
     },
+    # nz_compare_rows
+    "COMPARE_ROWS.HINT.SAMPLE_CAPPED": {
+        "es": (
+            "Muestras limitadas a {limit} claves por lado; quedan {missing_a} de A y "
+            "{missing_b} de B. Sube el parámetro 'limit' (máx {cap}) para ver más."
+        ),
+        "en": (
+            "Samples capped at {limit} keys per side; {missing_a} from A and "
+            "{missing_b} from B left out. Raise the 'limit' parameter (max {cap}) to see more."
+        ),
+    },
 }
 
 

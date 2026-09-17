@@ -17,6 +17,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_alter_table",
     "nz_call_procedure",
     "nz_clone_procedure",
+    "nz_compare_rows",
     "nz_compare_tables",
     "nz_create_table",
     "nz_create_table_as",
