@@ -511,6 +511,8 @@ Análisis **inverso** de impacto: dado `(database, schema, table)`, devuelve los
 | `table_database` | string (optional) | Filtra referencias prefijadas con esta BD; si se omite, acepta cualquier BD o sin prefijo. |
 | `table_schema` | string (optional) | Análogo a `table_database`. |
 | `pattern` | string (optional) | Filtro `LIKE` sobre el nombre del SP para acotar el escaneo. Match case-insensitive. |
+| `timeout_s` | int (optional, `1..300`) | Opt-in. Fija el timeout de socket de la descarga en lote **y** un deadline para el escaneo en proceso. Si se omite, manda el timeout de socket del perfil activo y el escaneo no tiene deadline (comportamiento previo a #308). Si el deadline salta a mitad de escaneo, se devuelven las referencias ya encontradas con `timed_out: true`. |
+| `max_procedures` | int (optional, `1..5000`) | Tope del universo a escanear. Default: `5000`. Se comprueba con un **pre-conteo barato** (solo nombres, sin `PROCEDURESOURCE`), así que superarlo falla rápido con `INPUT_TOO_BROAD` sin pagar la descarga completa ni devolver un parcial silencioso. |
 
 **Output**:
 ```json
@@ -528,6 +530,8 @@ Análisis **inverso** de impacto: dado `(database, schema, table)`, devuelve los
   "scanned_count": 142,
   "match_count": 1,
   "truncated": false,
+  "timed_out": false,
+  "hint": null,
   "duration_ms": 820
 }
 ```
@@ -537,11 +541,12 @@ Análisis **inverso** de impacto: dado `(database, schema, table)`, devuelve los
 - **Detección write**: `INSERT INTO <tabla>`, `UPDATE <tabla>`, `DELETE FROM <tabla>`, `MERGE INTO <tabla>`, `TRUNCATE TABLE <tabla>`, `DROP TABLE [IF EXISTS] <tabla>`, `CREATE [TEMP|TEMPORARY] TABLE [IF NOT EXISTS] <tabla>` (CTAS estándar), y `... INTO <tabla>` (cubre `SELECT INTO`).
 - Match case-insensitive sobre el nombre, con respeto de límites de token (`Foo` no engancha `FooBar`). Acepta `tabla`, `schema.tabla`, `bd.schema.tabla` y la sintaxis Netezza `bd..tabla`.
 - Comentarios (`--`, `/* */`) y literales `'…'` se filtran antes del scan.
-- **Caps**:
-  - Hard cap: `scanned_count <= 5000`. Si el `pattern` no acota suficiente → `INPUT_TOO_BROAD` con sugerencia de usar `pattern`.
+- **Caps y coste** (issue #308):
+  - Hard cap: `scanned_count <= max_procedures` (default `5000`). Si el `pattern` no acota suficiente → `INPUT_TOO_BROAD` con sugerencia de usar `pattern`. Con `max_procedures` explícito, el rechazo llega por pre-conteo, **antes** de la descarga en lote.
   - Soft cap: `references` truncadas a 1000 entradas, ordenadas desc por `occurrences_read + occurrences_write` (desempate por nombre); en ese caso `truncated: true`.
-  - Timeout default: 60 s.
-- **Out of scope v1**: vistas (`_v_view.DEFINITION`), dynamic SQL (`EXECUTE IMMEDIATE 'INSERT INTO ' || …`), análisis de columnas, cross-schema/cross-database, exportación a archivo. Documentado en [`../adr/0012-tool-find-table-references.md`](../adr/0012-tool-find-table-references.md).
+  - `timeout_s` es opt-in: fija el timeout de socket de la descarga y un deadline para el escaneo. Si el deadline salta a mitad de escaneo, se devuelven las referencias ya encontradas con `timed_out: true` (un análisis de impacto parcial sigue siendo útil si el cliente sabe que lo es). Si el socket expira durante la descarga, la llamada falla con `QUERY_TIMEOUT` y un `hint` para acotar. Omitirlo conserva el comportamiento previo — timeout de socket del perfil y sin deadline — para no convertir un escaneo ancho normal en un parcial.
+  - `hint`: presente (y localizado) cuando el universo escaneado alcanza el umbral `200` procedimientos (`HINT.FIND_TABLE_REFERENCES_LARGE_SCAN`, sugiere `pattern`/`max_procedures`) o cuando `timed_out` es `true` (`HINT.FIND_TABLE_REFERENCES_TIMEOUT`). `null` en escaneos pequeños.
+- **Out of scope v1**: vistas (`_v_view.DEFINITION`), dynamic SQL (`EXECUTE IMMEDIATE 'INSERT INTO ' || …`), análisis de columnas, cross-schema/cross-database, exportación a archivo, caché persistente de referencias. Documentado en [`../adr/0012-tool-find-table-references.md`](../adr/0012-tool-find-table-references.md).
 
 Implementación: una sola query a `_v_procedure` (mismo helper que `nz_get_procedures_ddl_batch`), seguida de `iter_statements` + `iter_table_references_in_statement` en `catalog/nzplsql_parser.py`.
 

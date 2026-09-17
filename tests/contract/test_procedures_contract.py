@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from nz_mcp.catalog.procedures import FIND_TABLE_REFERENCES_SCAN_CAP
+from nz_mcp.config import TIMEOUT_S_CAP
 from nz_mcp.tools.procedures import (
     GetFindTableReferencesInput,
     GetFindTableReferencesOutput,
@@ -390,3 +392,84 @@ def test_find_table_references_output_rejects_extra_fields() -> None:
                 "unexpected_field": True,
             }
         )
+
+
+# ── nz_find_table_references cost controls (issue #308) ──────────────────────
+
+
+@pytest.mark.contract
+def test_find_table_references_input_accepts_cost_controls() -> None:
+    inp = GetFindTableReferencesInput.model_validate(
+        {
+            "database": "D",
+            "schema": "PUBLIC",
+            "table": "FOO",
+            "timeout_s": 5,
+            "max_procedures": 50,
+        }
+    )
+    assert inp.timeout_s == 5
+    assert inp.max_procedures == 50
+
+
+@pytest.mark.contract
+def test_find_table_references_input_cost_controls_default_to_none() -> None:
+    inp = GetFindTableReferencesInput.model_validate(
+        {"database": "D", "schema": "PUBLIC", "table": "FOO"}
+    )
+    assert inp.timeout_s is None
+    assert inp.max_procedures is None
+
+
+@pytest.mark.contract
+@pytest.mark.parametrize("value", [0, -1, TIMEOUT_S_CAP + 1])
+def test_find_table_references_input_rejects_out_of_range_timeout(value: int) -> None:
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        GetFindTableReferencesInput.model_validate(
+            {"database": "D", "schema": "PUBLIC", "table": "FOO", "timeout_s": value}
+        )
+
+
+@pytest.mark.contract
+@pytest.mark.parametrize("value", [0, -1, FIND_TABLE_REFERENCES_SCAN_CAP + 1])
+def test_find_table_references_input_rejects_out_of_range_max_procedures(value: int) -> None:
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        GetFindTableReferencesInput.model_validate(
+            {"database": "D", "schema": "PUBLIC", "table": "FOO", "max_procedures": value}
+        )
+
+
+@pytest.mark.contract
+def test_find_table_references_output_accepts_cost_fields() -> None:
+    out = GetFindTableReferencesOutput.model_validate(
+        {
+            "references": [],
+            "scanned_count": 0,
+            "match_count": 0,
+            "truncated": False,
+            "timed_out": True,
+            "hint": "narrow it",
+            "duration_ms": 5,
+        }
+    )
+    assert out.timed_out is True
+    assert out.hint == "narrow it"
+
+
+@pytest.mark.contract
+def test_find_table_references_output_cost_fields_are_optional() -> None:
+    out = GetFindTableReferencesOutput.model_validate(
+        {
+            "references": [],
+            "scanned_count": 0,
+            "match_count": 0,
+            "truncated": False,
+            "duration_ms": 5,
+        }
+    )
+    assert out.timed_out is False
+    assert out.hint is None
