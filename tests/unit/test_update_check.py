@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-from importlib import metadata
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from nz_mcp import __version__, update_check
+from nz_mcp import update_check
 from nz_mcp.i18n import Locale
 
 
@@ -143,7 +142,7 @@ def test_the_notice_goes_to_stderr_and_never_to_stdout(
     """One line, on stderr. A byte on stdout would corrupt ``serve``'s JSON-RPC."""
     monkeypatch.delenv(update_check.NO_UPDATE_CHECK_ENV, raising=False)
     monkeypatch.setattr(update_check, "latest_version", lambda **_: "0.1.0a9")
-    monkeypatch.setattr(update_check, "installed_version", lambda: "0.1.0a1")
+    monkeypatch.setattr(update_check, "current_version", lambda: "0.1.0a1")
 
     update_check.run_update_check(locale="en")
 
@@ -297,17 +296,3 @@ def test_a_cached_none_is_respected(tmp_path: Path) -> None:
         raise AssertionError("a fresh cache must prevent the network call")
 
     assert update_check.latest_version(now=1_060.0, cache_path=path, fetch=_fetch) is None
-
-
-# --- installed version --------------------------------------------------------
-
-
-def test_installed_version_falls_back_to_the_package_constant(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def _missing(_name: str) -> str:
-        raise metadata.PackageNotFoundError
-
-    monkeypatch.setattr(metadata, "version", _missing)
-
-    assert update_check.installed_version() == __version__
