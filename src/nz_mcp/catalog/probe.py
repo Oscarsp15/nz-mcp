@@ -85,6 +85,7 @@ def dummy_params_for_query_id(query_id: str) -> tuple[Any, ...]:
         "get_procedure_ddl": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
         "get_all_procedures_ddl": (_DUMMY_SCHEMA, None, None),
         "get_procedure_section": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
+        "find_column": (_DUMMY_OBJECT, None, None, None, None),
     }
     if query_id not in mapping:
         raise KeyError(f"Unknown catalog query id: {query_id}")
