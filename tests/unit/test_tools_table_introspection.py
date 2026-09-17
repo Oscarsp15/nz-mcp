@@ -18,9 +18,18 @@ from nz_mcp.tools.tables import (
 
 def test_nz_table_sample_wire_schema_key(two_profiles: Path) -> None:
     parsed = TableSampleInput.model_validate(
-        {"database": "DEV", "schema": "PUBLIC", "table": "T", "rows": 5},
+        {
+            "database": "DEV",
+            "schema": "PUBLIC",
+            "table": "T",
+            "rows": 5,
+            "where": "ID > 10",
+            "order_by": "ID DESC",
+        },
     )
     assert parsed.table_schema == "PUBLIC"
+    assert parsed.where == "ID > 10"
+    assert parsed.order_by == "ID DESC"
 
 
 def test_nz_table_sample_happy_path(monkeypatch: pytest.MonkeyPatch, two_profiles: Path) -> None:
@@ -33,11 +42,15 @@ def test_nz_table_sample_happy_path(monkeypatch: pytest.MonkeyPatch, two_profile
         *,
         rows: int,
         timeout_s: int,
+        where: str | None = None,
+        order_by: str | None = None,
     ) -> dict[str, object]:
         assert database == "DEV"
         assert schema == "PUBLIC"
         assert table == "T"
         assert rows == 10
+        assert where == "ID > 10"
+        assert order_by == "ID DESC"
         return {
             "columns": [{"name": "c", "type": "INT"}],
             "rows": [[42]],
@@ -51,7 +64,13 @@ def test_nz_table_sample_happy_path(monkeypatch: pytest.MonkeyPatch, two_profile
     monkeypatch.setattr("nz_mcp.tools.tables.get_table_sample", _sample)
 
     out = nz_table_sample(
-        TableSampleInput(database="DEV", table_schema="PUBLIC", table="T"),
+        TableSampleInput(
+            database="DEV",
+            table_schema="PUBLIC",
+            table="T",
+            where="ID > 10",
+            order_by="ID DESC",
+        ),
         config_path=two_profiles,
     )
     assert out.rows == [[42]]

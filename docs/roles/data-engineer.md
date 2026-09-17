@@ -44,7 +44,8 @@ Referencia obligatoria de SQL validado por versión:
 | `_v_database` | `nz_list_databases` |
 | `_v_schema` | `nz_list_schemas` |
 | `_v_table` | `nz_list_tables` (`object_type`: `TABLE` default, `EXTERNAL TABLE`, `ALL`) |
-| `_v_view` | views si `include_views=true` |
+| `_v_view` | `nz_list_views`, `nz_get_view_ddl`; `nz_describe_view` (columnas + `depends_on`) y `nz_object_dependencies` (lineage `up`/`down`) parsean `DEFINITION` con sqlglot |
+| `_v_depend` (`SYSTEM.DEFINITION_SCHEMA`) | dependencias de objeto; en NPS 11.2.1.11-IF1 solo registra funciones/librerías, **no** vistas→tablas, así que el lineage se deriva del `DEFINITION` |
 | `_v_relation_column` | `nz_describe_table` (columnas, tipos, nullability); `nz_find_column` (búsqueda por patrón entre tablas/vistas) |
 | `_v_table_dist_map` | distribución (HASH/RANDOM, columnas) |
 | `_v_table_storage_stat` | tamaño físico, compresión |
