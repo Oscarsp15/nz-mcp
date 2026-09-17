@@ -565,6 +565,27 @@ def test_list_views_exposes_created_at_none_when_missing(monkeypatch: pytest.Mon
     assert out == [{"name": "V2", "owner": "ADMIN", "created_at": None}]
 
 
+def test_list_views_exposes_created_at_from_nzpy_string(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Issue #312 NO-GO fix: nzpy delivers CREATEDATE as 'YYYY-MM-DD HH:MM:SS' (no tz).
+
+    The Netezza SaaS server runs in UTC (verified 2026-09-17), so the naive
+    string must be normalised to UTC ISO-8601 with a +00:00 suffix.
+    """
+    cursor = _FakeListCursor(rows=[("V3", "ADMIN", "2026-09-17 10:40:09")])
+    connection = _FakeListConnection(cursor)
+    monkeypatch.setattr("nz_mcp.catalog.views.get_password", lambda _n: "pw")
+    monkeypatch.setattr("nz_mcp.catalog.views.open_connection", lambda *_a, **_k: connection)
+    monkeypatch.setattr(
+        "nz_mcp.catalog.views.resolve_query",
+        lambda _i, _p: "SELECT VIEWNAME AS NAME, OWNER, CREATEDATE FROM <BD>.._V_VIEW",
+    )
+
+    out = list_views(_profile(), database="DB", schema="DBO")
+    assert len(out) == 1
+    created = out[0]["created_at"]
+    assert created == "2026-09-17T10:40:09+00:00", f"got {created!r}"
+
+
 def test_get_view_ddl_validates_database_identifier_before_set_catalog(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -222,6 +222,22 @@ def test_parse_table_stats_epoch_string_converted_to_iso() -> None:
     assert "1789541796" not in created
 
 
+def test_parse_table_stats_nzpy_naive_string_converted_to_utc_iso() -> None:
+    """Naive 'YYYY-MM-DD HH:MM:SS' string from nzpy becomes UTC ISO-8601.
+
+    nzpy delivers _V_VIEW.CREATEDATE (and some _V_TABLE columns) as a plain
+    'YYYY-MM-DD HH:MM:SS' string with no timezone suffix.  The Netezza SaaS
+    server runs in UTC (verified 2026-09-17), so we attach +00:00.
+    """
+    from nz_mcp.catalog.formatters import format_timestamp_iso
+
+    result = format_timestamp_iso("2026-09-17 10:40:09")
+    assert result is not None
+    assert "T" in result, "ISO-8601 requires a T separator"
+    assert "+00:00" in result, "UTC timezone suffix required"
+    assert result == "2026-09-17T10:40:09+00:00"
+
+
 def test_get_table_stats_missing_row(monkeypatch: pytest.MonkeyPatch) -> None:
     class _Cur:
         def execute(self, _sql: str, _params: tuple[str, str]) -> None:

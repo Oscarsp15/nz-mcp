@@ -12,10 +12,12 @@ _IEC_BASE: int = 1024
 def format_timestamp_iso(value: Any) -> str | None:
     """Return an ISO-8601 string for a catalog timestamp value, or ``None``.
 
-    Handles three driver representations:
+    Handles four driver representations:
     - ``None`` → ``None``
     - A ``datetime`` (or any object with ``.isoformat()``) → ``isoformat()``
     - An integer or numeric string (Unix epoch in seconds) → UTC ISO-8601
+    - A naive ``'YYYY-MM-DD HH:MM:SS'`` string (nzpy TIMESTAMP columns) → UTC ISO-8601
+      (Netezza SaaS server runs in UTC; verified 2026-09-17)
     """
     if value is None:
         return None
@@ -24,9 +26,16 @@ def format_timestamp_iso(value: Any) -> str | None:
         return str(iso())
     try:
         epoch = int(value)
+        return datetime.fromtimestamp(epoch, tz=UTC).isoformat()
     except (TypeError, ValueError):
+        pass
+    try:
+        parsed = datetime.fromisoformat(str(value))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.isoformat()
+    except ValueError:
         return str(value)
-    return datetime.fromtimestamp(epoch, tz=UTC).isoformat()
 
 
 def format_bytes_iec(n: int) -> str:
