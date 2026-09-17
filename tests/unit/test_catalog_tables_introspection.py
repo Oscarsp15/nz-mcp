@@ -195,6 +195,33 @@ def test_parse_table_stats_dict_datetime() -> None:
     assert "2026-04-01" in (p["table_created"] or "")
 
 
+def test_parse_table_stats_epoch_int_converted_to_iso() -> None:
+    """Issue #312: integer epoch from driver must become ISO-8601, not a raw number string."""
+    p = _parse_table_stats_row((10, 1024, 2048, None, 1789541796))
+    created = p["table_created"]
+    assert created is not None
+    assert created[0].isdigit(), "should start with a year digit"
+    assert "T" in created, "ISO-8601 datetime requires a T separator"
+    assert "1789541796" not in created, "raw epoch must not appear in output"
+
+
+def test_parse_table_stats_epoch_string_converted_to_iso() -> None:
+    """Integer delivered as a string (some driver versions) also converts to ISO."""
+    p = _parse_table_stats_row(
+        {
+            "ROW_COUNT": 5,
+            "SIZE_BYTES_USED": 512,
+            "SIZE_BYTES_ALLOCATED": 1024,
+            "SKEW": None,
+            "TABLE_CREATED": "1789541796",
+        },
+    )
+    created = p["table_created"]
+    assert created is not None
+    assert "T" in created
+    assert "1789541796" not in created
+
+
 def test_get_table_stats_missing_row(monkeypatch: pytest.MonkeyPatch) -> None:
     class _Cur:
         def execute(self, _sql: str, _params: tuple[str, str]) -> None:

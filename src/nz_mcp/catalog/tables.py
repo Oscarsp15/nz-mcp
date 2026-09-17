@@ -9,7 +9,7 @@ from typing import Any, Final, Literal, Protocol, cast
 from nz_mcp.auth import get_password
 from nz_mcp.catalog.ddl_builder import build_create_table_ddl
 from nz_mcp.catalog.execute import execute_select, inject_limit
-from nz_mcp.catalog.formatters import format_bytes_iec
+from nz_mcp.catalog.formatters import format_bytes_iec, format_timestamp_iso
 from nz_mcp.catalog.identifier import (
     render_cross_db,
     validate_catalog_identifier,
@@ -644,19 +644,13 @@ def _normalize_stats_metrics(
     """
     skew_out: float | None = None if skew is None else float(skew)
 
-    created_out: str | None
-    if created is None:
-        created_out = None
-    else:
-        iso = getattr(created, "isoformat", None)
-        created_out = iso() if callable(iso) else str(created)
-
     return {
         "row_count": 0 if rc is None else int(rc),
         "size_bytes_used": 0 if used is None else int(used),
         "size_bytes_allocated": 0 if alloc is None else int(alloc),
         "skew": skew_out,
-        "table_created": created_out,
+        "table_created": format_timestamp_iso(created),
+        "stats_last_analyzed": None,
     }
 
 

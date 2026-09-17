@@ -241,6 +241,8 @@ Estadísticas agregadas desde `_V_TABLE` y `_V_TABLE_STORAGE_STAT` (reltuples, b
 }
 ```
 
+`table_created`: timestamp ISO-8601 (UTC) desde `_V_TABLE.CREATEDATE`; convierte epoch entero o string si el driver no devuelve un `datetime`.
+
 ---
 
 #### 9. `nz_get_table_ddl`
@@ -282,12 +284,14 @@ Lista vistas (solo vistas) en un schema.
 **Output**:
 ```json
 {
-  "views": [{"name": "VW_ACTIVE_CUSTOMERS", "owner": "ADMIN"}],
+  "views": [{"name": "VW_ACTIVE_CUSTOMERS", "owner": "ADMIN", "created_at": "2025-08-12T14:30:00+00:00"}],
   "truncated": false,
   "hint": null,
   "duration_ms": 31
 }
 ```
+
+`created_at`: timestamp ISO-8601 (UTC) de creación de la vista desde `_V_VIEW.CREATEDATE`; `null` si el driver no devuelve el dato.
 
 `truncated` + `hint` cuando el esquema tiene más vistas que `max_rows` (mismo patrón que `nz_list_procedures`, ADR 0018; issue #305).
 

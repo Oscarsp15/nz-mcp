@@ -40,6 +40,10 @@ class ViewItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str
     owner: str
+    created_at: str | None = Field(
+        default=None,
+        description="View creation timestamp in ISO-8601 (UTC). None if unavailable.",
+    )
 
 
 class ListViewsOutput(BaseModel):
@@ -125,7 +129,10 @@ def nz_list_views(
         else None
     )
     return ListViewsOutput(
-        views=[ViewItem(name=r["name"], owner=r["owner"]) for r in rows[:max_rows]],
+        views=[
+            ViewItem(name=r["name"], owner=r["owner"], created_at=r.get("created_at"))
+            for r in rows[:max_rows]
+        ],
         truncated=truncated,
         hint=hint,
         duration_ms=monotonic_duration_ms(start),

@@ -93,7 +93,7 @@ def _profile() -> Profile:
 
 
 def test_list_views_queries_catalog_with_optional_like(monkeypatch: pytest.MonkeyPatch) -> None:
-    cursor = _FakeListCursor(rows=[("V1", "A"), ("V2", "A")])
+    cursor = _FakeListCursor(rows=[("V1", "A", None), ("V2", "A", None)])
     connection = _FakeListConnection(cursor)
     monkeypatch.setattr("nz_mcp.catalog.views.get_password", lambda _n: "pw")
     monkeypatch.setattr(
@@ -103,7 +103,7 @@ def test_list_views_queries_catalog_with_optional_like(monkeypatch: pytest.Monke
     monkeypatch.setattr(
         "nz_mcp.catalog.views.resolve_query",
         lambda _i, _p: (
-            "SELECT VIEWNAME AS NAME, OWNER, X FROM <BD>.._V_VIEW "
+            "SELECT VIEWNAME AS NAME, OWNER, CREATEDATE FROM <BD>.._V_VIEW "
             "WHERE SCHEMA = UPPER(?) AND (? IS NULL OR VIEWNAME LIKE UPPER(?)) "
             "ORDER BY VIEWNAME"
         ),
@@ -111,8 +111,8 @@ def test_list_views_queries_catalog_with_optional_like(monkeypatch: pytest.Monke
 
     out = list_views(_profile(), database="ANALYTICS", schema="PUBLIC", pattern="V%")
     assert out == [
-        {"name": "V1", "owner": "A"},
-        {"name": "V2", "owner": "A"},
+        {"name": "V1", "owner": "A", "created_at": None},
+        {"name": "V2", "owner": "A", "created_at": None},
     ]
     assert cursor.executed_params == ("PUBLIC", "V%", "V%")
     assert "_v_view" in (cursor.executed_sql or "").lower()
@@ -126,9 +126,11 @@ def test_list_views_dict_row_with_name_owner(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("nz_mcp.catalog.views.open_connection", lambda *_a, **_k: connection)
     monkeypatch.setattr(
         "nz_mcp.catalog.views.resolve_query",
-        lambda _i, _p: "SELECT VIEWNAME AS NAME, OWNER FROM <BD>.._V_VIEW",
+        lambda _i, _p: "SELECT VIEWNAME AS NAME, OWNER, CREATEDATE FROM <BD>.._V_VIEW",
     )
-    assert list_views(_profile(), database="DB", schema="S") == [{"name": "V1", "owner": "O"}]
+    assert list_views(_profile(), database="DB", schema="S") == [
+        {"name": "V1", "owner": "O", "created_at": None}
+    ]
 
 
 def test_list_views_wraps_driver_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -173,17 +175,17 @@ class _CaseInsensitiveLikeListCursor:
         self.executed_sql = sql
         self.executed_params = params
 
-    def fetchall(self) -> list[tuple[str, str]]:
+    def fetchall(self) -> list[tuple[str, str, None]]:
         if self.executed_params is None:
             return []
         _, marker, pattern = self.executed_params
         if marker is None or pattern is None:
-            return [(n, "OWN") for n in self._names]
+            return [(n, "OWN", None) for n in self._names]
         upper = pattern.upper()
         if "%" not in upper:
-            return [(n, "OWN") for n in self._names if n == upper]
+            return [(n, "OWN", None) for n in self._names if n == upper]
         needle = upper.strip("%")
-        return [(n, "OWN") for n in self._names if needle in n]
+        return [(n, "OWN", None) for n in self._names if needle in n]
 
     def close(self) -> None:
         self.closed = True
@@ -230,7 +232,7 @@ def test_list_views_pattern_is_case_insensitive(
 
     out = list_views(_profile(), database="PROD_MAESTROBI", schema="DBO", pattern=pattern)
 
-    assert out == [{"name": "V_CONTINGENCIACREDITOSFULL", "owner": "OWN"}]
+    assert out == [{"name": "V_CONTINGENCIACREDITOSFULL", "owner": "OWN", "created_at": None}]
     assert cursor.executed_sql is not None
     assert "LIKE UPPER(?)" in " ".join(cursor.executed_sql.split())
 
@@ -521,6 +523,46 @@ def test_get_view_ddl_cross_db_fix_returns_real_definition(
     assert out != "Not a view"
     assert out.startswith("CREATE OR REPLACE VIEW DBO.V_CONTINGENCIACREDITOSFULL AS\n")
     assert "CONTINGENCIACREDITOSFULL" in out
+
+
+# ── issue #312: created_at exposed from CREATEDATE ────────────────────────────
+
+
+def test_list_views_exposes_created_at_from_epoch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Issue #312: integer CREATEDATE from driver must appear as ISO-8601 created_at."""
+    cursor = _FakeListCursor(rows=[("V1", "ADMIN", 1789541796)])
+    connection = _FakeListConnection(cursor)
+    monkeypatch.setattr("nz_mcp.catalog.views.get_password", lambda _n: "pw")
+    monkeypatch.setattr("nz_mcp.catalog.views.open_connection", lambda *_a, **_k: connection)
+    monkeypatch.setattr(
+        "nz_mcp.catalog.views.resolve_query",
+        lambda _i, _p: (
+            "SELECT VIEWNAME AS NAME, OWNER, CREATEDATE FROM <BD>.._V_VIEW "
+            "WHERE SCHEMA = UPPER(?) ORDER BY VIEWNAME"
+        ),
+    )
+
+    out = list_views(_profile(), database="DB", schema="DBO")
+    assert len(out) == 1
+    created = out[0]["created_at"]
+    assert created is not None
+    assert "T" in created, "ISO-8601 datetime requires a T separator"
+    assert "1789541796" not in created, "raw epoch must not appear in output"
+
+
+def test_list_views_exposes_created_at_none_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Issue #312: NULL CREATEDATE must surface as created_at=None, not raise."""
+    cursor = _FakeListCursor(rows=[("V2", "ADMIN", None)])
+    connection = _FakeListConnection(cursor)
+    monkeypatch.setattr("nz_mcp.catalog.views.get_password", lambda _n: "pw")
+    monkeypatch.setattr("nz_mcp.catalog.views.open_connection", lambda *_a, **_k: connection)
+    monkeypatch.setattr(
+        "nz_mcp.catalog.views.resolve_query",
+        lambda _i, _p: "SELECT VIEWNAME AS NAME, OWNER, CREATEDATE FROM <BD>.._V_VIEW",
+    )
+
+    out = list_views(_profile(), database="DB", schema="DBO")
+    assert out == [{"name": "V2", "owner": "ADMIN", "created_at": None}]
 
 
 def test_get_view_ddl_validates_database_identifier_before_set_catalog(
