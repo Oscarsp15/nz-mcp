@@ -333,6 +333,22 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Lista truncada en {n} de {total} procedimientos. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
         "en": "List truncated at {n} of {total} procedures. Narrow it with 'pattern' or raise 'max_rows' (max {cap}).",
     },
+    "HINT.TABLE_LIST_TRUNCATED": {
+        "es": "Lista truncada en {n} de {total} tablas. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
+        "en": "List truncated at {n} of {total} tables. Narrow it with 'pattern' or raise 'max_rows' (max {cap}).",
+    },
+    "HINT.VIEW_LIST_TRUNCATED": {
+        "es": "Lista truncada en {n} de {total} vistas. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
+        "en": "List truncated at {n} of {total} views. Narrow it with 'pattern' or raise 'max_rows' (max {cap}).",
+    },
+    "HINT.SCHEMA_LIST_TRUNCATED": {
+        "es": "Lista truncada en {n} de {total} esquemas. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
+        "en": "List truncated at {n} of {total} schemas. Narrow it with 'pattern' or raise 'max_rows' (max {cap}).",
+    },
+    "HINT.DATABASE_LIST_TRUNCATED": {
+        "es": "Lista truncada en {n} de {total} bases de datos. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
+        "en": "List truncated at {n} of {total} databases. Narrow it with 'pattern' or raise 'max_rows' (max {cap}).",
+    },
     "HINT.COLUMN_SEARCH_TRUNCATED": {
         "es": (
             "Resultado truncado en {n} de {total} columnas. Acota con 'schema_pattern' o "
@@ -346,6 +362,10 @@ MESSAGES: Final[dict[str, Message]] = {
     "HINT.PROCEDURE_DDL_TRUNCATED": {
         "es": "DDL truncado a {returned_kb} KB de {total_kb} KB (tope max_bytes={max_kb} KB). Llama a nz_get_procedure_size para dimensionar el SP y lee el resto con nz_get_procedure_section(section='range', from_line={from_line}, to_line={to_line}), avanzando de {step} en {step} líneas.",
         "en": "DDL truncated to {returned_kb} KB of {total_kb} KB (max_bytes cap {max_kb} KB). Call nz_get_procedure_size to size the SP up and read the rest with nz_get_procedure_section(section='range', from_line={from_line}, to_line={to_line}), advancing {step} lines at a time.",
+    },
+    "HINT.PROFILE_TOP_VALUES_LIMITED": {
+        "es": "Mostrando los {shown} valores más frecuentes de {distinct} distintos. Sube 'top_n' (máx {cap}) para ver más.",
+        "en": "Showing the top {shown} of {distinct} distinct values. Raise 'top_n' (max {cap}) to see more.",
     },
     "NOTE.DDL_RECONSTRUCTED": {
         "es": "DDL reconstruido desde catálogo (SHOW TABLE no disponible en este servidor).",
