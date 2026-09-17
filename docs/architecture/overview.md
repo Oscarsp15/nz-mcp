@@ -89,6 +89,15 @@
      ↳ SQL completo solo en DEBUG; nunca resultados.
 ```
 
+## Modelo de ejecución (concurrencia)
+
+Los handlers de tool son **síncronos** y nzpy es I/O bloqueante. El handler async del transporte stdio no llama al dispatcher directamente: lo ejecuta en un **worker thread** con `anyio.to_thread.run_sync`, de modo que el event loop sigue leyendo stdio (pings, `CancelledNotification`, otras peticiones) mientras un tool corre. Antes de ADR 0038 el loop quedaba ocupado toda la duración del tool y una petición lenta (p. ej. `nz_find_table` sin acotar) encolaba todo lo demás hasta que el cliente cerraba stdio por timeout.
+
+- **Tope de concurrencia**: `anyio.CapacityLimiter(MAX_CONCURRENT_TOOLS)`, con `MAX_CONCURRENT_TOOLS = 8`. Cada tool abre su propia conexión nzpy, así que el tope también acota las sesiones Netezza simultáneas (el default de anyio, 40, sería demasiado). Superar el tope **espera un hueco**, no falla.
+- **Cancelación diferida**: `to_thread` usa `abandon_on_cancel=False`; una `CancelledNotification` no abandona el hilo (nzpy no expone `cancel()`, ver #275/#291) pero el loop sigue atendiendo otras peticiones.
+- **API síncrona intacta**: `call_tool` (CLI y tests) sigue llamando al dispatcher directo; el cambio vive solo en el camino async.
+- **Estado global**: el job store ya usa lock; las escrituras de `profiles.toml` (switch de perfil/BD) se serializan con un lock de módulo; `_DriverDiagnosticsHandler` ya filtra por hilo. Ver [ADR 0038](../adr/0038-despacho-de-tools-en-worker-thread.md).
+
 ## Netezza target
 
 - **NPS 11.2.1.11-IF1 [Build 4]** (instancia de referencia del mantenedor).

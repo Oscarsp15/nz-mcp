@@ -5,8 +5,9 @@ from __future__ import annotations
 import inspect
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
-from typing import Any, TextIO, cast
+from typing import Any, Final, TextIO, cast
 
 import anyio
 from mcp import types
@@ -28,6 +29,12 @@ from nz_mcp.logging_config import configure_logging_for_stdio
 from nz_mcp.tools.registry import TOOLS, ToolSpec
 
 _MODE_RANK = {"read": 0, "write": 1, "admin": 2}
+
+#: Upper bound on tools dispatched at once. Each tool opens its own nzpy connection, so this
+#: is also the ceiling on concurrent Netezza sessions a single stdio server can hold. It is
+#: deliberately lower than anyio's default thread limiter (40): a burst of slow tools must
+#: not turn into a burst of connections.
+MAX_CONCURRENT_TOOLS: Final[int] = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +112,32 @@ def _dispatch_tool_call(
         blocks, meta = raw
         return blocks, meta
     return cast(BaseModel, raw)
+
+
+async def _dispatch_tool_call_offloaded(
+    name: str,
+    arguments: dict[str, Any],
+    *,
+    config_path: Path | None,
+    limiter: anyio.CapacityLimiter,
+) -> dict[str, Any] | tuple[list[Any], Any] | BaseModel:
+    """Run the synchronous dispatcher in a worker thread so the event loop stays free.
+
+    Every tool handler is synchronous and nzpy is blocking I/O, so calling
+    ``_dispatch_tool_call`` directly from the async handler parks the whole server for the
+    duration of the tool: pings, cancellations and concurrent calls all queue behind it
+    (issue #360). ``to_thread`` moves the work off the loop while ``limiter`` caps how many
+    tools run at once.
+
+    Cancellation is *delayed*, not dropped: ``to_thread`` defaults to
+    ``abandon_on_cancel=False``, so a ``CancelledNotification`` does not interrupt the
+    in-flight database call (nzpy exposes no ``cancel()``; see #275/#291) but the loop keeps
+    serving other requests meanwhile.
+    """
+    return await anyio.to_thread.run_sync(
+        partial(_dispatch_tool_call, name, arguments, config_path=config_path),
+        limiter=limiter,
+    )
 
 
 def call_tool(
@@ -215,9 +248,14 @@ def _i18n_key_for(code: str) -> str | None:
     return mapping.get(code)
 
 
-def build_mcp_server(*, config_path: Path | None = None) -> Server[Any, Any]:
+def build_mcp_server(
+    *,
+    config_path: Path | None = None,
+    max_concurrent_tools: int = MAX_CONCURRENT_TOOLS,
+) -> Server[Any, Any]:
     """Build a low-level MCP server that delegates to the internal dispatcher."""
     server: Server[Any, Any] = Server(name="nz-mcp", version=current_version())
+    limiter = anyio.CapacityLimiter(max_concurrent_tools)
 
     @server.list_tools()  # type: ignore[no-untyped-call,untyped-decorator]
     async def _handle_list_tools() -> list[types.Tool]:
@@ -228,7 +266,12 @@ def build_mcp_server(*, config_path: Path | None = None) -> Server[Any, Any]:
         name: str,
         arguments: dict[str, Any],
     ) -> dict[str, Any] | types.CallToolResult:
-        out = _dispatch_tool_call(name, arguments, config_path=config_path)
+        out = await _dispatch_tool_call_offloaded(
+            name,
+            arguments,
+            config_path=config_path,
+            limiter=limiter,
+        )
         if isinstance(out, dict):
             return out
         if isinstance(out, tuple):
@@ -333,6 +376,7 @@ def _inline_refs(schema: dict[str, Any]) -> dict[str, Any]:
 
 
 __all__ = [
+    "MAX_CONCURRENT_TOOLS",
     "InvalidInputError",
     "Profile",
     "ToolListing",
