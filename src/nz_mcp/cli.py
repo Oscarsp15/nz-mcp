@@ -14,6 +14,7 @@ rarely type by hand.
 - ``remove-profile``     delete a profile and its keyring password.
 - ``doctor``             print local diagnostics (no Netezza connection).
 - ``probe-catalog``      execute every catalog query with dummy parameters (validates overrides).
+- ``tools``              list the tools the server exposes, with what each one does.
 - ``version``            print the package version.
 - ``serve``              run the MCP server over stdio.
 - ``help``               print the six curated onboarding tasks and the command each runs.
@@ -94,6 +95,7 @@ from nz_mcp.profile_check import (
 )
 from nz_mcp.secret import Secret
 from nz_mcp.server import run_stdio_server
+from nz_mcp.tools.registry import TOOLS, ToolSpec
 from nz_mcp.tools.session import SwitchProfileInput, nz_switch_profile
 from nz_mcp.update_check import start_update_check
 
@@ -393,6 +395,31 @@ def probe_catalog_cmd(
     raise typer.Exit(code=code)
 
 
+@app.command("tools", help=_help("CLI.HELP.TOOLS"), rich_help_panel=_COMMANDS_PANEL)
+def tools_cmd(
+    as_json: bool = typer.Option(False, "--json", help=_help("CLI.HELP.OPT.JSON")),
+    name: str | None = typer.Option(None, "--name", help=_help("CLI.HELP.OPT.NAME_FILTER")),
+) -> None:
+    """List the tools the server exposes, read from the live registry.
+
+    The listing comes from the same registry ``serve`` answers ``tools/list`` from, so it
+    cannot describe a catalog different from the one an assistant is offered. Local only:
+    no profile is read and Netezza is never contacted.
+    """
+    locale = resolve_locale()
+    selected = _selected_tools(name)
+    if as_json:
+        payload = [_tool_payload(spec) for spec in selected]
+        out.emit(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    if not selected:
+        out.warn(t("CLI.TOOLS_NONE", locale, name=name or ""))
+        return
+    out.emit(_render_tools(selected, locale))
+    out.note(t("CLI.TOOLS_COUNT", locale, n=len(selected), total=len(TOOLS)))
+    out.note(t("CLI.TOOLS_NEXT_STEP", locale))
+
+
 @app.command("version", help=_help("CLI.HELP.VERSION"), rich_help_panel=_COMMANDS_PANEL)
 def version_cmd() -> None:
     """Print the installed nz-mcp version."""
@@ -416,7 +443,7 @@ def serve_cmd() -> None:
 def help_cmd(ctx: typer.Context) -> None:
     """The six curated onboarding tasks, in plain text: which command does what.
 
-    ``--help`` lists all eleven commands; this is a shorter, task-first read for someone who
+    ``--help`` lists every command; this is a shorter, task-first read for someone who
     just installed the package and does not yet know what any of them are called. Not tied
     to any full-screen surface (ADR 0035 removed the last one) - it is, and always was, a
     plain command like any other.
@@ -652,6 +679,56 @@ def _report_probe_summary(run: ProbeRun, locale: Locale) -> None:
         out.success(t("PROBE_CATALOG.SUMMARY_ALL_OK", locale, total=total))
     key = "PROBE_CATALOG.NEXT_STEP_FAILED" if failed else "PROBE_CATALOG.NEXT_STEP_OK"
     out.note(t(key, locale, total=total))
+
+
+# --- tools listing ------------------------------------------------------------
+
+
+def _selected_tools(name_filter: str | None) -> list[ToolSpec]:
+    """The registered tools, ordered by name, optionally filtered by a name substring.
+
+    Ordered by name and not by registration order: the registry's order is the order the
+    modules happen to be imported in, which means nothing to someone looking for a tool they
+    half-remember. A filter that matches nothing is not an error, it is an empty list; the
+    caller decides how to say so.
+    """
+    specs = [TOOLS[registered] for registered in sorted(TOOLS)]
+    if not name_filter:
+        return specs
+    needle = name_filter.lower()
+    return [spec for spec in specs if needle in spec.name.lower()]
+
+
+def _tool_payload(spec: ToolSpec) -> dict[str, object]:
+    """One tool as machine-readable data: what ``tools/list`` advertises, plus its mode."""
+    return {
+        "name": spec.name,
+        "mode": spec.mode,
+        "description": spec.description,
+        "annotations": dict(spec.annotations),
+    }
+
+
+def _render_tools(tools: list[ToolSpec], locale: Locale) -> str:
+    """One row per tool: its name, the mode it needs and the first sentence of its description.
+
+    The description is cut to its first sentence on purpose. A tool's full text runs to
+    several paragraphs and a table is a summary; whoever needs the whole thing has ``--json``.
+    """
+    headers = [
+        t("CLI.TOOLS_COLUMN_TOOL", locale),
+        t("CLI.TOOLS_COLUMN_MODE", locale),
+        t("CLI.TOOLS_COLUMN_DESCRIPTION", locale),
+    ]
+    rows = [[spec.name, spec.mode, _first_sentence(spec.description)] for spec in tools]
+    return out.table(headers, rows, level=out.stdout_terminal_level())
+
+
+def _first_sentence(description: str) -> str:
+    """The first sentence of a tool description, on a single line."""
+    first_line = description.strip().split("\n", 1)[0]
+    sentence, separator, _ = first_line.partition(". ")
+    return f"{sentence}." if separator else first_line
 
 
 # --- helpers ------------------------------------------------------------------
