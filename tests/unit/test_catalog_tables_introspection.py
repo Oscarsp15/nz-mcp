@@ -195,6 +195,70 @@ def test_parse_table_stats_dict_datetime() -> None:
     assert "2026-04-01" in (p["table_created"] or "")
 
 
+def test_parse_table_stats_epoch_int_converted_to_iso() -> None:
+    """Issue #312: integer epoch from driver must become ISO-8601, not a raw number string."""
+    p = _parse_table_stats_row((10, 1024, 2048, None, 1789541796))
+    created = p["table_created"]
+    assert created is not None
+    assert created[0].isdigit(), "should start with a year digit"
+    assert "T" in created, "ISO-8601 datetime requires a T separator"
+    assert "1789541796" not in created, "raw epoch must not appear in output"
+
+
+def test_parse_table_stats_epoch_string_converted_to_iso() -> None:
+    """Integer delivered as a string (some driver versions) also converts to ISO."""
+    p = _parse_table_stats_row(
+        {
+            "ROW_COUNT": 5,
+            "SIZE_BYTES_USED": 512,
+            "SIZE_BYTES_ALLOCATED": 1024,
+            "SKEW": None,
+            "TABLE_CREATED": "1789541796",
+        },
+    )
+    created = p["table_created"]
+    assert created is not None
+    assert "T" in created
+    assert "1789541796" not in created
+
+
+def test_parse_table_stats_nzpy_naive_string_converted_to_utc_iso() -> None:
+    """Naive 'YYYY-MM-DD HH:MM:SS' string from nzpy becomes UTC ISO-8601.
+
+    nzpy delivers _V_VIEW.CREATEDATE (and some _V_TABLE columns) as a plain
+    'YYYY-MM-DD HH:MM:SS' string with no timezone suffix.  The Netezza SaaS
+    server runs in UTC (verified 2026-09-17), so we attach +00:00.
+    """
+    from nz_mcp.catalog.formatters import format_timestamp_iso
+
+    result = format_timestamp_iso("2026-09-17 10:40:09")
+    assert result is not None
+    assert "T" in result, "ISO-8601 requires a T separator"
+    assert "+00:00" in result, "UTC timezone suffix required"
+    assert result == "2026-09-17T10:40:09+00:00"
+
+
+def test_parse_table_stats_varchar_string_is_tz_independent() -> None:
+    """Regression: CAST(CREATEDATE AS VARCHAR(19)) path must not shift by client TZ.
+
+    _V_TABLE.CREATEDATE as an integer epoch was already offset by the client's
+    local timezone (America/Lima UTC-5 → result was 5 h ahead of UTC). The SQL
+    now casts it to VARCHAR(19) so the driver delivers 'YYYY-MM-DD HH:MM:SS'.
+    This test verifies the string path through _parse_table_stats_row is
+    TZ-independent: the exact UTC string must come back unchanged.
+    """
+    p = _parse_table_stats_row(
+        {
+            "ROW_COUNT": 1,
+            "SIZE_BYTES_USED": 512,
+            "SIZE_BYTES_ALLOCATED": 1024,
+            "SKEW": None,
+            "TABLE_CREATED": "2026-09-17 11:09:00",
+        },
+    )
+    assert p["table_created"] == "2026-09-17T11:09:00+00:00"
+
+
 def test_get_table_stats_missing_row(monkeypatch: pytest.MonkeyPatch) -> None:
     class _Cur:
         def execute(self, _sql: str, _params: tuple[str, str]) -> None:

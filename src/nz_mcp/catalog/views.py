@@ -9,6 +9,7 @@ import sqlglot
 from sqlglot import expressions as exp
 
 from nz_mcp.auth import get_password
+from nz_mcp.catalog.formatters import format_timestamp_iso
 from nz_mcp.catalog.identifier import (
     render_cross_db,
     validate_catalog_identifier,
@@ -22,7 +23,7 @@ from nz_mcp.connection import open_connection
 from nz_mcp.errors import InvalidInputError, NetezzaError, ObjectNotFoundError
 from nz_mcp.logging_utils import sanitize
 
-_VIEW_LIST_MIN_ITEMS: Final[int] = 2
+_VIEW_LIST_MIN_ITEMS: Final[int] = 3
 _MAX_LINEAGE_DEPTH: Final[int] = 5
 _MAX_LINEAGE_NODES: Final[int] = 200
 _KIND_VIEW: Final[str] = "VIEW"
@@ -66,7 +67,7 @@ def list_views(
     database: str,
     schema: str,
     pattern: str | None = None,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Return views from ``_v_view`` for ``database`` and ``schema`` (cross-database)."""
     like_pattern = pattern if pattern else None
     params: tuple[str, str | None, str | None] = (schema, like_pattern, like_pattern)
@@ -152,7 +153,7 @@ def get_view_ddl(
     return f"CREATE OR REPLACE VIEW {schema_ident}.{view_ident} AS\n{definition}"
 
 
-def _row_to_view_list_item(row: Any) -> dict[str, str]:
+def _row_to_view_list_item(row: Any) -> dict[str, Any]:
     if isinstance(row, dict):
         name_key = "NAME" if "NAME" in row else None
         if name_key is None and "VIEWNAME" in row:
@@ -162,9 +163,18 @@ def _row_to_view_list_item(row: Any) -> dict[str, str]:
                 operation="list_views",
                 detail="Catalog query must return NAME (or VIEWNAME) and OWNER columns.",
             )
-        return {"name": str(row[name_key]), "owner": str(row["OWNER"])}
+        raw_date = row.get("CREATEDATE")
+        return {
+            "name": str(row[name_key]),
+            "owner": str(row["OWNER"]),
+            "created_at": format_timestamp_iso(raw_date),
+        }
     if is_sequence_row(row, _VIEW_LIST_MIN_ITEMS):
-        return {"name": str(row[0]), "owner": str(row[1])}
+        return {
+            "name": str(row[0]),
+            "owner": str(row[1]),
+            "created_at": format_timestamp_iso(row[2]),
+        }
     raise NetezzaError(operation="list_views", detail="Unexpected row shape from _v_view")
 
 
