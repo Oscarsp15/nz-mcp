@@ -10,6 +10,7 @@ from nz_mcp.tools import (
     call_async,  # noqa: F401  (registers nz_call_procedure_async, nz_job_poll)
     call_procedure,  # noqa: F401  (registers nz_call_procedure)
     clone_procedure,  # noqa: F401  (registers nz_clone_procedure)
+    compare_rows,  # noqa: F401  (registers nz_compare_rows)
     compare_tables,  # noqa: F401  (registers nz_compare_tables)
     databases,  # noqa: F401  (registers database tools)
     ddl,  # noqa: F401  (registers DDL tools)
