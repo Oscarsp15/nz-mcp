@@ -8,6 +8,10 @@ Cada entrada se documenta en **español** y **english**.
 
 ## [Unreleased]
 
+### Added
+- ES: **superficie pública nueva** — al arrancar el servidor, `nz-mcp` comprueba una vez si PyPI tiene una versión más nueva y, si la hay, escribe **una sola línea en stderr** con el comando de upgrade (`uv tool upgrade nz-mcp` / `pip install --upgrade --pre nz-mcp`). Es *best-effort*: corre en un hilo daemon con timeout de 1,5 s, nunca bloquea el handshake MCP y ante cualquier fallo (sin red, timeout, PyPI caído, JSON inesperado) calla por completo, sin traza. Nunca toca stdout, que es el canal JSON-RPC: lo garantiza `cli_output` (stderr) y lo verifica un test. El resultado se cachea 24 h en `~/.nz-mcp/update-check.json` (respeta `NZ_MCP_HOME`) para no golpear PyPI en cada arranque, y `NZ_MCP_NO_UPDATE_CHECK=1` desactiva la comprobación (cualquier valor vale salvo `0`/`false`/`no`). La comparación usa `packaging.version` y considera pre-releases, porque el proyecto publica en canal alpha. Nueva dependencia directa `packaging` (ADR 0037). No es una tool del catálogo. Cierra issue #349.
+- EN: **new public surface** — at server startup, `nz-mcp` checks once whether PyPI has a newer version and, if so, writes **a single line to stderr** with the upgrade command (`uv tool upgrade nz-mcp` / `pip install --upgrade --pre nz-mcp`). It is best-effort: it runs in a daemon thread with a 1.5 s timeout, never blocks the MCP handshake and, on any failure (offline, timeout, PyPI down, unexpected JSON), stays completely silent, with no traceback. It never touches stdout, the JSON-RPC channel: `cli_output` (stderr) guarantees it and a test verifies it. The result is cached for 24 h in `~/.nz-mcp/update-check.json` (honours `NZ_MCP_HOME`) so restarts do not hit PyPI every time, and `NZ_MCP_NO_UPDATE_CHECK=1` disables the check (any value counts except `0`/`false`/`no`). Version comparison uses `packaging.version` and considers pre-releases, because the project publishes on the alpha channel. New direct dependency `packaging` (ADR 0037). It is not a catalog tool. Closes issue #349.
+
 ## [0.1.0a4] - 2026-09-17
 
 ### Added

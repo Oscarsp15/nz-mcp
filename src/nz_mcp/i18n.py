@@ -1289,6 +1289,17 @@ MESSAGES: Final[dict[str, Message]] = {
             "{missing_b} from B left out. Raise the 'limit' parameter (max {cap}) to see more."
         ),
     },
+    # update-notify (issue #349): one line, on stderr, when PyPI has a newer release.
+    "CLI.UPDATE_AVAILABLE": {
+        "es": (
+            "Hay una versión nueva de nz-mcp: {latest} (tienes {installed}). Actualiza con "
+            "'uv tool upgrade nz-mcp' o 'pip install --upgrade --pre nz-mcp'."
+        ),
+        "en": (
+            "A new nz-mcp version is available: {latest} (you have {installed}). Upgrade with "
+            "'uv tool upgrade nz-mcp' or 'pip install --upgrade --pre nz-mcp'."
+        ),
+    },
 }
 
 

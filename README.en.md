@@ -139,6 +139,8 @@ Without Windows Terminal or any modern terminal, the CLI works the same, at leve
 
 `NZ_MCP_UI_LEVEL` forces the level both ways when automatic detection is not enough: `0` to force the ASCII floor (for example, when pasting output into an issue) and `1` to force level 1 on a modern terminal that detection does not recognize. Any other value is ignored and automatic detection wins. Details on the signals and their order in [docs/adr/0031-mejora-progresiva-por-capacidad-del-terminal.md](docs/adr/0031-mejora-progresiva-por-capacidad-del-terminal.md) and in [docs/architecture/cli-experience.md](docs/architecture/cli-experience.md).
 
+When `nz-mcp serve` starts, the server checks once whether PyPI has a newer version and, if so, writes one line to **stderr** with the upgrade command. It is *best-effort*: it runs in the background with a short timeout, never blocks startup and stays silent when there is no network or PyPI does not answer. The check is cached for 24 h in `~/.nz-mcp/update-check.json` (honours `NZ_MCP_HOME`); disable it with `NZ_MCP_NO_UPDATE_CHECK=1`. Details in [docs/adr/0037-aviso-de-version-nueva-al-arrancar.md](docs/adr/0037-aviso-de-version-nueva-al-arrancar.md).
+
 ## Profile management
 
 Each profile lives in `~/.nz-mcp/profiles.toml`; the password goes to the OS keyring, never to the file. Fields the wizard asks for and you can also edit by hand: `security_level` (0-3, default `2` = negotiate SSL with cleartext fallback; `3` = SSL required) and `ca_certs` (path to a PEM CA bundle used to **verify** the server certificate; when omitted, the SSL connection is established without certificate verification). Details in [docs/architecture/security-model.md](docs/architecture/security-model.md).
