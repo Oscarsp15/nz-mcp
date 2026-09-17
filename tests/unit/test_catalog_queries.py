@@ -25,6 +25,7 @@ def test_all_queries_contains_all_exported_query_constants() -> None:
         queries.GET_ALL_PROCEDURES_DDL,
         queries.GET_PROCEDURE_SECTION,
         queries.FIND_COLUMN,
+        queries.LIST_CONSTRAINTS,
     ]
 
     assert set(queries.ALL_QUERIES) == set(constants)
