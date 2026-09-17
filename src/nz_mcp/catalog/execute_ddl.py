@@ -49,8 +49,19 @@ _COMPILE_WARNING: Final[str] = (
 )
 # Netezza overload-not-found errors — mean the CALL never reached the body.
 # Return INCONCLUSIVE (None) rather than compiled=True.
+#
+# Real text captured live on NPS 11.2.1.11-IF1 (issue #319):
+#   "ERROR:  Function 'PROC(INT4)' does not exist\n"
+#   "\tUnable to identify a function that satisfies the given argument types\n"
+#   "\tYou may need to add explicit typecasts"
+# The function name (quoted, with its argument types) sits between "Function" and
+# "does not exist", so a bare ``function\s+does`` never matched — the pattern must
+# allow anything in between.
 _ARG_MISMATCH_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"function\s+does\s+not\s+exist|no\s+function\s+found|does\s+not\s+take",
+    r"function\b.*\bdoes\s+not\s+exist"
+    r"|unable\s+to\s+identify\s+a\s+function"
+    r"|no\s+function\s+found"
+    r"|does\s+not\s+take",
     re.IGNORECASE,
 )
 

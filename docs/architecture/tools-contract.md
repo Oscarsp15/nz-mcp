@@ -520,6 +520,8 @@ Análisis **inverso** de impacto: dado `(database, schema, table)`, devuelve los
 | `table_database` | string (optional) | Filtra referencias prefijadas con esta BD; si se omite, acepta cualquier BD o sin prefijo. |
 | `table_schema` | string (optional) | Análogo a `table_database`. |
 | `pattern` | string (optional) | Filtro `LIKE` sobre el nombre del SP para acotar el escaneo. Match case-insensitive. |
+| `timeout_s` | int (optional, `1..300`) | Opt-in. Fija el timeout de socket de la descarga en lote **y** un deadline para el escaneo en proceso. Si se omite, manda el timeout de socket del perfil activo y el escaneo no tiene deadline (comportamiento previo a #308). Si el deadline salta a mitad de escaneo, se devuelven las referencias ya encontradas con `timed_out: true`. |
+| `max_procedures` | int (optional, `1..5000`) | Tope del universo a escanear. Default: `5000`. Se comprueba con un **pre-conteo barato** (solo nombres, sin `PROCEDURESOURCE`), así que superarlo falla rápido con `INPUT_TOO_BROAD` sin pagar la descarga completa ni devolver un parcial silencioso. |
 
 **Output**:
 ```json
@@ -537,6 +539,8 @@ Análisis **inverso** de impacto: dado `(database, schema, table)`, devuelve los
   "scanned_count": 142,
   "match_count": 1,
   "truncated": false,
+  "timed_out": false,
+  "hint": null,
   "duration_ms": 820
 }
 ```
@@ -546,11 +550,12 @@ Análisis **inverso** de impacto: dado `(database, schema, table)`, devuelve los
 - **Detección write**: `INSERT INTO <tabla>`, `UPDATE <tabla>`, `DELETE FROM <tabla>`, `MERGE INTO <tabla>`, `TRUNCATE TABLE <tabla>`, `DROP TABLE [IF EXISTS] <tabla>`, `CREATE [TEMP|TEMPORARY] TABLE [IF NOT EXISTS] <tabla>` (CTAS estándar), y `... INTO <tabla>` (cubre `SELECT INTO`).
 - Match case-insensitive sobre el nombre, con respeto de límites de token (`Foo` no engancha `FooBar`). Acepta `tabla`, `schema.tabla`, `bd.schema.tabla` y la sintaxis Netezza `bd..tabla`.
 - Comentarios (`--`, `/* */`) y literales `'…'` se filtran antes del scan.
-- **Caps**:
-  - Hard cap: `scanned_count <= 5000`. Si el `pattern` no acota suficiente → `INPUT_TOO_BROAD` con sugerencia de usar `pattern`.
+- **Caps y coste** (issue #308):
+  - Hard cap: `scanned_count <= max_procedures` (default `5000`). Si el `pattern` no acota suficiente → `INPUT_TOO_BROAD` con sugerencia de usar `pattern`. Con `max_procedures` explícito, el rechazo llega por pre-conteo, **antes** de la descarga en lote.
   - Soft cap: `references` truncadas a 1000 entradas, ordenadas desc por `occurrences_read + occurrences_write` (desempate por nombre); en ese caso `truncated: true`.
-  - Timeout default: 60 s.
-- **Out of scope v1**: vistas (`_v_view.DEFINITION`), dynamic SQL (`EXECUTE IMMEDIATE 'INSERT INTO ' || …`), análisis de columnas, cross-schema/cross-database, exportación a archivo. Documentado en [`../adr/0012-tool-find-table-references.md`](../adr/0012-tool-find-table-references.md).
+  - `timeout_s` es opt-in: fija el timeout de socket de la descarga y un deadline para el escaneo. Si el deadline salta a mitad de escaneo, se devuelven las referencias ya encontradas con `timed_out: true` (un análisis de impacto parcial sigue siendo útil si el cliente sabe que lo es). Si el socket expira durante la descarga, la llamada falla con `QUERY_TIMEOUT` y un `hint` para acotar. Omitirlo conserva el comportamiento previo — timeout de socket del perfil y sin deadline — para no convertir un escaneo ancho normal en un parcial.
+  - `hint`: presente (y localizado) cuando el universo escaneado alcanza el umbral `200` procedimientos (`HINT.FIND_TABLE_REFERENCES_LARGE_SCAN`, sugiere `pattern`/`max_procedures`) o cuando `timed_out` es `true` (`HINT.FIND_TABLE_REFERENCES_TIMEOUT`). `null` en escaneos pequeños.
+- **Out of scope v1**: vistas (`_v_view.DEFINITION`), dynamic SQL (`EXECUTE IMMEDIATE 'INSERT INTO ' || …`), análisis de columnas, cross-schema/cross-database, exportación a archivo, caché persistente de referencias. Documentado en [`../adr/0012-tool-find-table-references.md`](../adr/0012-tool-find-table-references.md).
 
 Implementación: una sola query a `_v_procedure` (mismo helper que `nz_get_procedures_ddl_batch`), seguida de `iter_statements` + `iter_table_references_in_statement` en `catalog/nzplsql_parser.py`.
 
@@ -970,7 +975,7 @@ Ejecuta un procedimiento almacenado vía `CALL schema.proc(args)` y devuelve el 
   "dry_run": false,
   "call_sql": "CALL DBO.NZMCP_SMOKE_CALL(?)",
   "executed": true,
-  "return_value": "50",
+  "return_value": 50,
   "messages": ["nz-mcp: recibido 5", "nz-mcp: paso 2 ok"],
   "duration_ms": 110
 }
@@ -979,7 +984,7 @@ Ejecuta un procedimiento almacenado vía `CALL schema.proc(args)` y devuelve el 
 **Reglas**:
 - `sql_guard` clasifica `CALL` (kind `CALL`) y lo permite **solo en `admin`** (rechazo `STATEMENT_NOT_ALLOWED` en read/write). Ruta dedicada de regex que **solo acepta placeholders `?`**: un argumento literal se rechaza (`UNKNOWN_STATEMENT`), forzando parametrización.
 - Guarda de entorno `assert_env_safe`: un `CALL` a un SP `PROD_*` desde un perfil no productivo → `PROD_REF_IN_NONPROD`.
-- `return_value` es el valor devuelto por el SP (o `null` si no hay result set); `messages` son los `NOTICE`/`RAISE` capturados de `cursor.notices`.
+- `return_value` es el valor devuelto por el SP con su **tipo nativo** (un `INT` sale como número `50`, no como `"50"`; `null` si no hay result set), para que `return_value == 0` no exija parseo en el cliente (issue #310). Un `NUMERIC`/`DECIMAL` se normaliza a `int` si es entero o a `float` si no; un tipo que JSON no puede llevar (`DATE`/`TIMESTAMP`, `bytes`) se serializa a string. `messages` son los `NOTICE`/`RAISE` capturados de `cursor.notices`.
 - Si el SP falla tras emitir NOTICEs, los mensajes previos al fallo se devuelven en `error.context["partial_notices"]` (el campo `messages` del output feliz sigue siendo la lista completa).
 - Un timeout de socket lanza `QueryTimeoutError` (código `QUERY_TIMEOUT`) con `context["orphan_session_risk"]=true` y `context["partial_notices"]`; el servidor puede seguir ejecutando el SP (nzpy no expone `cancel()`).
 - No usar para crear un SP (`nz_execute_ddl`) ni para leer su DDL (`nz_get_procedure_ddl`).
@@ -1170,7 +1175,7 @@ Devuelve el estado actual de un job lanzado por `nz_call_procedure_async`. Modo 
   "elapsed_ms": 185400,
   "poll_after_s": null,
   "partial_notices": ["NOTICE: paso 1 ok", "NOTICE: paso 2 ok"],
-  "return_value": "OK",
+  "return_value": 1,
   "messages": ["NOTICE: paso 1 ok", "NOTICE: paso 2 ok"],
   "duration_ms": 185100,
   "error": null
@@ -1182,6 +1187,7 @@ Devuelve el estado actual de un job lanzado por `nz_call_procedure_async`. Modo 
 - **Dos duraciones, no confundirlas**: `elapsed_ms` es tiempo de reloj desde que se llamó a `nz_call_procedure_async` (incluye abrir la conexión, sigue creciendo en cada sondeo); `duration_ms` es lo que tardó el `CALL` dentro de Netezza y solo se rellena cuando `status == "done"` — es el número que responde "¿cuánto tardó el SP?".
 - `poll_after_s` sugiere el próximo intervalo de sondeo en segundos, adaptado al tiempo transcurrido (crece hasta un tope de 30 s); es `null` cuando el job ya terminó (`done`/`failed`/`cancelled`) porque no hace falta volver a sondear.
 - `partial_notices` puede llegar vacío mientras el SP corre: nzpy entrega los `NOTICE` junto con el resultset al terminar, no de forma incremental. `messages` solo está completo cuando `status == "done"`.
+- `return_value` usa el **tipo nativo** del SP, igual que `nz_call_procedure` (un `INT` sale como número, `null` si no hay result set) — ver § 33 (issue #310).
 - `error` tiene forma `{code, detail, partial_notices}` cuando `status == "failed"`.
 - **El job store es en memoria**: si el servidor MCP reinicia, todos los jobs desaparecen. Guarda el `job_id` en otra parte si el SP es crítico.
 
