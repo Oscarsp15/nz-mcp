@@ -343,6 +343,16 @@ MESSAGES: Final[dict[str, Message]] = {
             "'table_pattern', or raise 'max_rows' (max {cap})."
         ),
     },
+    "HINT.CONSTRAINT_LIST_TRUNCATED": {
+        "es": (
+            "Lista truncada en {n} de {total} constraints. Acota con 'table' o sube "
+            "'max_rows' (máx {cap})."
+        ),
+        "en": (
+            "List truncated at {n} of {total} constraints. Narrow it with 'table' or raise "
+            "'max_rows' (max {cap})."
+        ),
+    },
     "HINT.PROCEDURE_DDL_TRUNCATED": {
         "es": "DDL truncado a {returned_kb} KB de {total_kb} KB (tope max_bytes={max_kb} KB). Llama a nz_get_procedure_size para dimensionar el SP y lee el resto con nz_get_procedure_section(section='range', from_line={from_line}, to_line={to_line}), avanzando de {step} en {step} líneas.",
         "en": "DDL truncated to {returned_kb} KB of {total_kb} KB (max_bytes cap {max_kb} KB). Call nz_get_procedure_size to size the SP up and read the rest with nz_get_procedure_section(section='range', from_line={from_line}, to_line={to_line}), advancing {step} lines at a time.",
