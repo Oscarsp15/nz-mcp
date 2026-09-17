@@ -73,7 +73,8 @@ class DescribeTableOutput(BaseModel):
     description=(
         "Describe Netezza table, external table, or view columns, primary key, foreign "
         "keys, and (for tables/external tables) distribution from system catalogs. kind "
-        "reflects the real object type; distribution is omitted for views. "
+        "reflects the real object type; distribution is omitted for views. Works with "
+        "_V_* catalog views too (schema is ignored for them). "
         "Use before querying or sampling data. Do not use for procedures."
     ),
     mode="read",

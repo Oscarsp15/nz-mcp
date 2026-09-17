@@ -231,8 +231,8 @@ MESSAGES: Final[dict[str, Message]] = {
         "en": "The relation does not exist in the active database. Check the name with nz_list_tables and qualify it as DB.SCHEMA.TABLE if it lives in another database.",
     },
     "NETEZZA_ERROR.HINT.ATTRIBUTE_NOT_FOUND": {
-        "es": "Esa columna no existe en la tabla. Pide los nombres exactos con nz_describe_table antes de reintentar.",
-        "en": "That column does not exist on the table. Get the exact names with nz_describe_table before retrying.",
+        "es": "Esa columna no existe. Pide los nombres exactos con nz_describe_table, que funciona con tablas, vistas y vistas de catálogo (`_V_*`), antes de reintentar.",
+        "en": "That column does not exist. Get the exact names with nz_describe_table, which works for tables, views and `_V_*` catalog views, before retrying.",
     },
     "NETEZZA_ERROR.HINT.PERMISSION_DENIED": {
         "es": "El usuario de Netezza del perfil no tiene el privilegio necesario. nz-mcp no puede concederlo: mira con qué usuario operas con nz_current_profile y pide el grant a un DBA.",
