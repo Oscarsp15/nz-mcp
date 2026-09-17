@@ -650,7 +650,6 @@ def _normalize_stats_metrics(
         "size_bytes_allocated": 0 if alloc is None else int(alloc),
         "skew": skew_out,
         "table_created": format_timestamp_iso(created),
-        "stats_last_analyzed": None,
     }
 
 
