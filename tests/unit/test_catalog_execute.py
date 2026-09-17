@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from itertools import chain, repeat
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 import pytest
 import sqlglot
@@ -15,6 +15,7 @@ from nz_mcp.catalog import execute as execute_mod
 from nz_mcp.catalog.execute import (
     _column_meta_from_cursor,
     _limit_value_span,
+    _normalize_scalar,
     _type_label_from_oid_cell,
     execute_select,
     fetch_explain_text,
@@ -535,6 +536,128 @@ def test_column_meta_null_type_cell() -> None:
 
 def test_type_label_from_oid_cell_fallback() -> None:
     assert _type_label_from_oid_cell("notdigits") == "notdigits"
+
+
+def test_column_meta_maps_char_oid_18_to_name() -> None:
+    """OID 18 is Netezza's single-byte ``char`` (e.g. CONTYPE); issue #298."""
+
+    class _C:
+        description = (("c", 18),)
+
+    meta = _column_meta_from_cursor(cast(Any, _C()))
+    assert meta == [{"name": "c", "type": "char"}]
+
+
+def test_type_label_appends_numeric_precision_and_scale() -> None:
+    # Live Netezza modifiers: NUMERIC(14,2) -> 917522, NUMERIC(10,3) -> 655379.
+    assert _type_label_from_oid_cell(1700, 917522) == "numeric(14,2)"
+    assert _type_label_from_oid_cell(1700, 655379) == "numeric(10,3)"
+
+
+def test_type_label_appends_character_length() -> None:
+    # Live Netezza modifiers: VARCHAR(10) -> 26, CHAR(1) -> 17, NVARCHAR(5) -> 21.
+    assert _type_label_from_oid_cell(1043, 26) == "varchar(10)"
+    assert _type_label_from_oid_cell(1042, 17) == "char(1)"
+    assert _type_label_from_oid_cell(2530, 21) == "nvarchar(5)"
+
+
+def test_type_label_ignores_absent_typmod() -> None:
+    assert _type_label_from_oid_cell(1700) == "numeric"
+    assert _type_label_from_oid_cell(1700, -1) == "numeric"
+    assert _type_label_from_oid_cell(20, -1) == "bigint"
+
+
+def test_column_meta_reads_typmod_from_row_desc() -> None:
+    class _C:
+        description = (("n", 1700), ("v", 1043))
+        ps: ClassVar[dict[str, object]] = {
+            "row_desc": [
+                {"name": b"n", "type_oid": 1700, "type_modifier": 917522},
+                {"name": b"v", "type_oid": 1043, "type_modifier": 26},
+            ]
+        }
+
+    meta = _column_meta_from_cursor(cast(Any, _C()))
+    assert meta == [
+        {"name": "n", "type": "numeric(14,2)"},
+        {"name": "v", "type": "varchar(10)"},
+    ]
+
+
+def test_column_meta_tolerates_missing_or_bad_row_desc() -> None:
+    class _NoPs:
+        description = (("n", 1700),)
+
+    class _BadPs:
+        description = (("n", 1700),)
+        ps: ClassVar[dict[str, object]] = {"row_desc": "nope"}
+
+    assert _column_meta_from_cursor(cast(Any, _NoPs())) == [{"name": "n", "type": "numeric"}]
+    assert _column_meta_from_cursor(cast(Any, _BadPs())) == [{"name": "n", "type": "numeric"}]
+
+
+def test_normalize_scalar_numeric_byteint_and_passthrough() -> None:
+    from decimal import Decimal
+
+    assert _normalize_scalar(Decimal("0"), "numeric") == 0
+    assert _normalize_scalar(Decimal("12345678.90"), "numeric") == 12345678.9
+    # nzpy's binary numeric path hands back a string for numeric columns.
+    assert _normalize_scalar("17982", "numeric") == 17982
+    assert _normalize_scalar("1.50", "numeric") == 1.5
+    assert _normalize_scalar("1", "byteint") == 1
+    assert _normalize_scalar("x", "varchar") == "x"
+    assert _normalize_scalar(None, "numeric") is None
+
+
+def test_execute_select_normalizes_numeric_and_reports_precision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from decimal import Decimal
+
+    profile = Profile(name="dev", host="h", port=5480, database="D", user="u", mode="read")
+
+    class _Cur:
+        description = (("TOTAL", 20), ("SUMA", 1700), ("B1", 2500))
+        ps: ClassVar[dict[str, object]] = {
+            "row_desc": [
+                {"type_oid": 20, "type_modifier": -1},
+                {"type_oid": 1700, "type_modifier": 917522},
+                {"type_oid": 2500, "type_modifier": -1},
+            ]
+        }
+
+        def __init__(self) -> None:
+            self._done = False
+
+        def execute(self, _sql: str) -> None:
+            return None
+
+        def fetchmany(self, size: int) -> list[tuple[Any, ...]]:
+            if self._done:
+                return []
+            self._done = True
+            return [(37466, Decimal("0"), "1")]
+
+        def close(self) -> None:
+            return None
+
+    class _Conn:
+        def cursor(self) -> _Cur:
+            return _Cur()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(execute_mod, "get_password", lambda _n: "pw")
+    monkeypatch.setattr(execute_mod, "open_connection", lambda _p, _pw: _Conn())
+
+    out = execute_select(profile, "SELECT 1", max_rows=10, timeout_s=30)
+    assert out["columns"] == [
+        {"name": "TOTAL", "type": "bigint"},
+        {"name": "SUMA", "type": "numeric(14,2)"},
+        {"name": "B1", "type": "byteint"},
+    ]
+    assert out["rows"] == [[37466, 0, 1]]
 
 
 def test_execute_select_accepts_scalar_fetch_row(monkeypatch: pytest.MonkeyPatch) -> None:
