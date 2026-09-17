@@ -231,8 +231,8 @@ MESSAGES: Final[dict[str, Message]] = {
         "en": "The relation does not exist in the active database. Check the name with nz_list_tables and qualify it as DB.SCHEMA.TABLE if it lives in another database.",
     },
     "NETEZZA_ERROR.HINT.ATTRIBUTE_NOT_FOUND": {
-        "es": "Esa columna no existe en la tabla. Pide los nombres exactos con nz_describe_table antes de reintentar.",
-        "en": "That column does not exist on the table. Get the exact names with nz_describe_table before retrying.",
+        "es": "Esa columna no existe. Pide los nombres exactos con nz_describe_table, que funciona con tablas, vistas y vistas de catálogo (`_V_*`), antes de reintentar.",
+        "en": "That column does not exist. Get the exact names with nz_describe_table, which works for tables, views and `_V_*` catalog views, before retrying.",
     },
     "NETEZZA_ERROR.HINT.PERMISSION_DENIED": {
         "es": "El usuario de Netezza del perfil no tiene el privilegio necesario. nz-mcp no puede concederlo: mira con qué usuario operas con nz_current_profile y pide el grant a un DBA.",
@@ -365,6 +365,14 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Lista truncada en {n} de {total} vistas. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
         "en": "List truncated at {n} of {total} views. Narrow it with 'pattern' or raise 'max_rows' (max {cap}).",
     },
+    "HINT.PARTITION_SUMMARY_TRUNCATED": {
+        "es": "Resumen truncado en {n} de {total} particiones. Sube 'max_rows' (máx {cap}) para ver el resto.",
+        "en": "Summary truncated at {n} of {total} partitions. Raise 'max_rows' (max {cap}) to see the rest.",
+    },
+    "HINT.PARTITION_COLUMN_TOO_MANY_VALUES": {
+        "es": "La columna '{column}' tiene {cap} o más valores distintos, así que no parece una columna de partición/periodo. Comprueba el nombre exacto con nz_describe_table.",
+        "en": "Column '{column}' has {cap} or more distinct values, so it does not look like a partition/period column. Check the exact name with nz_describe_table.",
+    },
     "HINT.SCHEMA_LIST_TRUNCATED": {
         "es": "Lista truncada en {n} de {total} esquemas. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
         "en": "List truncated at {n} of {total} schemas. Narrow it with 'pattern' or raise 'max_rows' (max {cap}).",
@@ -372,6 +380,10 @@ MESSAGES: Final[dict[str, Message]] = {
     "HINT.DATABASE_LIST_TRUNCATED": {
         "es": "Lista truncada en {n} de {total} bases de datos. Acota con 'pattern' o sube 'max_rows' (máx {cap}).",
         "en": "List truncated at {n} of {total} databases. Narrow it with 'pattern' or raise 'max_rows' (max {cap}).",
+    },
+    "HINT.TABLE_SEARCH_TRUNCATED": {
+        "es": "Resultado truncado en {n} coincidencias. Acota con 'database' o 'schema_pattern', o sube 'max_rows' (máx {cap}).",
+        "en": "Result truncated at {n} matches. Narrow it with 'database' or 'schema_pattern', or raise 'max_rows' (max {cap}).",
     },
     "HINT.COLUMN_SEARCH_TRUNCATED": {
         "es": (
@@ -400,6 +412,10 @@ MESSAGES: Final[dict[str, Message]] = {
     "HINT.PROFILE_TOP_VALUES_LIMITED": {
         "es": "Mostrando los {shown} valores más frecuentes de {distinct} distintos. Sube 'top_n' (máx {cap}) para ver más.",
         "en": "Showing the top {shown} of {distinct} distinct values. Raise 'top_n' (max {cap}) to see more.",
+    },
+    "HINT.DUPLICATE_GROUPS_TRUNCATED": {
+        "es": "Muestra truncada a {shown} de {groups} grupos duplicados. Sube 'limit' (máx {cap}) para ver más.",
+        "en": "Sample truncated to {shown} of {groups} duplicate groups. Raise 'limit' (max {cap}) to see more.",
     },
     "HINT.TABLE_STATS_BATCH_TRUNCATED": {
         "es": "Mostrando las {n} tablas mayores de {total} en el esquema. Sube 'top_n' (máx {cap}) para incluir más.",
@@ -1261,6 +1277,17 @@ MESSAGES: Final[dict[str, Message]] = {
     "PROBE_CATALOG.COLUMN_ROWS": {
         "es": "Filas",
         "en": "Rows",
+    },
+    # nz_compare_rows
+    "COMPARE_ROWS.HINT.SAMPLE_CAPPED": {
+        "es": (
+            "Muestras limitadas a {limit} claves por lado; quedan {missing_a} de A y "
+            "{missing_b} de B. Sube el parámetro 'limit' (máx {cap}) para ver más."
+        ),
+        "en": (
+            "Samples capped at {limit} keys per side; {missing_a} from A and "
+            "{missing_b} from B left out. Raise the 'limit' parameter (max {cap}) to see more."
+        ),
     },
 }
 

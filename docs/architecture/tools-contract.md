@@ -28,7 +28,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (47 tools registradas)
+## Catálogo v0.1 (51 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -155,10 +155,12 @@ Lista **tablas** (base y/o externas; no vistas, no procedimientos). Para vistas 
 | Input | Tipo | Descripción |
 |---|---|---|
 | `database` | string (required) | |
-| `schema` | string (required) | |
-| `table` | string (required) | |
+| `schema` | string (required) | Se **ignora** cuando `table` es una vista de catálogo `_V_*`. |
+| `table` | string (required) | Tabla, tabla externa, vista, o vista de catálogo `_V_*` (p. ej. `_V_RELATION_COLUMN`). |
 
 Funciona con tablas, tablas externas y vistas: `kind` refleja el tipo real (issue #295). `distribution` solo aparece cuando `kind` es `TABLE` o `EXTERNAL TABLE`; se omite (no aparece la clave) para vistas, porque Netezza no distribuye vistas.
+
+Las **vistas de catálogo** (`_V_*`, p. ej. `_V_RELATION_COLUMN`, `_V_SESSION`) se resuelven en `DEFINITION_SCHEMA`; el `schema` del input se ignora para esos nombres (issue #315). Así un DE puede descubrir las columnas de las vistas de sistema antes de consultarlas.
 
 **Output** (tabla base):
 ```json
@@ -1522,6 +1524,157 @@ Estadísticas de almacenamiento de **todas** las tablas de un esquema en una sol
 
 ---
 
+#### 48. `nz_find_duplicates`
+
+Cuenta grupos de clave duplicados en una tabla y muestrea las claves ofensoras (modo `read`). Netezza no enforcea PK/UNIQUE (issue #134), así que el catálogo no avisa: esta tool es el control del analista para una carga que corrió dos veces o un join que multiplicó filas. Ejecuta dos `SELECT` validados por `sql_guard`: uno de conteo (`COUNT(*)` de grupos con `HAVING COUNT(*) > 1` y suma de filas) y uno de muestra (`GROUP BY ... HAVING COUNT(*) > 1 ORDER BY CNT DESC LIMIT limit`). Exige que la BD coincida con la del perfil activo (misma regla que `nz_table_sample`).
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | Debe coincidir con la BD del perfil activo. |
+| `schema` | string (required) | |
+| `table` | string (required) | |
+| `key_columns` | array of string (required) | Columnas que forman la clave lógica (≥ 1). |
+| `limit` | int (default 10, cap 100) | Máx. de grupos duplicados a muestrear. |
+
+**Output**:
+```json
+{
+  "duplicate_groups": 3,
+  "duplicate_rows": 7,
+  "sample": [{"key": ["12345"], "count": 3}],
+  "truncated": false,
+  "hint": null,
+  "duration_ms": 420
+}
+```
+
+**Reglas**:
+- `duplicate_groups` = número de combinaciones de `key_columns` que aparecen más de una vez; `duplicate_rows` = total de filas que caen en esos grupos (suma de conteos).
+- `sample` devuelve hasta `limit` grupos ordenados por conteo descendente; `truncated=true` + `hint` cuando hay más grupos que `limit`.
+- Si la tabla no existe o no es visible → `OBJECT_NOT_FOUND`. Si alguna columna de `key_columns` no existe → `INVALID_INPUT` (con las columnas disponibles en el `detail`); `key_columns` vacío o con columnas repetidas → `INVALID_INPUT`.
+- Los valores de `key` se serializan a texto (`null` se conserva como `null`).
+- Fuera de alcance: comparar dos tablas (`nz_compare_rows`, #302), comparar filas completas, o borrar/corregir duplicados.
+
+---
+
+#### 49. `nz_compare_rows`
+
+Compara los conjuntos de claves entre dos tablas usando `EXCEPT` / `INTERSECT` + `COUNT(*)`. Devuelve conteos exactos de claves solo-en-A, solo-en-B, en-ambas y claves nulas, más muestras acotadas de las diferencias. Modo `read`. No compara columnas completas, solo la clave indicada. Ver issue #302.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | BD. |
+| `schema_a` | string (required) | Esquema de la tabla A. |
+| `table_a` | string (required) | Tabla A. |
+| `key_a` | string (required) | Columna clave en A. |
+| `schema_b` | string (required) | Esquema de la tabla B. |
+| `table_b` | string (required) | Tabla B. |
+| `key_b` | string (required) | Columna clave en B. |
+| `limit` | int (default: 10, max: 100) | Tope de muestra de filas de diferencia. Los conteos son siempre exactos. |
+
+**Output**:
+```json
+{
+  "only_in_a": 37466,
+  "only_in_b": 0,
+  "in_both": 33000,
+  "null_keys_a": 0,
+  "null_keys_b": 0,
+  "sample_only_in_a": ["CR001", "CR002"],
+  "sample_only_in_b": [],
+  "truncated": true,
+  "hint": "Muestras limitadas a 10 claves por lado; quedan 37456 de A y 0 de B. Sube el parámetro 'limit' (máx 100) para ver más.",
+  "duration_ms": 820
+}
+```
+
+**Errores**: `GuardRejectedError`, `ObjectNotFoundError`, `NetezzaError`, `PermissionDeniedError`.
+
+**Reglas**:
+- Todos los identificadores (esquema, tabla, clave) se validan como identificadores de catálogo antes de interpolarse en SQL.
+- Si `table_a` o `table_b` no existe o no es visible → `OBJECT_NOT_FOUND` (se verifica contra `_V_RELATION_COLUMN` antes de construir el SQL, en vez de exponer el error crudo del driver).
+- Las 7 sentencias se validan con `sql_guard` (`mode="read"`) antes de ejecutarse (defensa en profundidad).
+- Las claves nulas se excluyen de los conteos de diferencias y se cuentan por separado (`null_keys_a`, `null_keys_b`).
+- `truncated` es `true` cuando alguna diferencia supera la muestra devuelta; `hint` (ES/EN) indica cuántas claves quedaron fuera y cómo subir el `limit`.
+- La tool no acepta SQL crudo; el caller solo declara coordenadas de objeto.
+- Solo compara una clave; diferencias por columnas completas quedan fuera de alcance.
+
+---
+
+#### 50. `nz_summarize_partitions`
+
+Resume las filas por valor de una columna de partición/periodo: una entrada por valor con su conteo, más la partición más reciente y la más antigua. Modo `read`. Responde a *"¿cargó bien el proceso de hoy?"* en un solo paso, sin escribir el `GROUP BY` a mano. Para comparar dos particiones concretas usar `nz_compare_rows` (#302); para el esquema de dos tablas, `nz_compare_tables`.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | BD de la tabla. Debe coincidir con la BD del perfil activo (misma regla que `nz_table_sample`: el `SELECT` corre en la BD de sesión). |
+| `schema` | string (required) | Esquema de la tabla. |
+| `table` | string (required) | Tabla. |
+| `partition_column` | string (required) | Columna de corte (`FECCORTE`, `CODPERIODO`, ...). Identificador validado. |
+| `max_rows` | int (optional, `1..1000`) | Tope de particiones devueltas (default: `max_rows_default` del perfil, cap `MAX_ROWS_CAP`). |
+
+**Output**:
+```json
+{
+  "partitions": [
+    {"value": "2026-07-06", "rows": 34},
+    {"value": "2026-06-30", "rows": 12318},
+    {"value": "2026-05-30", "rows": 12249},
+    {"value": "2026-04-30", "rows": 12865}
+  ],
+  "partition_count": 4,
+  "latest": "2026-07-06",
+  "earliest": "2026-04-30",
+  "truncated": false,
+  "hint": null,
+  "duration_ms": 860
+}
+```
+
+**Reglas**:
+- Una query agregada: `SELECT <col>, COUNT(*) FROM <schema>.<tabla> GROUP BY <col> ORDER BY <col> DESC`. Identificadores validados (`validate_catalog_identifier`) y SQL pasado por `sql_guard` antes de llegar al driver.
+- `latest` es la primera partición (orden `DESC`) y `earliest` la última; ambos `null` si la tabla no tiene filas. `partition_count` es el total exacto de valores distintos.
+- Valores `NULL` se devuelven como `value: null` (un grupo `NULL` es un dato válido del análisis de cargas).
+- **Tope duro**: si la columna tiene `MAX_ROWS_CAP` (1000) o más valores distintos → `INPUT_TOO_BROAD` con hint: no parece una columna de partición y no se devuelve un resumen parcial. Mismo principio que `nz_find_table_references` (#308): en análisis de cargas un parcial silencioso es peor que un fallo ruidoso.
+- `truncated` + `hint` cuando hay más particiones que `max_rows` (mismo patrón que `nz_list_procedures` / `nz_find_column`, ADR 0018).
+- Fuera de alcance: detectar cargas parciales o umbrales de anomalía; comparar particiones entre sí; crear o borrar particiones (solo lectura). Ver #338.
+
+---
+
+#### 51. `nz_find_table`
+
+Busca **tablas y vistas por patrón de nombre** a través de las bases visibles (o de una sola si se indica `database`), devolviendo `{database, schema, name, kind}`. Resuelve el "¿dónde está el dato?" cuando hay decenas de bases con nombres casi idénticos: antes había que iterar BD × esquema a mano con `nz_list_tables`.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `table_pattern` | string (required) | Filtro `LIKE` sobre el nombre (case-insensitive). |
+| `database` | string (optional) | Limita la búsqueda a una base; si se omite, recorre todas las visibles. |
+| `schema_pattern` | string (optional) | Filtro `LIKE` sobre el esquema. Match case-insensitive. |
+| `object_type` | enum: `TABLE` (default) \| `VIEW` \| `ALL` | `TABLE` = tablas base; `VIEW` = vistas; `ALL` = tablas base + tablas externas + vistas. |
+| `max_rows` | int (default: perfil, cap `MAX_ROWS_CAP`) | Tope de coincidencias devueltas. |
+
+**Output**:
+```json
+{
+  "objects": [
+    {"database": "DESA_MODELOS", "schema": "DBO", "name": "EFE_MC_CREDITOS", "kind": "TABLE"}
+  ],
+  "truncated": false,
+  "hint": null,
+  "duration_ms": 1500
+}
+```
+
+**Reglas**:
+- Consulta `_V_TABLE` (con `OBJTYPE` real) y `_V_VIEW` por cada base; `kind` refleja el tipo real (`TABLE`, `EXTERNAL TABLE`, `VIEW`).
+- Recorre las bases en el orden de `nz_list_databases` y se detiene en cuanto encuentra una coincidencia de más que `max_rows`, así que un patrón raro no lee el catálogo entero de todas las bases.
+- `database` inexistente o no visible → `OBJECT_NOT_FOUND`; nombre inválido → `INVALID_INPUT`.
+- `truncated` + `hint` cuando hay más coincidencias que `max_rows` (mismo patrón que `nz_find_column`).
+- Sin coincidencias → `objects: []`, no es un error.
+- No busca por nombre de columna (eso es `nz_find_column`) ni devuelve columnas/estadísticas: solo la ubicación del objeto.
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -1530,7 +1683,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
 |---|---|---|---|
-| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_table_stats_batch`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_find_column`, `nz_compare_tables`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
+| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_table_stats_batch`, `nz_summarize_partitions`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_find_column`, `nz_find_table`, `nz_find_duplicates`, `nz_compare_rows`, `nz_compare_tables`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
 | `nz_insert` | false | false | false |
 | `nz_insert_select` | false | false | false |
 | `nz_update`, `nz_delete` | false | true | false |

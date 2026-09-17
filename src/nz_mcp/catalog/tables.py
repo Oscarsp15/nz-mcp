@@ -7,6 +7,7 @@ from contextlib import closing
 from typing import Any, Final, Literal, Protocol, cast
 
 from nz_mcp.auth import get_password
+from nz_mcp.catalog.databases import list_databases
 from nz_mcp.catalog.ddl_builder import build_create_table_ddl
 from nz_mcp.catalog.execute import execute_select, inject_limit
 from nz_mcp.catalog.formatters import format_bytes_iec, format_timestamp_iso
@@ -14,12 +15,19 @@ from nz_mcp.catalog.identifier import (
     render_cross_db,
     validate_catalog_identifier,
     validate_database_identifier,
+    validate_system_view_identifier,
 )
 from nz_mcp.catalog.resolver import resolve_query
 from nz_mcp.catalog.row_shape import is_sequence_row
-from nz_mcp.config import Profile
+from nz_mcp.config import MAX_ROWS_CAP, Profile
 from nz_mcp.connection import open_connection
-from nz_mcp.errors import InvalidInputError, NetezzaError, ObjectNotFoundError
+from nz_mcp.errors import (
+    InputTooBroadError,
+    InvalidInputError,
+    NetezzaError,
+    ObjectNotFoundError,
+)
+from nz_mcp.i18n import both
 from nz_mcp.logging_utils import sanitize
 from nz_mcp.sql_guard import StatementKind
 from nz_mcp.sql_guard import validate as guard_validate
@@ -28,6 +36,9 @@ _TABLE_ROW_MIN_ITEMS: Final[int] = 3
 _TABLE_KIND: Final[str] = "TABLE"
 _EXTERNAL_TABLE_KIND: Final[str] = "EXTERNAL TABLE"
 _VIEW_KIND: Final[str] = "VIEW"
+# Every Netezza catalog/management view (``_V_*``) lives in this schema; the caller's
+# ``schema`` argument is ignored for those names (issue #315).
+_SYSTEM_VIEW_SCHEMA: Final[str] = "DEFINITION_SCHEMA"
 _OBJECT_TYPES_WITH_DISTRIBUTION: Final[frozenset[str]] = frozenset(
     {_TABLE_KIND, _EXTERNAL_TABLE_KIND},
 )
@@ -48,6 +59,12 @@ TABLE_STATS_BATCH_TOP_N_DEFAULT: Final[int] = 20
 # Rule-of-thumb skew bands (Netezza): document-only, not policy thresholds.
 _SKEW_BALANCED_LT: Final[float] = 0.1
 _SKEW_MODERATE_LE: Final[float] = 0.3
+
+# Hard cap on the distinct values fetched by ``summarize_partitions`` (issue #338).
+# A real partition/period column holds a handful of values; one with this many is
+# not a partition column, so the summary is refused instead of streaming groups.
+# Kept at ``MAX_ROWS_CAP`` so the per-row list stays well below the response byte cap.
+PARTITION_SUMMARY_MAX_GROUPS: Final[int] = MAX_ROWS_CAP
 
 
 def skew_class(skew: float | None) -> Literal["balanced", "moderate", "severe"] | None:
@@ -178,6 +195,11 @@ def _row_to_table(row: Any) -> dict[str, str]:
     raise NetezzaError(operation="list_tables", detail="Unexpected row shape from _v_table")
 
 
+def _is_system_view_name(name: str) -> bool:
+    """True for Netezza catalog/management view names (``_V_*``)."""
+    return name.strip().startswith("_")
+
+
 def describe_table(
     profile: Profile,
     database: str,
@@ -189,10 +211,17 @@ def describe_table(
     ``kind`` is the real object type (``TABLE``, ``EXTERNAL TABLE``, or ``VIEW``); the
     ``distribution`` key is only present for tables and external tables, since Netezza
     views have no distribution.
+
+    A ``_V_*`` name is a Netezza catalog/management view: it is resolved in
+    ``DEFINITION_SCHEMA`` and the caller's ``schema`` argument is ignored (issue #315).
     """
     db_ident = validate_database_identifier(database)
-    sch_ident = validate_catalog_identifier(schema)
-    tab_ident = validate_catalog_identifier(table)
+    if _is_system_view_name(table):
+        sch_ident = validate_catalog_identifier(_SYSTEM_VIEW_SCHEMA)
+        tab_ident = validate_system_view_identifier(table)
+    else:
+        sch_ident = validate_catalog_identifier(schema)
+        tab_ident = validate_catalog_identifier(table)
     params: tuple[str, str] = (sch_ident, tab_ident)
     dist_params: tuple[str, str, str] = (db_ident, sch_ident, tab_ident)
     password = get_password(profile.name)
@@ -208,13 +237,13 @@ def describe_table(
             if not column_rows:
                 raise ObjectNotFoundError(
                     detail=(
-                        f"Table {table!r} does not exist in {database}.{schema} "
+                        f"Table {table!r} does not exist in {database}.{sch_ident} "
                         "or is not visible to this profile."
                     ),
                     object_type="table",
                     database=database,
-                    schema=schema,
-                    table=table,
+                    schema=sch_ident,
+                    table=tab_ident,
                 )
 
             objtype_sql = render_cross_db(
@@ -539,6 +568,82 @@ def get_table_sample(
     )
 
 
+def _partition_value(cell: Any) -> str | None:
+    """Render a partition key as text, keeping a SQL NULL as ``None``."""
+    return None if cell is None else str(cell)
+
+
+def summarize_partitions(
+    profile: Profile,
+    database: str,
+    schema: str,
+    table: str,
+    partition_column: str,
+    *,
+    timeout_s: int,
+) -> dict[str, Any]:
+    """Return one entry per distinct ``partition_column`` value, newest first.
+
+    A column name cannot be bound as a parameter, so the SQL is built from
+    identifiers validated by :func:`validate_catalog_identifier` and passed through
+    ``sql_guard`` before it reaches the driver.
+
+    The distinct values are fetched with a hard cap (:data:`PARTITION_SUMMARY_MAX_GROUPS`).
+    Hitting it means the column has at least that many values, i.e. it is not a
+    partition/period column: the call is refused with ``INPUT_TOO_BROAD`` rather
+    than returning a partial summary that an analyst could mistake for the truth.
+
+    Ordering is ``DESC`` on the column, so the first entry is the newest partition
+    and the last one the oldest. ``max_rows`` is applied by the tool layer.
+    """
+    _ensure_profile_database(profile, database)
+    schema_u = validate_catalog_identifier(schema)
+    table_u = validate_catalog_identifier(table)
+    column_u = validate_catalog_identifier(partition_column)
+    sql = (
+        f"SELECT {column_u} AS PARTITION_VALUE, COUNT(*) AS PARTITION_ROWS "  # noqa: S608
+        f"FROM {schema_u}.{table_u} "
+        f"GROUP BY {column_u} ORDER BY {column_u} DESC"
+    )
+    parsed = guard_validate(sql, mode="read")
+    if parsed.kind is not StatementKind.SELECT:
+        raise NetezzaError(
+            operation="summarize_partitions",
+            detail=f"Unexpected statement kind after validation: {parsed.kind}",
+        )
+
+    raw = execute_select(
+        profile,
+        parsed.raw,
+        max_rows=PARTITION_SUMMARY_MAX_GROUPS,
+        timeout_s=timeout_s,
+    )
+    if raw["truncated"]:
+        hints = both(
+            "HINT.PARTITION_COLUMN_TOO_MANY_VALUES",
+            column=column_u,
+            cap=PARTITION_SUMMARY_MAX_GROUPS,
+        )
+        raise InputTooBroadError(
+            scanned=PARTITION_SUMMARY_MAX_GROUPS,
+            cap=PARTITION_SUMMARY_MAX_GROUPS,
+            column=column_u,
+            hint_es=hints["es"],
+            hint_en=hints["en"],
+        )
+
+    partitions = [
+        {"value": _partition_value(cell[0]), "rows": int(cell[1])} for cell in raw["rows"]
+    ]
+    return {
+        "partitions": partitions,
+        "partition_count": len(partitions),
+        "latest": partitions[0]["value"] if partitions else None,
+        "earliest": partitions[-1]["value"] if partitions else None,
+        "duration_ms": int(raw["duration_ms"]),
+    }
+
+
 def get_table_stats(
     profile: Profile,
     database: str,
@@ -833,6 +938,128 @@ def _row_to_column_match(row: Any) -> dict[str, str]:
     )
 
 
+class _FindTableCursorLike(Protocol):
+    def execute(
+        self,
+        sql: str,
+        params: tuple[str, str | None, str | None, str, str | None, str | None, str, str, str],
+    ) -> None: ...
+
+    def fetchall(self) -> list[Any]: ...
+    def close(self) -> None: ...
+
+
+class _FindTableConnectionLike(Protocol):
+    def cursor(self) -> _FindTableCursorLike: ...
+    def close(self) -> None: ...
+
+
+_TABLE_MATCH_MIN_ITEMS: Final[int] = 3
+
+
+def find_tables(
+    profile: Profile,
+    *,
+    table_pattern: str,
+    database: str | None,
+    schema_pattern: str | None,
+    object_type: str,
+    max_rows: int,
+) -> tuple[list[dict[str, str]], bool]:
+    """Search base tables and views by name across the visible databases.
+
+    Returns ``(matches, truncated)``: at most ``max_rows`` matches plus a flag that says at
+    least one more exists. Databases are scanned in ``nz_list_databases`` order and the scan
+    stops as soon as one extra match is found, so a rare pattern does not read the whole
+    catalog of every database.
+    """
+    schema_like = schema_pattern if schema_pattern else None
+    targets = _target_databases(profile, database)
+    params = (
+        table_pattern,
+        schema_like,
+        schema_like,
+        table_pattern,
+        schema_like,
+        schema_like,
+        object_type,
+        object_type,
+        object_type,
+    )
+    base_sql = resolve_query("find_table", profile)
+    password = get_password(profile.name)
+    matches: list[dict[str, str]] = []
+    truncated = False
+    connection = cast(_FindTableConnectionLike, open_connection(profile, password))
+    try:
+        for db_name in targets:
+            sql = render_cross_db(base_sql, database=db_name)
+            with closing(connection.cursor()) as cursor:
+                cursor.execute(sql, params)
+                rows = cursor.fetchall()
+            for row in rows:
+                matches.append(_row_to_table_match(db_name, row))
+                if len(matches) > max_rows:
+                    truncated = True
+                    break
+            if truncated:
+                break
+    except NetezzaError:
+        raise
+    except Exception as exc:  # noqa: BLE001, RUF100
+        raise NetezzaError(
+            operation="find_table",
+            database=database or profile.database,
+            detail=sanitize(str(exc), known_secrets={password}),
+        ) from exc
+    finally:
+        connection.close()
+    return matches, truncated
+
+
+def _target_databases(profile: Profile, database: str | None) -> list[str]:
+    """Return the databases to scan: all visible ones, or the single requested database."""
+    visible = [str(entry["name"]) for entry in list_databases(profile)]
+    if database is None:
+        return visible
+    db_ident = validate_database_identifier(database)
+    if db_ident not in {name.upper() for name in visible}:
+        raise ObjectNotFoundError(
+            detail=(
+                f"Database {db_ident!r} is not visible to profile {profile.name!r}. "
+                f"Available: {', '.join(sorted(visible))}."
+            ),
+            database=db_ident,
+            available=sorted(visible),
+        )
+    return [db_ident]
+
+
+def _row_to_table_match(database: str, row: Any) -> dict[str, str]:
+    if isinstance(row, dict):
+        keys = {str(k).upper(): v for k, v in row.items()}
+        required = ("SCHEMA", "NAME", "KIND")
+        if not all(k in keys for k in required):
+            raise NetezzaError(
+                operation="find_table",
+                detail="Catalog query must return SCHEMA, NAME, KIND columns.",
+            )
+        return {
+            "database": database,
+            "schema": str(keys["SCHEMA"]),
+            "name": str(keys["NAME"]),
+            "kind": str(keys["KIND"]),
+        }
+    if is_sequence_row(row, _TABLE_MATCH_MIN_ITEMS):
+        return {
+            "database": database,
+            "schema": str(row[0]),
+            "name": str(row[1]),
+            "kind": str(row[2]),
+        }
+    raise NetezzaError(operation="find_table", detail="Unexpected row shape from _v_table/_v_view")
+
+
 _CONSTRAINT_ROW_MIN_ITEMS: Final[int] = 5
 
 
@@ -1115,3 +1342,198 @@ def _compare_column_descriptor(row: Any, fallback_pos: int) -> dict[str, Any]:
             "position": pos,
         }
     raise NetezzaError(operation="compare_tables", detail="Unexpected column row shape.")
+
+
+_DUPLICATE_COUNT_COLUMNS: Final[int] = 2
+_DUPLICATE_SAMPLE_MIN_CELLS: Final[int] = 2
+DUPLICATES_LIMIT_DEFAULT: Final[int] = 10
+DUPLICATES_LIMIT_CAP: Final[int] = 100
+
+
+def find_duplicates(
+    profile: Profile,
+    database: str,
+    schema: str,
+    table: str,
+    key_columns: list[str],
+    *,
+    limit: int,
+    timeout_s: int,
+) -> dict[str, Any]:
+    """Return duplicate key groups for ``key_columns`` plus a bounded sample.
+
+    Netezza does not enforce PK/UNIQUE (issue #134), so this is the analyst's only check
+    for double-run loads or fan-out joins. ``database`` must match the active profile
+    database: the queries run as real ``SELECT`` bound to the session database, same rule
+    as ``nz_table_sample``.
+    """
+    _ensure_profile_database(profile, database)
+    schema_u = validate_catalog_identifier(schema)
+    table_u = validate_catalog_identifier(table)
+    keys_u = _validate_key_columns(key_columns)
+    _ensure_columns_exist(profile, database, schema_u, table_u, keys_u)
+
+    key_list = ", ".join(keys_u)
+    groups, rows = _run_duplicate_counts(profile, schema_u, table_u, key_list, timeout_s)
+    sample = _run_duplicate_sample(profile, schema_u, table_u, keys_u, key_list, limit, timeout_s)
+    return {
+        "duplicate_groups": groups,
+        "duplicate_rows": rows,
+        "sample": sample,
+        "truncated": groups > limit,
+    }
+
+
+def _validate_key_columns(key_columns: list[str]) -> list[str]:
+    if not key_columns:
+        raise InvalidInputError(detail="key_columns must contain at least one column.")
+    validated: list[str] = []
+    for column in key_columns:
+        name = validate_catalog_identifier(column)
+        if name in validated:
+            raise InvalidInputError(detail=f"key_columns contains a duplicate column: {name}.")
+        validated.append(name)
+    return validated
+
+
+def _ensure_columns_exist(
+    profile: Profile,
+    database: str,
+    schema_u: str,
+    table_u: str,
+    columns_u: list[str],
+) -> None:
+    """Raise when the table is missing (``OBJECT_NOT_FOUND``) or a key column is not there.
+
+    A missing column is an input mistake by the caller (they named a column that does not
+    exist), so it surfaces as ``INVALID_INPUT`` with the available columns in the detail.
+    """
+    password = get_password(profile.name)
+    sql = render_cross_db(resolve_query("describe_table_columns", profile), database=database)
+    connection = cast(Any, open_connection(profile, password))
+    try:
+        with closing(connection.cursor()) as cursor:
+            cursor.execute(sql, (schema_u, table_u))
+            rows = cursor.fetchall()
+    except Exception as exc:  # noqa: BLE001, RUF100
+        raise NetezzaError(
+            operation="find_duplicates",
+            database=database,
+            detail=sanitize(str(exc), known_secrets={password}),
+        ) from exc
+    finally:
+        connection.close()
+
+    if not rows:
+        raise ObjectNotFoundError(
+            detail=(
+                f"Table {table_u!r} does not exist in {database}.{schema_u} "
+                "or is not visible to this profile."
+            ),
+            object_type="table",
+            database=database,
+            schema=schema_u,
+            table=table_u,
+        )
+    visible = {_duplicate_column_name(row) for row in rows}
+    missing = [column for column in columns_u if column not in visible]
+    if missing:
+        raise InvalidInputError(
+            detail=(
+                f"Column(s) {', '.join(missing)} do not exist in "
+                f"{database}.{schema_u}.{table_u}. Available: {', '.join(sorted(visible))}."
+            ),
+        )
+
+
+def _run_duplicate_counts(
+    profile: Profile,
+    schema_u: str,
+    table_u: str,
+    key_list: str,
+    timeout_s: int,
+) -> tuple[int, int]:
+    sql = (
+        f"SELECT COUNT(*) AS DUP_GROUPS, COALESCE(SUM(CNT), 0) AS DUP_ROWS "  # noqa: S608
+        f"FROM (SELECT COUNT(*) AS CNT FROM {schema_u}.{table_u} "
+        f"GROUP BY {key_list} HAVING COUNT(*) > 1) AS NZ_MCP_DUP"
+    )
+    parsed = guard_validate(sql, mode="read")
+    if parsed.kind is not StatementKind.SELECT:
+        raise NetezzaError(
+            operation="find_duplicates",
+            detail=f"Unexpected statement kind after validation: {parsed.kind}",
+        )
+    raw = execute_select(profile, parsed.raw, max_rows=1, timeout_s=timeout_s)
+    rows = raw["rows"]
+    if not rows or len(rows[0]) < _DUPLICATE_COUNT_COLUMNS:
+        raise NetezzaError(
+            operation="find_duplicates",
+            detail="Duplicate count query returned an unexpected row shape.",
+        )
+    cells = rows[0]
+    rows_in_groups = 0 if cells[1] is None else int(cells[1])
+    return int(cells[0]), rows_in_groups
+
+
+def _run_duplicate_sample(
+    profile: Profile,
+    schema_u: str,
+    table_u: str,
+    keys_u: list[str],
+    key_list: str,
+    limit: int,
+    timeout_s: int,
+) -> list[dict[str, Any]]:
+    select_keys = ", ".join(keys_u)
+    sql = (
+        f"SELECT {select_keys}, COUNT(*) AS CNT "  # noqa: S608
+        f"FROM {schema_u}.{table_u} "
+        f"GROUP BY {key_list} HAVING COUNT(*) > 1 "
+        f"ORDER BY CNT DESC, {key_list}"
+    )
+    parsed = guard_validate(sql, mode="read")
+    if parsed.kind is not StatementKind.SELECT:
+        raise NetezzaError(
+            operation="find_duplicates",
+            detail=f"Unexpected statement kind after validation: {parsed.kind}",
+        )
+    limited = inject_limit(parsed.raw, limit)
+    raw = execute_select(profile, limited, max_rows=limit, timeout_s=timeout_s)
+    return [_duplicate_sample_item(row) for row in raw["rows"]]
+
+
+def _duplicate_sample_item(row: Any) -> dict[str, Any]:
+    cells = list(row)
+    if len(cells) < _DUPLICATE_SAMPLE_MIN_CELLS:
+        raise NetezzaError(
+            operation="find_duplicates",
+            detail="Duplicate sample row must include the key columns and a count.",
+        )
+    return {
+        "key": [_stringify_duplicate(cell) for cell in cells[:-1]],
+        "count": int(cells[-1]),
+    }
+
+
+def _stringify_duplicate(value: Any) -> str | None:
+    if value is None:
+        return None
+    iso = getattr(value, "isoformat", None)
+    if callable(iso):
+        return str(iso())
+    return str(value)
+
+
+def _duplicate_column_name(row: Any) -> str:
+    if isinstance(row, dict):
+        name = row.get("COLUMN_NAME")
+        if name is None:
+            raise NetezzaError(
+                operation="find_duplicates",
+                detail="Column row must include COLUMN_NAME.",
+            )
+        return str(name).upper()
+    if is_sequence_row(row, 1):
+        return str(row[0]).upper()
+    raise NetezzaError(operation="find_duplicates", detail="Unexpected column row shape.")
