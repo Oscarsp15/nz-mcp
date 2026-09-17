@@ -32,6 +32,7 @@ _STRUCTURAL_IDS: Final[frozenset[str]] = frozenset(
     {
         "get_view_ddl",
         "describe_table_columns",
+        "describe_table_objtype",
         "describe_table_distribution",
         "describe_table_pk",
         "describe_table_fk",
@@ -71,10 +72,11 @@ def dummy_params_for_query_id(query_id: str) -> tuple[Any, ...]:
     mapping: dict[str, tuple[Any, ...]] = {
         "list_databases": (None, None),
         "list_schemas": (None, None),
-        "list_tables": (_DUMMY_SCHEMA, None, None),
+        "list_tables": (_DUMMY_SCHEMA, None, None, None, None),
         "list_views": (_DUMMY_SCHEMA, None, None),
         "get_view_ddl": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
         "describe_table_columns": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
+        "describe_table_objtype": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
         "describe_table_distribution": (_DUMMY_DATABASE, _DUMMY_SCHEMA, _DUMMY_OBJECT),
         "describe_table_pk": (_DUMMY_SCHEMA, _DUMMY_OBJECT),
         "describe_table_fk": (_DUMMY_SCHEMA, _DUMMY_OBJECT),

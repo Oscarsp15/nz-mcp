@@ -56,9 +56,12 @@ class ForeignKeyItem(BaseModel):
 class DescribeTableOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str
-    kind: Literal["TABLE"] = "TABLE"
+    kind: Literal["TABLE", "EXTERNAL TABLE", "VIEW"]
     columns: list[ColumnDescriptor]
-    distribution: DistributionBlock
+    distribution: DistributionBlock | None = Field(
+        default=None,
+        description="Omitted (null) when kind is VIEW: Netezza views have no distribution.",
+    )
     organized_on: list[str] = Field(default_factory=list)
     primary_key: list[str]
     foreign_keys: list[ForeignKeyItem]
@@ -68,9 +71,10 @@ class DescribeTableOutput(BaseModel):
 @tool(
     name="nz_describe_table",
     description=(
-        "Describe Netezza table columns, primary key, foreign keys, and distribution "
-        "from system catalogs. Use before querying or sampling data. "
-        "Do not use for views or procedures."
+        "Describe Netezza table, external table, or view columns, primary key, foreign "
+        "keys, and (for tables/external tables) distribution from system catalogs. kind "
+        "reflects the real object type; distribution is omitted for views. "
+        "Use before querying or sampling data. Do not use for procedures."
     ),
     mode="read",
     input_model=DescribeTableInput,

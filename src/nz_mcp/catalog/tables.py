@@ -24,8 +24,13 @@ from nz_mcp.logging_utils import sanitize
 from nz_mcp.sql_guard import StatementKind
 from nz_mcp.sql_guard import validate as guard_validate
 
-_TABLE_ROW_MIN_ITEMS: Final[int] = 2
+_TABLE_ROW_MIN_ITEMS: Final[int] = 3
 _TABLE_KIND: Final[str] = "TABLE"
+_EXTERNAL_TABLE_KIND: Final[str] = "EXTERNAL TABLE"
+_VIEW_KIND: Final[str] = "VIEW"
+_OBJECT_TYPES_WITH_DISTRIBUTION: Final[frozenset[str]] = frozenset(
+    {_TABLE_KIND, _EXTERNAL_TABLE_KIND},
+)
 _DIST_ROW_MIN: Final[int] = 2
 _COL_TUPLE_MIN: Final[int] = 4
 _PK_TUPLE_MIN: Final[int] = 3
@@ -66,7 +71,7 @@ class _CursorLike(Protocol):
     def execute(
         self,
         sql: str,
-        params: tuple[str, str | None, str | None],
+        params: tuple[str | None, ...],
     ) -> None: ...
 
     def fetchall(self) -> list[Any]: ...
@@ -114,10 +119,22 @@ def list_tables(
     database: str,
     schema: str,
     pattern: str | None = None,
+    object_type: Literal["TABLE", "EXTERNAL TABLE", "ALL"] = "TABLE",
 ) -> list[dict[str, str]]:
-    """Return tables from ``_v_table`` for ``database`` and ``schema`` (cross-database notation)."""
+    """Return tables from ``_v_table`` for ``database`` and ``schema`` (cross-database notation).
+
+    ``object_type`` filters the catalog's ``OBJTYPE`` column: ``TABLE`` (default) lists only
+    base tables, ``EXTERNAL TABLE`` lists only external tables, and ``ALL`` lists both.
+    """
     like_pattern = pattern if pattern else None
-    params: tuple[str, str | None, str | None] = (schema, like_pattern, like_pattern)
+    type_filter = None if object_type == "ALL" else object_type
+    params: tuple[str, str | None, str | None, str | None, str | None] = (
+        schema,
+        type_filter,
+        type_filter,
+        like_pattern,
+        like_pattern,
+    )
     password = get_password(profile.name)
     base_sql = resolve_query("list_tables", profile)
     sql = render_cross_db(base_sql, database=database)
@@ -145,14 +162,14 @@ def _row_to_table(row: Any) -> dict[str, str]:
         name_key = "NAME" if "NAME" in row else None
         if name_key is None and "TABLENAME" in row:
             name_key = "TABLENAME"
-        if name_key is None:
+        if name_key is None or "OBJTYPE" not in row:
             raise NetezzaError(
                 operation="list_tables",
-                detail="Catalog query must return NAME (or TABLENAME) column.",
+                detail="Catalog query must return NAME (or TABLENAME) and OBJTYPE columns.",
             )
-        return {"name": str(row[name_key]), "kind": _TABLE_KIND}
+        return {"name": str(row[name_key]), "kind": str(row["OBJTYPE"])}
     if is_sequence_row(row, _TABLE_ROW_MIN_ITEMS):
-        return {"name": str(row[0]), "kind": _TABLE_KIND}
+        return {"name": str(row[0]), "kind": str(row[2])}
     raise NetezzaError(operation="list_tables", detail="Unexpected row shape from _v_table")
 
 
@@ -162,7 +179,12 @@ def describe_table(
     schema: str,
     table: str,
 ) -> dict[str, Any]:
-    """Return columns, distribution, PK, and FK metadata for one base table via catalog views."""
+    """Return columns, kind, PK, and FK metadata for one relation via catalog views.
+
+    ``kind`` is the real object type (``TABLE``, ``EXTERNAL TABLE``, or ``VIEW``); the
+    ``distribution`` key is only present for tables and external tables, since Netezza
+    views have no distribution.
+    """
     db_ident = validate_database_identifier(database)
     sch_ident = validate_catalog_identifier(schema)
     tab_ident = validate_catalog_identifier(table)
@@ -190,12 +212,22 @@ def describe_table(
                     table=table,
                 )
 
-            dist_sql = render_cross_db(
-                resolve_query("describe_table_distribution", profile),
+            objtype_sql = render_cross_db(
+                resolve_query("describe_table_objtype", profile),
                 database=database,
             )
-            cursor.execute(dist_sql, dist_params)
-            dist_rows = cursor.fetchall()
+            cursor.execute(objtype_sql, params)
+            kind = _resolve_kind(cursor.fetchall())
+
+            if kind in _OBJECT_TYPES_WITH_DISTRIBUTION:
+                dist_sql = render_cross_db(
+                    resolve_query("describe_table_distribution", profile),
+                    database=database,
+                )
+                cursor.execute(dist_sql, dist_params)
+                dist_rows = cursor.fetchall()
+            else:
+                dist_rows = []
 
             pk_sql = render_cross_db(
                 resolve_query("describe_table_pk", profile),
@@ -221,16 +253,35 @@ def describe_table(
     finally:
         connection.close()
 
-    dist = _distribution_from_rows(dist_rows)
-    return {
+    result: dict[str, Any] = {
         "name": tab_ident,
-        "kind": _TABLE_KIND,
+        "kind": kind,
         "columns": [_column_descriptor(r) for r in column_rows],
-        "distribution": dist,
         "organized_on": [],
         "primary_key": _primary_key_columns(pk_rows),
         "foreign_keys": _foreign_keys_payload(fk_rows),
     }
+    if kind in _OBJECT_TYPES_WITH_DISTRIBUTION:
+        result["distribution"] = _distribution_from_rows(dist_rows)
+    return result
+
+
+def _resolve_kind(objtype_rows: list[Any]) -> str:
+    """Map the ``describe_table_objtype`` result to a real object kind.
+
+    No row means the relation is not in ``_V_TABLE``, i.e. it is a view.
+    """
+    if not objtype_rows:
+        return _VIEW_KIND
+    row = objtype_rows[0]
+    if isinstance(row, dict):
+        value = row.get("OBJTYPE")
+        if value is None:
+            raise NetezzaError(operation="describe_table", detail="OBJTYPE row missing OBJTYPE.")
+        return str(value)
+    if is_sequence_row(row, 1):
+        return str(row[0])
+    raise NetezzaError(operation="describe_table", detail="Unexpected OBJTYPE row shape.")
 
 
 def _distribution_from_rows(rows: list[Any]) -> dict[str, Any]:

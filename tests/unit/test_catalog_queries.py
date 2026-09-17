@@ -15,6 +15,7 @@ def test_all_queries_contains_all_exported_query_constants() -> None:
         queries.LIST_VIEWS,
         queries.GET_VIEW_DDL,
         queries.DESCRIBE_TABLE_COLUMNS,
+        queries.DESCRIBE_TABLE_OBJTYPE,
         queries.DESCRIBE_TABLE_DISTRIBUTION,
         queries.DESCRIBE_TABLE_PK,
         queries.DESCRIBE_TABLE_FK,
