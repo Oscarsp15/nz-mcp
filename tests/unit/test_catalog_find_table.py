@@ -178,18 +178,21 @@ def test_find_tables_bad_row_shape_raises(monkeypatch: pytest.MonkeyPatch) -> No
 # --- cost guard (issue #361) --------------------------------------------------
 
 
-def test_find_tables_refuses_a_wildcard_only_pattern_without_scanning(
+def test_find_tables_refuses_a_wildcard_only_pattern_before_any_connection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A pattern of wildcards matches everything: refuse before opening a connection."""
-    cursor = _wire(monkeypatch, databases=["DB1", "DB2"], results_by_db={})
-    opened: list[object] = []
+    """A pattern of wildcards matches everything: refuse before even listing the databases.
 
-    def _no_connection(*args: object, **_kwargs: object) -> object:
-        opened.append(args)
-        raise AssertionError("the guard must refuse before opening a connection")
+    Neither ``list_databases`` (which opens its own connection) nor the scan connection may
+    be reached, which is exactly what the guard claims. Mocking ``list_databases`` here would
+    hide the very call this test exists to forbid, so it is replaced by one that raises.
+    """
 
-    monkeypatch.setattr(tables_mod, "open_connection", _no_connection)
+    def _forbidden(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("the guard must refuse before touching the catalog")
+
+    monkeypatch.setattr(tables_mod, "list_databases", _forbidden)
+    monkeypatch.setattr(tables_mod, "open_connection", _forbidden)
 
     with pytest.raises(InputTooBroadError) as exc:
         find_tables(
@@ -202,12 +205,10 @@ def test_find_tables_refuses_a_wildcard_only_pattern_without_scanning(
         )
 
     assert exc.value.code == "INPUT_TOO_BROAD"
-    assert exc.value.context["scanned"] == 2
     assert exc.value.context["pattern"] == "%"
+    assert "scanned" not in exc.value.context
     assert exc.value.context["hint_es"]
     assert exc.value.context["hint_en"]
-    assert opened == []
-    assert cursor.executed_sql == []
 
 
 def test_find_tables_allows_a_specific_pattern(

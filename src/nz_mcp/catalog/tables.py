@@ -966,13 +966,13 @@ def _narrows_anything(table_pattern: str) -> bool:
     return any(char not in _LIKE_WILDCARDS for char in table_pattern)
 
 
-def _ensure_scan_is_bounded(database: str | None, table_pattern: str, targets: list[str]) -> None:
-    """Refuse a cross-database sweep that the pattern does not narrow (issue #361).
+def _ensure_pattern_narrows(database: str | None, table_pattern: str) -> None:
+    """Refuse a cross-database sweep whose pattern matches everything (issue #361).
 
     A pattern made only of wildcards matches every object of every visible database, so the
-    call is not a search: it is a sweep whose result nobody asked for, and it costs one
-    catalog query per database. It is refused instead of run, and refused *before* the
-    connection is opened, so the caller pays nothing for it.
+    call is not a search: it is a sweep whose result nobody asked for. It is refused before
+    anything else runs, so the caller pays nothing — not even the connection that listing
+    the databases would open.
 
     A named ``database`` is never refused — it bounds the sweep to one — and neither is a
     pattern with a literal character, however wide the visible universe is: that is a real
@@ -983,15 +983,9 @@ def _ensure_scan_is_bounded(database: str | None, table_pattern: str, targets: l
     """
     if database is not None or _narrows_anything(table_pattern):
         return
-    hints = both(
-        "HINT.INPUT_TOO_BROAD.PATTERN_MATCHES_EVERYTHING",
-        pattern=table_pattern,
-        databases=len(targets),
-    )
+    hints = both("HINT.INPUT_TOO_BROAD.PATTERN_MATCHES_EVERYTHING", pattern=table_pattern)
     raise InputTooBroadError(
-        scanned=len(targets),
         pattern=table_pattern,
-        databases=len(targets),
         hint_es=hints["es"],
         hint_en=hints["en"],
     )
@@ -1013,13 +1007,13 @@ def find_tables(
     stops as soon as one extra match is found, so a rare pattern does not read the whole
     catalog of every database.
 
-    Without a ``database`` the call is refused by :func:`_ensure_scan_is_bounded` when the
-    pattern narrows nothing (issue #361); a pattern with a literal character is a real
-    search and scans every visible database as before.
+    Without a ``database`` the call is refused by :func:`_ensure_pattern_narrows` when the
+    pattern narrows nothing, before anything is opened (issue #361); a pattern with a
+    literal character is a real search and scans every visible database as before.
     """
     schema_like = schema_pattern if schema_pattern else None
+    _ensure_pattern_narrows(database, table_pattern)
     targets = _target_databases(profile, database)
-    _ensure_scan_is_bounded(database, table_pattern, targets)
     params = (
         table_pattern,
         schema_like,

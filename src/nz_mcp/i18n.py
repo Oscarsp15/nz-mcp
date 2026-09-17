@@ -316,13 +316,10 @@ MESSAGES: Final[dict[str, Message]] = {
     },
     "INPUT_TOO_BROAD": {
         "es": (
-            "El escaneo abarcaría {scanned} objetos y no se ejecuta: acota la búsqueda "
-            "antes de repetirla."
+            "La búsqueda no está lo bastante acotada para un escaneo de catálogo: acótala "
+            "antes de reintentarla."
         ),
-        "en": (
-            "The scan would cover {scanned} objects and does not run: narrow the search "
-            "before retrying."
-        ),
+        "en": "The search is not narrow enough for a catalog scan: narrow it before retrying.",
     },
     # Hints
     "HINT.RESULT_TRUNCATED_BY_ROWS": {
@@ -361,14 +358,14 @@ MESSAGES: Final[dict[str, Message]] = {
     # raises it: the shared message states the fact, the hint carries the escape.
     "HINT.INPUT_TOO_BROAD.PATTERN_MATCHES_EVERYTHING": {
         "es": (
-            "El patrón '{pattern}' solo tiene comodines, así que coincide con todo. Pasa "
-            "'database' para acotar a una base, o un patrón con algún carácter literal "
-            "(por ejemplo 'ventas%')."
+            "El patrón '{pattern}' solo tiene comodines, así que abarcaría todas las bases "
+            "visibles. Pasa 'database' para acotar a una base, o un patrón con algún "
+            "carácter literal (por ejemplo 'ventas%')."
         ),
         "en": (
-            "The pattern '{pattern}' holds only wildcards, so it matches everything. Pass "
-            "'database' to limit it to one database, or a pattern with at least one literal "
-            "character (for example 'ventas%')."
+            "The pattern '{pattern}' holds only wildcards, so it would cover every visible "
+            "database. Pass 'database' to limit it to one database, or a pattern with at "
+            "least one literal character (for example 'ventas%')."
         ),
     },
     "HINT.INPUT_TOO_BROAD.NARROW_PROCEDURE_PATTERN": {
