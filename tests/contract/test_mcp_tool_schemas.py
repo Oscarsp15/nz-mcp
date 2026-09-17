@@ -43,6 +43,7 @@ EXPECTED_V010A0: set[str] = {
     "nz_list_schemas",
     "nz_list_tables",
     "nz_list_views",
+    "nz_maintenance",
     "nz_object_dependencies",
     "nz_profile_column",
     "nz_query_select",
@@ -120,6 +121,28 @@ def test_nz_alter_table_schema_and_annotations() -> None:
         "readOnlyHint": False,
         "destructiveHint": True,
         "idempotentHint": False,
+        "openWorldHint": False,
+    }
+
+
+@pytest.mark.contract
+def test_nz_maintenance_schema_and_annotations() -> None:
+    spec = TOOLS["nz_maintenance"]
+    props = spec.input_model.model_json_schema()["properties"]
+    assert set(props) == {
+        "database",
+        "schema",
+        "table",
+        "action",
+        "dry_run",
+        "confirm",
+        "echo_sql",
+    }
+    assert spec.mode == "admin"
+    assert spec.annotations == {
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
         "openWorldHint": False,
     }
 

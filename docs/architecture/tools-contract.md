@@ -28,7 +28,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (45 tools registradas)
+## Catálogo v0.1 (46 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -1408,6 +1408,55 @@ Compara el esquema de dos tablas o vistas: columnas solo en A, solo en B, discre
 
 ---
 
+#### 46. `nz_maintenance`
+
+Ejecuta DDL de **mantenimiento** sobre una tabla existente (modo `admin`): refresco de estadísticas (`generate_statistics`) y recuperación de espacio (`groom`, `vacuum`). Recibe la operación como **input estructurado** (acción de una allowlist cerrada + identificadores validados), nunca SQL crudo. Cubre el hueco de que `nz_execute_ddl` solo compila `procedure|view` y `nz_alter_table` es aditivo: hasta ahora `GENERATE STATISTICS` / `GROOM TABLE` obligaban a salir a `nzsql` tras una carga por ETL. Cierra issue #307.
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | Debe coincidir con la BD del perfil activo. |
+| `schema` | string (required) | |
+| `table` | string (required) | Tabla existente a mantener. |
+| `action` | `"generate_statistics"` \| `"groom"` \| `"vacuum"` (required) | Allowlist cerrada; cualquier otro valor → `INVALID_MAINTENANCE_ACTION`. |
+| `dry_run` | bool (default **true**) | Si `true`, devuelve `statements_to_execute` sin ejecutar y sin abrir conexión. |
+| `confirm` | bool (**required if** `dry_run=false`) | Debe ser `true` para ejecutar cuando `dry_run=false`. |
+| `echo_sql` | bool (default **true**) | Solo afecta a la ejecución real: con `false`, `statements_to_execute` vuelve `null` (el `dry_run` siempre devuelve el SQL, que es su razón de ser), mismo criterio que `nz_execute_ddl`. |
+
+**Output** (dry-run `true`):
+```json
+{
+  "action": "groom",
+  "dry_run": true,
+  "statements_to_execute": ["GROOM TABLE DBO.CLIENTES"],
+  "executed": false,
+  "statements_executed": 0,
+  "duration_ms": 0
+}
+```
+
+**Output** (ejecución real):
+```json
+{
+  "action": "generate_statistics",
+  "dry_run": false,
+  "statements_to_execute": ["GENERATE STATISTICS ON DBO.CLIENTES"],
+  "executed": true,
+  "statements_executed": 1,
+  "duration_ms": 412
+}
+```
+
+**Reglas**:
+- **Input estructurado**: el caller declara la acción como dato; la tool construye la única sentencia con el validador de identificadores de catálogo. No se acepta SQL crudo.
+- **Allowlist cerrada (default-deny)**: solo las tres acciones de arriba. Todo el SQL pasa por `sql_guard.validate(mode="admin")`, que clasifica un nuevo kind `MAINTENANCE` mediante un patrón dedicado (como `CALL` y el `DROP TABLE ... IF EXISTS` de Netezza): acepta **exactamente** `GENERATE STATISTICS ON schema.table`, `GROOM TABLE schema.table` y `VACUUM schema.table`, con identificadores validados y sin apilado; cualquier otra forma cae a `UNKNOWN_STATEMENT`.
+- **Sintaxis `VACUUM` de NPS**: va directo sobre la tabla (`VACUUM schema.table`), **sin** `TABLE` ni `FULL` (a diferencia de Postgres). `VACUUM TABLE ...` y `VACUUM FULL ...` son error de parseo en NPS 11.2.1.11-IF1 (verificado en vivo). Además `VACUUM` exige privilegios elevados en el servidor: con una cuenta de servicio puede devolver `VACUUM: permission denied`, que se propaga como `NETEZZA_ERROR` (es un grant del usuario, no un fallo de la tool).
+- Guarda de entorno `assert_env_safe`: si la BD del perfil activo **no** empieza con `PROD_`, cualquier identificador `PROD_*` en el SQL → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD`.
+- **Una sentencia, una conexión**: se ejecuta la única sentencia y se cierra la conexión (sin sesiones huérfanas).
+- **Solo metadatos en ejecución**: con `echo_sql=false`, el SQL no se devuelve tras ejecutar.
+- No usar para cambios de estructura (`nz_alter_table`), ni para crear/compilar objetos (`nz_execute_ddl`), ni para SQL crudo (`nz_query_select`).
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -1428,6 +1477,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 | `nz_truncate`, `nz_drop_table`, `nz_drop_procedure`, `nz_drop_view` | false | **true** | true |
 | `nz_switch_profile`, `nz_switch_database` | false | false | true |
 | `nz_alter_table` | false | true | false |
+| `nz_maintenance` | false | false | true |
 | `nz_call_procedure_async` | false | **true** | false |
 | `nz_job_poll` | true | false | true |
 
