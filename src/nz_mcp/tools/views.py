@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from nz_mcp.catalog.ddl import execute_drop_view
-from nz_mcp.catalog.views import get_view_ddl, list_views
+from nz_mcp.catalog.views import describe_view, get_view_ddl, list_views, object_dependencies
 from nz_mcp.config import MAX_ROWS_CAP, get_active_profile
 from nz_mcp.errors import InvalidInputError
 from nz_mcp.i18n import t
@@ -200,4 +201,141 @@ def nz_drop_view(
     return DropViewOutput(
         dropped=bool(raw["dropped"]),
         duration_ms=int(raw["duration_ms"]),
+    )
+
+
+class DescribeViewInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    database: str = Field(min_length=1, max_length=128)
+    view_schema: str = Field(alias="schema", min_length=1, max_length=128)
+    view: str = Field(min_length=1, max_length=128)
+
+
+class ViewColumnDescriptor(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    name: str
+    sql_type: str = Field(alias="type")
+    nullable: bool
+    default: str | None
+
+
+class DependencyItem(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    ref_schema: str = Field(alias="schema")
+    name: str
+    kind: str
+
+
+class DescribeViewOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    kind: Literal["VIEW"]
+    columns: list[ViewColumnDescriptor]
+    depends_on: list[DependencyItem]
+    duration_ms: int = Field(ge=0, description="Wall time to query catalogs (milliseconds).")
+
+
+class ObjectDependenciesInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    database: str = Field(min_length=1, max_length=128)
+    object_schema: str = Field(alias="schema", min_length=1, max_length=128)
+    object: str = Field(min_length=1, max_length=128)
+    direction: Literal["up", "down"] = Field(
+        default="up",
+        description="'up' walks what the object reads; 'down' walks what reads the object.",
+    )
+    depth: int = Field(default=1, ge=1, le=5, description="Maximum levels to walk.")
+
+
+class ObjectDependencyNode(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    node_schema: str = Field(alias="schema")
+    name: str
+    kind: str
+    level: int
+
+
+class ObjectDependenciesOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    kind: str
+    direction: Literal["up", "down"]
+    depth: int
+    nodes: list[ObjectDependencyNode]
+    truncated: bool = Field(
+        default=False,
+        description="True when the node cap was reached before the walk finished.",
+    )
+    duration_ms: int = Field(ge=0, description="Wall time to walk dependencies (milliseconds).")
+
+
+@tool(
+    name="nz_describe_view",
+    description=(
+        "Describe a view's columns and the objects it reads (depends_on). Use before "
+        "changing a table or view to see what a view depends on. "
+        "Do not use for tables or procedures."
+    ),
+    mode="read",
+    input_model=DescribeViewInput,
+    output_model=DescribeViewOutput,
+    annotations={
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+def nz_describe_view(
+    params: DescribeViewInput,
+    *,
+    config_path: Path | None = None,
+) -> DescribeViewOutput:
+    start = monotonic_start()
+    profile = get_active_profile(path=config_path)
+    payload = describe_view(
+        profile,
+        database=params.database,
+        schema=params.view_schema,
+        view=params.view,
+    )
+    return DescribeViewOutput.model_validate(
+        {**payload, "duration_ms": monotonic_duration_ms(start)},
+    )
+
+
+@tool(
+    name="nz_object_dependencies",
+    description=(
+        "Walk object dependencies (views/tables) up (what it reads) or down (what reads "
+        "it) for impact analysis before changing an object. "
+        "Do not use for column-level lineage or stored procedures."
+    ),
+    mode="read",
+    input_model=ObjectDependenciesInput,
+    output_model=ObjectDependenciesOutput,
+    annotations={
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+def nz_object_dependencies(
+    params: ObjectDependenciesInput,
+    *,
+    config_path: Path | None = None,
+) -> ObjectDependenciesOutput:
+    start = monotonic_start()
+    profile = get_active_profile(path=config_path)
+    payload = object_dependencies(
+        profile,
+        database=params.database,
+        schema=params.object_schema,
+        obj=params.object,
+        direction=params.direction,
+        depth=params.depth,
+    )
+    return ObjectDependenciesOutput.model_validate(
+        {**payload, "duration_ms": monotonic_duration_ms(start)},
     )

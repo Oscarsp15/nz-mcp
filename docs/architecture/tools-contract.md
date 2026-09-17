@@ -28,7 +28,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (42 tools registradas)
+## Catálogo v0.1 (44 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -1278,6 +1278,76 @@ Lista constraints `PRIMARY KEY`/`FOREIGN KEY`/`UNIQUE` de un esquema completo, o
 
 ---
 
+#### 43. `nz_describe_view`
+
+Describe las columnas/tipos de una vista y las relaciones que lee (`depends_on`), en modo `read`. Reutiliza `nz_describe_table` para las columnas y el `kind` (una vista se resuelve como `VIEW`, sin `distribution`), y deriva `depends_on` **parseando el `DEFINITION` de `_V_VIEW` con sqlglot** (solo lectura del árbol, nunca se re-serializa) y resolviendo el `kind` real de cada referencia contra el catálogo (`_V_TABLE` / `_V_VIEW`). Se añadió porque `nz_find_table_references` solo cubre SPs: hasta ahora "¿qué alimenta esta vista?" era abrir DDLs y parsear a ojo (issue #304).
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | BD a inspeccionar (identificador validado para interpolación `<BD>..`). |
+| `schema` | string (required) | Esquema de la vista. |
+| `view` | string (required) | Nombre de la vista. |
+
+**Output**:
+```json
+{
+  "name": "V_CASCADAS",
+  "kind": "VIEW",
+  "columns": [
+    {"name": "FECCORTE", "type": "DATE", "nullable": true, "default": null}
+  ],
+  "depends_on": [
+    {"schema": "DBO", "name": "V_CASCADASUNIVERSO", "kind": "VIEW"},
+    {"schema": "DBO", "name": "V_CASCADASDETALLES", "kind": "VIEW"}
+  ],
+  "duration_ms": 210
+}
+```
+
+**Reglas**:
+- Si el objeto no existe o no es visible → `OBJECT_NOT_FOUND`. Si existe pero **no es una vista** → `OBJECT_NOT_FOUND` con `object_type` del tipo real (`TABLE` / `EXTERNAL TABLE`); para tablas usar `nz_describe_table`.
+- `depends_on` es **best-effort**: si el `DEFINITION` no parsea con sqlglot se devuelve `[]` (no es un error); `kind` es `UNKNOWN` cuando la referencia no resuelve contra el catálogo.
+- Referencias sin esquema en el DDL se asumen del mismo esquema de la vista.
+- Fuera de alcance: lineage a nivel de columna; recorrido recursivo (para eso, `nz_object_dependencies`).
+
+---
+
+#### 44. `nz_object_dependencies`
+
+Recorre dependencias de objeto (vistas/tablas) en modo `read`, en una dirección: `up` (qué lee el objeto) o `down` (qué lee al objeto), hasta `depth` niveles. `up` sigue el `DEFINITION` parseado de cada vista; `down` **no tiene catálogo** (Netezza no registra dependencias de vistas en `_V_DEPEND`, solo funciones/librerías), así que escanea los `DEFINITION` de las vistas del esquema dado y conserva las que referencian el nodo. El recorrido es BFS, deduplicado por `(schema, name)`, con tope de profundidad (5) y de nodos (200). Cierra el caso "¿puedo cambiar esta tabla sin romper el reporte?" (issue #304).
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | BD a inspeccionar (identificador validado para interpolación `<BD>..`). |
+| `schema` | string (required) | Esquema del objeto y universo del escaneo `down`. |
+| `object` | string (required) | Nombre del objeto (tabla o vista). |
+| `direction` | `"up"` \| `"down"` (default: `"up"`) | `up` = de qué depende; `down` = qué depende de él. |
+| `depth` | int (1..5, default: 1) | Niveles máximos a recorrer. |
+
+**Output**:
+```json
+{
+  "name": "V_CASCADAS",
+  "kind": "VIEW",
+  "direction": "up",
+  "depth": 2,
+  "nodes": [
+    {"schema": "DBO", "name": "V_CASCADASUNIVERSO", "kind": "VIEW", "level": 1},
+    {"schema": "DBO", "name": "V_CASCADASDETALLES", "kind": "VIEW", "level": 1}
+  ],
+  "truncated": false,
+  "duration_ms": 340
+}
+```
+
+**Reglas**:
+- Si el objeto raíz no existe o no es visible → `OBJECT_NOT_FOUND`.
+- `down` está acotado al esquema dado (no busca referencias en otros esquemas) y es más costoso: escanea y parsea el `DEFINITION` de cada vista del esquema.
+- `truncated=true` cuando se alcanza el tope de 200 nodos antes de agotar `depth`.
+- Fuera de alcance: lineage a nivel de columna; referencias dentro de SPs (para eso, `nz_find_table_references`).
+
+---
+
 ## Convenciones comunes
 
 ### Tool annotations (MCP)
@@ -1286,7 +1356,7 @@ Cada tool declara `annotations` para que el cliente MCP muestre diálogos adecua
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
 |---|---|---|---|
-| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
+| `nz_query_select`, `nz_explain`, `nz_list_*`, `nz_describe_*`, `nz_object_dependencies`, `nz_table_sample`, `nz_table_stats`, `nz_get_table_ddl`, `nz_get_view_ddl`, `nz_get_procedure_ddl`, `nz_get_procedure_section`, `nz_get_procedure_size`, `nz_get_procedure_table_logic`, `nz_get_procedures_ddl_batch`, `nz_find_table_references`, `nz_export_ddl`, `nz_current_profile`, `nz_profile_column` | true | false | true |
 | `nz_insert` | false | false | false |
 | `nz_insert_select` | false | false | false |
 | `nz_update`, `nz_delete` | false | true | false |
