@@ -401,6 +401,10 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "Mostrando los {shown} valores más frecuentes de {distinct} distintos. Sube 'top_n' (máx {cap}) para ver más.",
         "en": "Showing the top {shown} of {distinct} distinct values. Raise 'top_n' (max {cap}) to see more.",
     },
+    "HINT.DUPLICATE_GROUPS_TRUNCATED": {
+        "es": "Muestra truncada a {shown} de {groups} grupos duplicados. Sube 'limit' (máx {cap}) para ver más.",
+        "en": "Sample truncated to {shown} of {groups} duplicate groups. Raise 'limit' (max {cap}) to see more.",
+    },
     "HINT.TABLE_STATS_BATCH_TRUNCATED": {
         "es": "Mostrando las {n} tablas mayores de {total} en el esquema. Sube 'top_n' (máx {cap}) para incluir más.",
         "en": "Showing the {n} largest of {total} tables in the schema. Raise 'top_n' (max {cap}) to include more.",
