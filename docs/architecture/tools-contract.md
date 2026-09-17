@@ -290,10 +290,12 @@ Source: `_v_view`.
 **Output**:
 ```json
 {
-  "ddl": "CREATE VIEW PUBLIC.VW_X AS SELECT ... FROM ...",
+  "ddl": "CREATE OR REPLACE VIEW DBO.VW_X AS\nSELECT ... FROM ...",
   "duration_ms": 55
 }
 ```
+
+`ddl` is a complete, re-executable `CREATE OR REPLACE VIEW schema.view AS\n<body>` statement. `_V_VIEW.DEFINITION` stores only the SELECT body; the header is reconstructed by the tool. Schema and view are always uppercased in the header.
 
 Source: `SELECT DEFINITION FROM _V_VIEW WHERE ...`.
 
