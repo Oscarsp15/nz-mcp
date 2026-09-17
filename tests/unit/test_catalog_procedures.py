@@ -13,6 +13,7 @@ from nz_mcp.errors import (
     NetezzaError,
     ObjectNotFoundError,
     OverloadAmbiguousError,
+    QueryTimeoutError,
     SectionNotFoundError,
 )
 
@@ -598,3 +599,93 @@ def test_truncation_hint_line_continues_wrapped_ddl(
     assert first_unread == source.splitlines()[resume - 1]
     # No overlap: that line was not part of what the caller already received.
     assert cut.splitlines()[built.header_lines :] == source.splitlines()[: resume - 1]
+
+
+# ── issue #308: timeout on the batch fetch is a QueryTimeoutError with a hint ──
+
+
+def _patch_open_connection_raising_on_execute(
+    monkeypatch: pytest.MonkeyPatch,
+    exc: BaseException,
+    captured_timeout: list[object] | None = None,
+) -> None:
+    """Open a fake connection whose cursor blows up on ``execute``.
+
+    The timeout has to surface *during the query*, not during the connect: a failure
+    to open a connection is already a ``ConnectionError`` from ``open_connection``.
+    """
+
+    class _Cursor:
+        def execute(self, *_a: object, **_k: object) -> None:
+            raise exc
+
+        def fetchall(self) -> list[object]:
+            return []
+
+        def close(self) -> None:
+            return
+
+    class _Conn:
+        def cursor(self) -> _Cursor:
+            return _Cursor()
+
+        def close(self) -> None:
+            return
+
+    def _fake(*_a: object, **kwargs: object) -> object:
+        if captured_timeout is not None:
+            captured_timeout.append(kwargs.get("timeout", "<unset>"))
+        return _Conn()
+
+    monkeypatch.setattr(proc, "open_connection", _fake)
+
+
+def test_get_all_procedures_ddl_forwards_timeout_to_the_driver(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    profile = get_active_profile(path=two_profiles)
+    monkeypatch.setattr("nz_mcp.catalog.procedures.get_password", lambda _n: "pw")
+    captured: list[object] = []
+    _patch_open_connection_raising_on_execute(
+        monkeypatch, OSError("boom"), captured_timeout=captured
+    )
+
+    with pytest.raises(NetezzaError):
+        proc.get_all_procedures_ddl(profile, "DB1", "SCH", timeout_s=9)
+    assert captured == [9]
+
+
+def test_get_all_procedures_ddl_omits_timeout_when_not_given(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    profile = get_active_profile(path=two_profiles)
+    monkeypatch.setattr("nz_mcp.catalog.procedures.get_password", lambda _n: "pw")
+    captured: list[object] = []
+    _patch_open_connection_raising_on_execute(
+        monkeypatch, OSError("boom"), captured_timeout=captured
+    )
+
+    with pytest.raises(NetezzaError):
+        proc.get_all_procedures_ddl(profile, "DB1", "SCH")
+    # The sentinel is not passed: ``open_connection`` falls back to the profile default.
+    assert captured == ["<unset>"]
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [TimeoutError("timed out"), OSError("connection timed out")],
+)
+def test_get_all_procedures_ddl_maps_socket_timeout_to_query_timeout(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path, exc: BaseException
+) -> None:
+    profile = get_active_profile(path=two_profiles)
+    monkeypatch.setattr("nz_mcp.catalog.procedures.get_password", lambda _n: "pw")
+    _patch_open_connection_raising_on_execute(monkeypatch, exc)
+
+    with pytest.raises(QueryTimeoutError) as caught:
+        proc.get_all_procedures_ddl(profile, "DB1", "SCH", timeout_s=3)
+    assert caught.value.code == "QUERY_TIMEOUT"
+    assert caught.value.context.get("timeout_s") == 3
+    # The raise-site hint travels to the MCP payload; it must be actionable.
+    assert "pattern" in str(caught.value.context.get("hint_es"))
+    assert "pattern" in str(caught.value.context.get("hint_en"))
