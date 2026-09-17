@@ -33,6 +33,7 @@ _OBJECT_TYPES_WITH_DISTRIBUTION: Final[frozenset[str]] = frozenset(
 )
 _DIST_ROW_MIN: Final[int] = 2
 _COL_TUPLE_MIN: Final[int] = 4
+_COL_WITH_ATTNUM_MIN: Final[int] = 5
 _PK_TUPLE_MIN: Final[int] = 3
 _FK_PK_MIN: Final[int] = 4
 _FK_SCHEMA_MIN: Final[int] = 5
@@ -846,3 +847,182 @@ def _constraint_quintuplet(row: Any) -> tuple[str, str, str, str, int]:
     raise NetezzaError(
         operation="list_constraints", detail="Unexpected row shape from _v_relation_keydata"
     )
+
+
+def compare_tables(
+    profile: Profile,
+    database_a: str,
+    schema_a: str,
+    table_a: str,
+    database_b: str,
+    schema_b: str,
+    table_b: str,
+) -> dict[str, Any]:
+    """Compare column schemas between two tables/views in Netezza.
+
+    Returns columns only in A, only in B, type/nullability mismatches, and ordinal
+    position mismatches. Raises ObjectNotFoundError if either relation does not exist.
+    """
+    db_a_ident = validate_database_identifier(database_a)
+    sch_a_ident = validate_catalog_identifier(schema_a)
+    tab_a_ident = validate_catalog_identifier(table_a)
+    db_b_ident = validate_database_identifier(database_b)
+    sch_b_ident = validate_catalog_identifier(schema_b)
+    tab_b_ident = validate_catalog_identifier(table_b)
+
+    params_a: tuple[str, str] = (sch_a_ident, tab_a_ident)
+    params_b: tuple[str, str] = (sch_b_ident, tab_b_ident)
+
+    password = get_password(profile.name)
+    connection = cast(_DescribeConnectionLike, open_connection(profile, password))
+    try:
+        with closing(connection.cursor()) as cursor:
+            col_sql_a = render_cross_db(
+                resolve_query("describe_table_columns", profile),
+                database=db_a_ident,
+            )
+            cursor.execute(col_sql_a, params_a)
+            column_rows_a = cursor.fetchall()
+            if not column_rows_a:
+                raise ObjectNotFoundError(
+                    detail=(
+                        f"Table {table_a!r} does not exist in {database_a}.{schema_a} "
+                        "or is not visible to this profile."
+                    ),
+                    object_type="table",
+                    database=database_a,
+                    schema=schema_a,
+                    table=table_a,
+                )
+
+            col_sql_b = render_cross_db(
+                resolve_query("describe_table_columns", profile),
+                database=db_b_ident,
+            )
+            cursor.execute(col_sql_b, params_b)
+            column_rows_b = cursor.fetchall()
+            if not column_rows_b:
+                raise ObjectNotFoundError(
+                    detail=(
+                        f"Table {table_b!r} does not exist in {database_b}.{schema_b} "
+                        "or is not visible to this profile."
+                    ),
+                    object_type="table",
+                    database=database_b,
+                    schema=schema_b,
+                    table=table_b,
+                )
+    except ObjectNotFoundError:
+        raise
+    except Exception as exc:  # noqa: BLE001, RUF100
+        raise NetezzaError(
+            operation="compare_tables",
+            database=database_a,
+            detail=sanitize(str(exc), known_secrets={password}),
+        ) from exc
+    finally:
+        connection.close()
+
+    cols_a = [_compare_column_descriptor(r, i + 1) for i, r in enumerate(column_rows_a)]
+    cols_b = [_compare_column_descriptor(r, i + 1) for i, r in enumerate(column_rows_b)]
+
+    map_a: dict[str, dict[str, Any]] = {col["name"].upper(): col for col in cols_a}
+    map_b: dict[str, dict[str, Any]] = {col["name"].upper(): col for col in cols_b}
+
+    only_in_a: list[dict[str, Any]] = [
+        {
+            "column": col["name"],
+            "type": col["type"],
+            "nullable": col["nullable"],
+            "position": col["position"],
+        }
+        for col in cols_a
+        if col["name"].upper() not in map_b
+    ]
+
+    only_in_b: list[dict[str, Any]] = [
+        {
+            "column": col["name"],
+            "type": col["type"],
+            "nullable": col["nullable"],
+            "position": col["position"],
+        }
+        for col in cols_b
+        if col["name"].upper() not in map_a
+    ]
+
+    type_mismatches: list[dict[str, Any]] = []
+    position_mismatches: list[dict[str, Any]] = []
+
+    for col_a in cols_a:
+        key = col_a["name"].upper()
+        if key in map_b:
+            col_b = map_b[key]
+            if col_a["type"] != col_b["type"] or col_a["nullable"] != col_b["nullable"]:
+                type_mismatches.append(
+                    {
+                        "column": col_a["name"],
+                        "type_a": col_a["type"],
+                        "type_b": col_b["type"],
+                        "nullable_a": col_a["nullable"],
+                        "nullable_b": col_b["nullable"],
+                    }
+                )
+            if col_a["position"] != col_b["position"]:
+                position_mismatches.append(
+                    {
+                        "column": col_a["name"],
+                        "position_a": col_a["position"],
+                        "position_b": col_b["position"],
+                    }
+                )
+
+    common_count = len(set(map_a.keys()) & set(map_b.keys()))
+    identical = (
+        len(only_in_a) == 0
+        and len(only_in_b) == 0
+        and len(type_mismatches) == 0
+        and len(position_mismatches) == 0
+    )
+
+    return {
+        "identical": identical,
+        "columns_in_a": len(cols_a),
+        "columns_in_b": len(cols_b),
+        "columns_in_common": common_count,
+        "only_in_a": only_in_a,
+        "only_in_b": only_in_b,
+        "type_mismatches": type_mismatches,
+        "position_mismatches": position_mismatches,
+    }
+
+
+def _compare_column_descriptor(row: Any, fallback_pos: int) -> dict[str, Any]:
+    if isinstance(row, dict):
+        name = row.get("COLUMN_NAME")
+        dtype = row.get("DATA_TYPE")
+        not_null = row.get("NOT_NULL")
+        attnum = row.get("ATTNUM")
+        if name is None or dtype is None or not_null is None:
+            raise NetezzaError(
+                operation="compare_tables",
+                detail="Column row must include COLUMN_NAME, DATA_TYPE, NOT_NULL.",
+            )
+        pos = int(attnum) if attnum is not None else fallback_pos
+        return {
+            "name": str(name),
+            "type": str(dtype),
+            "nullable": not _is_not_null(not_null),
+            "position": pos,
+        }
+    if is_sequence_row(row, _COL_TUPLE_MIN):
+        pos = (
+            int(row[4]) if len(row) >= _COL_WITH_ATTNUM_MIN and row[4] is not None else fallback_pos
+        )
+        return {
+            "name": str(row[0]),
+            "type": str(row[1]),
+            "nullable": not _is_not_null(row[2]),
+            "position": pos,
+        }
+    raise NetezzaError(operation="compare_tables", detail="Unexpected column row shape.")
