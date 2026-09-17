@@ -363,6 +363,10 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "DDL truncado a {returned_kb} KB de {total_kb} KB (tope max_bytes={max_kb} KB). Llama a nz_get_procedure_size para dimensionar el SP y lee el resto con nz_get_procedure_section(section='range', from_line={from_line}, to_line={to_line}), avanzando de {step} en {step} líneas.",
         "en": "DDL truncated to {returned_kb} KB of {total_kb} KB (max_bytes cap {max_kb} KB). Call nz_get_procedure_size to size the SP up and read the rest with nz_get_procedure_section(section='range', from_line={from_line}, to_line={to_line}), advancing {step} lines at a time.",
     },
+    "HINT.PROFILE_TOP_VALUES_LIMITED": {
+        "es": "Mostrando los {shown} valores más frecuentes de {distinct} distintos. Sube 'top_n' (máx {cap}) para ver más.",
+        "en": "Showing the top {shown} of {distinct} distinct values. Raise 'top_n' (max {cap}) to see more.",
+    },
     "NOTE.DDL_RECONSTRUCTED": {
         "es": "DDL reconstruido desde catálogo (SHOW TABLE no disponible en este servidor).",
         "en": "DDL reconstructed from catalogs (SHOW TABLE not available on this server).",
