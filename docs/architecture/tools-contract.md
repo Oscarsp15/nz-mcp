@@ -27,7 +27,7 @@ Cada tool declara el `mode` mínimo que requiere. El perfil activo define el `mo
 | `write` | `read` + `write` |
 | `admin` | `read` + `write` + `ddl` |
 
-## Catálogo v0.1 (40 tools registradas)
+## Catálogo v0.1 (41 tools registradas)
 
 > Si quieres añadir una tool nueva, lee primero [`../standards/maintainability.md`](../standards/maintainability.md) y abre un ADR. El catálogo está congelado para v0.1.
 
@@ -100,24 +100,28 @@ Lista bases de datos visibles para el usuario del perfil.
 
 #### 5. `nz_list_tables`
 
-Lista **solo tablas** (no vistas, no procedimientos). Para vistas usar `nz_list_views`, para procedimientos `nz_list_procedures`.
+Lista **tablas** (base y/o externas; no vistas, no procedimientos). Para vistas usar `nz_list_views`, para procedimientos `nz_list_procedures`.
 
 | Input | Tipo | Descripción |
 |---|---|---|
 | `database` | string (required) | |
 | `schema` | string (required) | |
 | `pattern` | string (optional) | Filtro `LIKE` por nombre. Match case-insensitive. |
+| `object_type` | `"TABLE"` \| `"EXTERNAL TABLE"` \| `"ALL"` (default: `"TABLE"`) | Filtra por `OBJTYPE` real del catálogo. `ALL` incluye tablas base y externas (issue #295). |
 
 **Output** (solo `name` y `kind`; el conteo de filas va en `nz_table_stats`):
 
 ```json
 {
   "tables": [
-    {"name": "CUSTOMERS", "kind": "TABLE"}
+    {"name": "CUSTOMERS", "kind": "TABLE"},
+    {"name": "STG_S3_ORDERS", "kind": "EXTERNAL TABLE"}
   ],
   "duration_ms": 28
 }
 ```
+
+`kind` refleja el `OBJTYPE` real de cada fila (`TABLE` o `EXTERNAL TABLE`), no un valor fijo.
 
 ---
 
@@ -129,7 +133,9 @@ Lista **solo tablas** (no vistas, no procedimientos). Para vistas usar `nz_list_
 | `schema` | string (required) | |
 | `table` | string (required) | |
 
-**Output**:
+Funciona con tablas, tablas externas y vistas: `kind` refleja el tipo real (issue #295). `distribution` solo aparece cuando `kind` es `TABLE` o `EXTERNAL TABLE`; se omite (no aparece la clave) para vistas, porque Netezza no distribuye vistas.
+
+**Output** (tabla base):
 ```json
 {
   "name": "CUSTOMERS",
@@ -142,6 +148,21 @@ Lista **solo tablas** (no vistas, no procedimientos). Para vistas usar `nz_list_
   "primary_key": ["ID"],
   "foreign_keys": [],
   "duration_ms": 2100
+}
+```
+
+**Output** (vista, sin `distribution`):
+```json
+{
+  "name": "V_MODELOVERSION",
+  "kind": "VIEW",
+  "columns": [
+    {"name": "ID", "type": "INTEGER", "nullable": false, "default": null}
+  ],
+  "organized_on": [],
+  "primary_key": [],
+  "foreign_keys": [],
+  "duration_ms": 1800
 }
 ```
 
@@ -861,8 +882,9 @@ Compila un `CREATE [OR REPLACE] PROCEDURE` (NZPLSQL) **completo** o un `CREATE [
 | `confirm` | bool (**required if** `dry_run=false`) | |
 | `allow_prod_reads` | bool (default **false**) | Si `true`, **omite solo** la guarda `PROD_REF_IN_NONPROD`. El caller certifica que ya volteó todas las **escrituras** a la BD activa y que los `PROD_*` restantes son **solo lecturas**. Aplica igual en `dry_run` y en compilación real. El resto de validaciones (statement único, cabecera, modo admin, `statement_type`) siguen vigentes. |
 | `echo_sql` | bool (default **true**) | Si `false`, la respuesta de ejecución real omite `sql_to_execute` (queda `null`); en `dry_run` siempre se devuelve el SQL como preview. |
+| `validate_compile` | bool (default **false**) | Si `true` y `statement_type="procedure"`, tras el `CREATE` ejecuta `CALL schema.proc()` para forzar la compilación del cuerpo NZPLSQL. Un error de compilación aparece en `compile_error` y `compiled=false`; cualquier otro error (p.ej. nro. de args incorrecto) significa que el cuerpo compiló bien. Ver nota sobre efectos secundarios abajo. |
 
-**Output**:
+**Output** (dry-run):
 ```json
 {
   "dry_run": true,
@@ -872,13 +894,16 @@ Compila un `CREATE [OR REPLACE] PROCEDURE` (NZPLSQL) **completo** o un `CREATE [
 }
 ```
 
-**Output** (ejecución real con `echo_sql=false`):
+**Output** (ejecución real, `statement_type="procedure"`, con `validate_compile=true` y cuerpo inválido):
 ```json
 {
   "dry_run": false,
-  "sql_to_execute": null,
+  "sql_to_execute": "CREATE OR REPLACE PROCEDURE ...",
   "executed": true,
-  "duration_ms": 42
+  "duration_ms": 42,
+  "compile_warning": "DDL accepted by server. NZPLSQL body compilation is deferred to the first CALL — a syntax error will only surface then. Pass validate_compile=true to force a check now.",
+  "compile_error": "plpgsql: ERROR during compile of PROC_NAME near line 1",
+  "compiled": false
 }
 ```
 
@@ -886,6 +911,8 @@ Compila un `CREATE [OR REPLACE] PROCEDURE` (NZPLSQL) **completo** o un `CREATE [
 - Guarda de entorno (`assert_env_safe`): si la BD del perfil activo **no** empieza con `PROD_`, cualquier identificador `PROD_*` en el SQL → `GUARD_REJECTED` código `PROD_REF_IN_NONPROD`. Evita compilar en desarrollo código que apunta a producción. Es un escaneo conservador (un literal con `PROD_` también dispara; falla cerrado).
 - `allow_prod_reads=true` desactiva **únicamente** esa guarda: compilar un `CREATE` es inerte (las escrituras reales solo ocurren en `CALL`), así que el flag relaja el escaneo textual de compilación, no el comportamiento en ejecución. El default `false` conserva el bloqueo (falla cerrado). No se intenta distinguir lecturas de escrituras: el flag es la certificación explícita del caller.
 - `echo_sql` controla **solo** la ejecución real: con `false`, `sql_to_execute` queda `null` y la respuesta se reduce a metadatos (`executed`, `duration_ms`), para compilar en lote sin arrastrar el DDL completo al contexto. En `dry_run` el SQL se devuelve **siempre**, porque el preview es el objetivo de ese modo.
+- **Compilación perezosa NZPLSQL**: Netezza acepta el DDL aunque el cuerpo sea inválido — compila en el primer `CALL`. Por eso `executed=true` **no implica que el SP sea válido**. Para `statement_type="procedure"`, la respuesta siempre lleva `compile_warning` explicando esto.
+- `validate_compile=true`: fuerza la compilación ejecutando `CALL schema.proc()` sin argumentos. Si el SP acepta 0 argumentos y el cuerpo es válido, el SP **se ejecuta** de verdad (efecto secundario). El caller acepta este riesgo al pasar el flag.
 - Todo el SQL pasa por `sql_guard.validate(mode="admin")`; se exige `CREATE`.
 - Ejecuta contra la BD del perfil activo (no acepta `database` cross-DB).
 - No usar para tablas (`nz_create_table`) ni para ejecutar un procedimiento (`nz_call_procedure`).
@@ -1125,7 +1152,38 @@ Devuelve el estado actual de un job lanzado por `nz_call_procedure_async`. Modo 
 
 ---
 
-#### 40. `nz_profile_column`
+#### 40. `nz_find_column`
+
+Busca columnas por patrón de nombre entre **tablas y vistas** de una base de datos (excluye vistas de sistema/gestión, tablas externas y secuencias). Modo `read`. Responde "¿dónde vive este dato?" sin tener que adivinar los nombres de columna de `_V_RELATION_COLUMN` (`NAME`/`ATTNAME`, no `TABLENAME`/`COLUMNNAME`).
+
+| Input | Tipo | Descripción |
+|---|---|---|
+| `database` | string (required) | BD a inspeccionar (identificador validado para interpolación `<BD>..`). |
+| `column_pattern` | string (required) | Filtro `LIKE` sobre el nombre de columna. Match case-insensitive. |
+| `schema_pattern` | string (optional) | Filtro `LIKE` sobre el esquema. Match case-insensitive. |
+| `table_pattern` | string (optional) | Filtro `LIKE` sobre la tabla/vista. Match case-insensitive. |
+| `max_rows` | int (default: perfil, cap `MAX_ROWS_CAP`) | Tope de coincidencias devueltas. |
+
+**Output**:
+```json
+{
+  "columns": [
+    {"schema": "DBO", "table": "EFE_MC_CREDITOS", "column": "NUMDOCUMENTO", "type": "CHARACTER VARYING(12)"}
+  ],
+  "truncated": false,
+  "hint": null,
+  "duration_ms": 58
+}
+```
+
+**Reglas**:
+- Sin coincidencias → `columns: []`, no es un error (mismo criterio que `nz_list_tables` / `nz_list_procedures`).
+- `truncated` + `hint` cuando hay más coincidencias que `max_rows` (mismo patrón que `nz_list_procedures`, ADR 0018).
+- Fuera de alcance: búsqueda por tipo de dato o por valor de columna.
+
+---
+
+#### 41. `nz_profile_column`
 
 Perfila una columna en una sola pasada de solo lectura: total de filas, nulos, % de nulos, distintos, mínimo/máximo y los `top_n` valores más frecuentes. Es el paso previo al análisis de una tabla nueva, que hasta ahora exigía escribir los agregados a mano para cada columna.
 

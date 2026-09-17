@@ -47,12 +47,27 @@ LIST_SCHEMAS: Final[CatalogQuery] = CatalogQuery(
 LIST_TABLES: Final[CatalogQuery] = CatalogQuery(
     id="list_tables",
     sql=(
-        "SELECT TABLENAME AS NAME, OWNER FROM <BD>.._V_TABLE "
-        "WHERE SCHEMA = UPPER(?) AND OBJTYPE='TABLE' "
+        "SELECT TABLENAME AS NAME, OWNER, OBJTYPE FROM <BD>.._V_TABLE "
+        "WHERE SCHEMA = UPPER(?) AND (? IS NULL OR OBJTYPE = UPPER(?)) "
         "AND (? IS NULL OR TABLENAME LIKE UPPER(?)) ORDER BY TABLENAME"
     ),
     catalog_views=("_V_TABLE",),
-    description="Lists tables for a schema with an optional case-insensitive name filter.",
+    description=(
+        "Lists tables for a schema with an optional case-insensitive name filter. "
+        "OBJTYPE filter is optional (NULL means both TABLE and EXTERNAL TABLE)."
+    ),
+    tested_versions=(NPS_112_IF1,),
+    cross_database=True,
+)
+
+DESCRIBE_TABLE_OBJTYPE: Final[CatalogQuery] = CatalogQuery(
+    id="describe_table_objtype",
+    sql=("SELECT OBJTYPE FROM <BD>.._V_TABLE WHERE SCHEMA = UPPER(?) AND TABLENAME = UPPER(?)"),
+    catalog_views=("_V_TABLE",),
+    description=(
+        "Resolves the real OBJTYPE (TABLE or EXTERNAL TABLE) for describe_table. "
+        "No row means the relation is a view, not a table."
+    ),
     tested_versions=(NPS_112_IF1,),
     cross_database=True,
 )
@@ -205,6 +220,23 @@ GET_ALL_PROCEDURES_DDL: Final[CatalogQuery] = CatalogQuery(
     cross_database=True,
 )
 
+FIND_COLUMN: Final[CatalogQuery] = CatalogQuery(
+    id="find_column",
+    sql=(
+        "SELECT SCHEMA, NAME, ATTNAME, FORMAT_TYPE FROM <BD>.._V_RELATION_COLUMN "
+        "WHERE TYPE IN ('TABLE', 'VIEW') AND ATTNAME LIKE UPPER(?) "
+        "AND (? IS NULL OR SCHEMA LIKE UPPER(?)) AND (? IS NULL OR NAME LIKE UPPER(?)) "
+        "ORDER BY SCHEMA, NAME, ATTNAME"
+    ),
+    catalog_views=("_V_RELATION_COLUMN",),
+    description=(
+        "Finds columns by name pattern across base tables and views in a database, "
+        "with optional schema/table name filters."
+    ),
+    tested_versions=(NPS_112_IF1,),
+    cross_database=True,
+)
+
 ALL_QUERIES: Final[tuple[CatalogQuery, ...]] = (
     LIST_DATABASES,
     LIST_SCHEMAS,
@@ -212,6 +244,7 @@ ALL_QUERIES: Final[tuple[CatalogQuery, ...]] = (
     LIST_VIEWS,
     GET_VIEW_DDL,
     DESCRIBE_TABLE_COLUMNS,
+    DESCRIBE_TABLE_OBJTYPE,
     DESCRIBE_TABLE_DISTRIBUTION,
     DESCRIBE_TABLE_PK,
     DESCRIBE_TABLE_FK,
@@ -220,6 +253,7 @@ ALL_QUERIES: Final[tuple[CatalogQuery, ...]] = (
     GET_PROCEDURE_DDL,
     GET_PROCEDURE_SECTION,
     GET_ALL_PROCEDURES_DDL,
+    FIND_COLUMN,
 )
 
 CATALOG_QUERY_MAP: Final[dict[str, CatalogQuery]] = {query.id: query for query in ALL_QUERIES}

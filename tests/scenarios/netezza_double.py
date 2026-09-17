@@ -293,6 +293,8 @@ class FakeCursor:
             return self._database_rows(params)
         if "_V_SCHEMA" in upper:
             return self._schema_rows(database, params)
+        if upper.startswith("SELECT OBJTYPE FROM"):
+            return self._objtype_rows(database, params)
         if "_V_TABLE" in upper:
             return self._table_rows(database, params)
         raise FakeNetezzaError(f"catalog view not supported by the double: {text[:120]!r}")
@@ -314,13 +316,30 @@ class FakeCursor:
         ]
 
     def _table_rows(self, database: str, params: Any) -> list[Row]:
+        """Rows for ``list_tables``: NAME, OWNER, OBJTYPE (issue #295).
+
+        Every table the double knows about is a base ``TABLE``: it has no notion of
+        ``EXTERNAL TABLE``, so an ``object_type`` filter other than ``TABLE`` (or ``ALL``,
+        which is ``NULL`` on the wire) yields no rows.
+        """
         schema = (_param(params, 0) or "").upper()
-        pattern = _param(params, 1)
+        type_filter = _param(params, 1)
+        pattern = _param(params, 3)
+        if type_filter is not None and type_filter.upper() != "TABLE":
+            return []
         return [
-            (name, table.owner)
+            (name, table.owner, "TABLE")
             for (db, sch, name), table in sorted(self.server.tables.items())
             if (db, sch) == (database, schema) and _like(name, pattern)
         ]
+
+    def _objtype_rows(self, database: str, params: Any) -> list[Row]:
+        """Rows for ``describe_table_objtype``: no row means "it's a view" (issue #295)."""
+        schema = (_param(params, 0) or "").upper()
+        name = (_param(params, 1) or "").upper()
+        if (database, schema, name) not in self.server.tables:
+            return []
+        return [("TABLE",)]
 
     def _require_table(self, database: str, params: Any, *, schema_at: int = 0) -> FakeTable:
         schema = (_param(params, schema_at) or "").upper()

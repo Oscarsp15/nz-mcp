@@ -16,6 +16,7 @@ from nz_mcp.tools import (
     drop_procedure,  # noqa: F401  (registers nz_drop_procedure)
     execute_ddl,  # noqa: F401  (registers nz_execute_ddl)
     export_ddl,  # noqa: F401  (registers nz_export_ddl)
+    find_column,  # noqa: F401  (registers nz_find_column)
     procedures,  # noqa: F401  (registers procedure tools)
     profiling,  # noqa: F401  (registers nz_profile_column)
     query,  # noqa: F401  (registers nz_query_select, nz_explain)
