@@ -12,10 +12,12 @@ from nz_mcp.catalog.identifier import (
     render_cross_db,
     validate_catalog_identifier,
     validate_database_identifier,
+    validate_system_view_identifier,
 )
 from nz_mcp.errors import InvalidInputError
 
 _VALIDATED_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+_SYSTEM_VIEW_PATTERN = re.compile(r"^_[A-Z0-9_]{1,127}$")
 
 
 @pytest.mark.parametrize(
@@ -74,6 +76,46 @@ def test_render_cross_db_fails_when_marker_is_unresolved() -> None:
     with pytest.raises(InvalidInputError) as exc:
         render_cross_db("SELECT * FROM <BD>_V_TABLE", "PROD")
     assert exc.value.code == "INVALID_DATABASE_NAME"
+
+
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("_V_RELATION_COLUMN", "_V_RELATION_COLUMN"),
+        ("_v_session", "_V_SESSION"),
+        ("_V_TABLE", "_V_TABLE"),
+    ],
+)
+def test_validate_system_view_identifier_accepts_underscore_names(name: str, expected: str) -> None:
+    assert validate_system_view_identifier(name) == expected
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "V_TABLE",  # no leading underscore: a regular catalog identifier, not a system view
+        "_V; DROP TABLE",
+        "_V TABLE",
+        "_",
+        "",
+        "_V" + "A" * 129,
+        "1_V_TABLE",
+    ],
+)
+def test_validate_system_view_identifier_rejects_invalid(name: str) -> None:
+    with pytest.raises(InvalidInputError) as exc:
+        validate_system_view_identifier(name)
+    assert exc.value.code == "INVALID_INPUT"
+
+
+@given(st.text())
+def test_validate_system_view_identifier_matches_security_regex(raw_name: str) -> None:
+    normalized = raw_name.strip().upper()
+    if _SYSTEM_VIEW_PATTERN.fullmatch(normalized):
+        assert validate_system_view_identifier(raw_name) == normalized
+    else:
+        with pytest.raises(InvalidInputError):
+            validate_system_view_identifier(raw_name)
 
 
 @given(st.text())

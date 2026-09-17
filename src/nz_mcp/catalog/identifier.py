@@ -8,6 +8,9 @@ from typing import Final
 from nz_mcp.errors import InvalidInputError
 
 _DB_IDENTIFIER_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+# Netezza system/catalog views are named ``_V_*`` and live in ``DEFINITION_SCHEMA``; unlike
+# user objects they start with an underscore, which the regular catalog pattern rejects.
+_SYSTEM_VIEW_IDENTIFIER_PATTERN: Final[re.Pattern[str]] = re.compile(r"^_[A-Z0-9_]{1,127}$")
 
 
 def validate_database_identifier(name: str) -> str:
@@ -27,6 +30,21 @@ def validate_catalog_identifier(name: str) -> str:
     if not _DB_IDENTIFIER_PATTERN.fullmatch(normalized):
         raise InvalidInputError(
             detail=f"Invalid catalog identifier: {name!r}",
+        )
+    return normalized
+
+
+def validate_system_view_identifier(name: str) -> str:
+    """Validate a Netezza system/catalog view name (``_V_*``, e.g. ``_V_RELATION_COLUMN``).
+
+    Same safety as :func:`validate_catalog_identifier` (letters, digits and underscore only,
+    so it is safe to interpolate), but a leading underscore is allowed because catalog views
+    are named that way.
+    """
+    normalized = name.strip().upper()
+    if not _SYSTEM_VIEW_IDENTIFIER_PATTERN.fullmatch(normalized):
+        raise InvalidInputError(
+            detail=f"Invalid system view identifier: {name!r}",
         )
     return normalized
 
