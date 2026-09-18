@@ -268,6 +268,29 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "El backend de keyring no está disponible en este sistema.",
         "en": "The keyring backend is unavailable on this system.",
     },
+    # One guide for the three places that hit a missing keyring: the CLI, ``doctor`` and the
+    # hint the MCP client receives. ``{command}`` is the install-manager specific way to add
+    # ``keyrings.alt`` (see ``error_hints.keyring_unavailable_hints``).
+    "KEYRING_UNAVAILABLE.HINT": {
+        "es": (
+            "Es típico de WSL o de Linux sin escritorio ni Secret Service: sin un backend de "
+            "credenciales nz-mcp no puede guardar ni leer la password de Netezza. Hay dos "
+            "salidas. Rápida: instala keyrings.alt en el mismo entorno que nz-mcp con "
+            "`{command}` y repite; ojo, la password queda en un archivo local SIN cifrar. "
+            "Segura: instala gnome-keyring y libsecret (en Ubuntu: "
+            "`sudo apt install gnome-keyring libsecret-1-0`), arranca el daemon D-Bus de tu "
+            "sesión y desbloquea el keyring."
+        ),
+        "en": (
+            "This is typical of WSL or Linux without a desktop or Secret Service: without a "
+            "credential backend nz-mcp can neither store nor read the Netezza password. There "
+            "are two ways out. Quick: install keyrings.alt in the same environment as nz-mcp "
+            "with `{command}` and retry; note the password is then kept in a local file "
+            "WITHOUT encryption. Secure: install gnome-keyring and libsecret (on Ubuntu: "
+            "`sudo apt install gnome-keyring libsecret-1-0`), start your session's D-Bus "
+            "daemon and unlock the keyring."
+        ),
+    },
     "CREDENTIAL_NOT_FOUND": {
         "es": "No se encontró credencial para el perfil '{profile}'.",
         "en": "No credential found for profile '{profile}'.",
@@ -1247,8 +1270,8 @@ MESSAGES: Final[dict[str, Message]] = {
         "en": "The configuration directory is not writable.",
     },
     "DOCTOR.CRITICAL.KEYRING_UNAVAILABLE": {
-        "es": "El backend de keyring no está disponible.",
-        "en": "The keyring backend is unavailable.",
+        "es": "El backend de keyring no está disponible. {hint}",
+        "en": "The keyring backend is unavailable. {hint}",
     },
     # probe-catalog CLI
     "PROBE_CATALOG.HEADER": {

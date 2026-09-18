@@ -71,6 +71,21 @@ def test_format_shows_critical_when_unhealthy(
     assert "keyring" in text.lower()
 
 
+@pytest.mark.parametrize(
+    ("locale", "warning"), [("es", "SIN cifrar"), ("en", "WITHOUT encryption")]
+)
+def test_doctor_explains_how_to_get_a_keyring(
+    monkeypatch: pytest.MonkeyPatch, tmp_profiles: Path, locale: str, warning: str
+) -> None:
+    """Same guide the CLI and the MCP client get: what happened and both ways out."""
+    monkeypatch.setattr(keyring, "get_keyring", _fail_keyring_backend)
+    report = collect_diagnostic()
+    text = format_diagnostic_report(report, locale=locale)  # type: ignore[arg-type]
+    assert "keyrings.alt" in text
+    assert warning in text
+    assert "gnome-keyring" in text
+
+
 def test_terminal_block_reports_level_0(
     monkeypatch: pytest.MonkeyPatch, tmp_profiles: Path
 ) -> None:

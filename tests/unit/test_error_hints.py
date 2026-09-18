@@ -11,10 +11,11 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from nz_mcp.error_hints import (
     hints_for_error,
     hints_for_validation_error,
+    keyring_unavailable_hints,
     summarize_validation_error,
 )
 from nz_mcp.errors import ConnectionError as NzConnectionError
-from nz_mcp.errors import NetezzaError, ObjectNotFoundError
+from nz_mcp.errors import KeyringUnavailableError, NetezzaError, ObjectNotFoundError
 from nz_mcp.server import call_tool
 
 
@@ -322,3 +323,52 @@ def test_override_hint_is_specific_per_reason(reason: str, needle: str) -> None:
 def test_no_override_hint_without_a_key_to_point_at() -> None:
     """Rule of ADR 0023: a hint is specific or absent, never filler."""
     assert hints_for_error("CATALOG_OVERRIDE_REJECTED", {"reason": "NOT_A_SELECT"}) is None
+
+
+# --- KEYRING_UNAVAILABLE: one guide, the exact command for this install -------
+
+
+@pytest.mark.parametrize(
+    ("installer", "command"),
+    [
+        ("pipx", "pipx inject nz-mcp keyrings.alt"),
+        ("uv", "uv tool install --force nz-mcp --with keyrings.alt"),
+        ("pip", "pip install keyrings.alt"),
+    ],
+)
+def test_keyring_hint_names_the_command_of_the_detected_installer(
+    monkeypatch: pytest.MonkeyPatch, installer: str, command: str
+) -> None:
+    monkeypatch.setattr("nz_mcp.error_hints.detect_installer", lambda _exe, _prefix: installer)
+    hints = keyring_unavailable_hints()
+    assert set(hints) == {"es", "en"}
+    for text in hints.values():
+        assert f"`{command}`" in text
+        assert "keyrings.alt" in text
+        assert "gnome-keyring" in text
+        assert "libsecret" in text
+    assert "SIN cifrar" in hints["es"]
+    assert "WITHOUT encryption" in hints["en"]
+
+
+def test_keyring_unavailable_error_gets_the_guide_as_its_hint() -> None:
+    assert hints_for_error("KEYRING_UNAVAILABLE", {"profile": "dev"}) == keyring_unavailable_hints()
+
+
+def test_keyring_unavailable_payload_carries_the_hint_once(
+    two_profiles: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _no_keyring(*_args: object, **_kwargs: object) -> None:
+        raise KeyringUnavailableError(profile="dev", detail="No recommended backend was available")
+
+    monkeypatch.setattr("nz_mcp.tools.describe_table.describe_table", _no_keyring)
+    out = call_tool(
+        "nz_describe_table",
+        {"database": "DEV", "schema": "PUBLIC", "table": "CLIENTES"},
+        config_path=two_profiles,
+    )
+    error = out["error"]
+    assert error["code"] == "KEYRING_UNAVAILABLE"
+    assert "keyrings.alt" in error["hint_es"]
+    assert "keyrings.alt" in error["hint_en"]
+    assert "hint_es" not in error["context"]

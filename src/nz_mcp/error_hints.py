@@ -14,9 +14,11 @@ is paid in tokens on every failed call. See docs/adr/0023-mensajes-error-acciona
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING, Any, Final
 
 from nz_mcp.i18n import both
+from nz_mcp.update_check import Installer, detect_installer
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -53,6 +55,15 @@ _NETEZZA_HINT_RULES: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ("RELATION_NOT_FOUND", ("relation does not exist", "table does not exist")),
     ("PERMISSION_DENIED", ("permission denied", "not authorized")),
 )
+
+# How to add ``keyrings.alt`` to the environment nz-mcp runs from, per install manager. The
+# manager is detected from the running paths (ADR 0037) because each one keeps tools in its
+# own venv: a plain ``pip install`` would put the package where nz-mcp cannot see it.
+_KEYRING_ALT_COMMANDS: Final[dict[Installer, str]] = {
+    "pipx": "pipx inject nz-mcp keyrings.alt",
+    "uv": "uv tool install --force nz-mcp --with keyrings.alt",
+    "pip": "pip install keyrings.alt",
+}
 
 
 def summarize_validation_error(exc: ValidationError) -> str:
@@ -94,7 +105,18 @@ def hints_for_error(code: str, context: Mapping[str, Any]) -> dict[str, str] | N
         return _netezza_hints(str(context.get("detail", "")))
     if code == "CATALOG_OVERRIDE_REJECTED":
         return _catalog_override_hints(context)
+    if code == "KEYRING_UNAVAILABLE":
+        return keyring_unavailable_hints()
     return None
+
+
+def keyring_unavailable_hints() -> dict[str, str]:
+    """What happened and the two real ways out, with the exact command for this install.
+
+    Shared by the CLI, ``doctor`` and the MCP error payload so the three say the same thing.
+    """
+    command = _KEYRING_ALT_COMMANDS[detect_installer(sys.executable, sys.prefix)]
+    return both("KEYRING_UNAVAILABLE.HINT", command=command)
 
 
 def _catalog_override_hints(context: Mapping[str, Any]) -> dict[str, str] | None:

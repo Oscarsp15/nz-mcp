@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import keyring
 import pytest
+from keyring.backends.fail import Keyring as FailKeyring
+from keyring.errors import KeyringError
 from typer.testing import CliRunner
 
-from nz_mcp.auth import get_password
+from nz_mcp.auth import get_password, store_password
 from nz_mcp.cli import app
 from nz_mcp.config import get_profile, list_profile_names, load_profiles_file
 from nz_mcp.errors import ConnectionError as NzConnectionError
@@ -393,3 +396,109 @@ def test_password_can_be_fixed_after_a_failure(
     result = runner.invoke(app, ["add-profile", "dev"], input=_answers(host=_BAD_HOST, extra=extra))
     assert result.exit_code == 0
     assert get_password("dev") == "newpw12345"
+
+
+# --- no keyring: found before the first question, never a half-saved profile ---------
+
+
+def _no_keyring_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """What WSL and a headless Linux give: keyring resolves to its ``fail`` backend."""
+    monkeypatch.setattr(keyring, "get_keyring", FailKeyring)
+
+
+def _forbid_prompts_and_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail the test if the wizard asks anything or opens a connection."""
+
+    def _asked(*_args: object, **_kwargs: object) -> str:
+        raise AssertionError("asked a question although there is no keyring")
+
+    monkeypatch.setattr("nz_mcp.cli.out.ask", _asked)
+    monkeypatch.setattr("nz_mcp.profile_check.open_connection", _asked)
+
+
+@pytest.mark.parametrize("argv", [["add-profile", "dev"], ["init"]])
+def test_no_keyring_is_reported_before_the_first_question(
+    monkeypatch: pytest.MonkeyPatch, tmp_profiles: Path, argv: list[str]
+) -> None:
+    _no_keyring_backend(monkeypatch)
+    _forbid_prompts_and_network(monkeypatch)
+
+    result = runner.invoke(app, argv)
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)  # a clean exit, not a raised error
+    out = result.stdout + result.stderr
+    assert "Traceback" not in out
+    assert "keyrings.alt" in out
+    assert "SIN cifrar" in out
+    assert "gnome-keyring" in out
+    assert not tmp_profiles.exists()
+
+
+def test_no_keyring_message_follows_the_locale(
+    monkeypatch: pytest.MonkeyPatch, tmp_profiles: Path
+) -> None:
+    monkeypatch.setenv("NZ_MCP_LANG", "en")
+    _no_keyring_backend(monkeypatch)
+    result = runner.invoke(app, ["add-profile", "dev"])
+    assert result.exit_code == 1
+    assert "WITHOUT encryption" in result.stderr
+    assert "SIN cifrar" not in result.stderr
+
+
+def test_backend_that_fails_when_storing_leaves_no_profile_behind(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    """The probe passes (a backend exists) but storing fails, e.g. a locked keyring."""
+    _patch_connection(monkeypatch)
+    before = two_profiles.read_bytes()
+
+    def _locked(*_args: object, **_kwargs: object) -> None:
+        raise KeyringError("Failed to unlock the collection!")
+
+    monkeypatch.setattr(keyring, "set_password", _locked)
+
+    result = runner.invoke(app, ["add-profile", "staging"], input=_answers())
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    out = result.stdout + result.stderr
+    assert "Traceback" not in out
+    assert "keyrings.alt" in out
+    assert "pw123456" not in out
+    assert two_profiles.read_bytes() == before
+    assert "staging" not in list_profile_names(two_profiles)
+
+
+def test_a_failed_profile_write_removes_the_new_credential(
+    monkeypatch: pytest.MonkeyPatch, tmp_profiles: Path
+) -> None:
+    _patch_connection(monkeypatch)
+
+    def _disk_full(**_kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("nz_mcp.cli._write_profile", _disk_full)
+
+    result = runner.invoke(app, ["add-profile", "dev"], input=_answers())
+
+    assert isinstance(result.exception, OSError)
+    with pytest.raises(CredentialNotFoundError):
+        get_password("dev")
+
+
+def test_a_failed_profile_write_keeps_the_credential_of_an_existing_profile(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    _patch_connection(monkeypatch)
+    store_password("dev", "old-password-1")
+
+    def _disk_full(**_kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("nz_mcp.cli._write_profile", _disk_full)
+
+    result = runner.invoke(app, ["add-profile", "dev", "--yes"], input=_answers())
+
+    assert isinstance(result.exception, OSError)
+    assert get_password("dev")  # the profile still on disk still has a credential

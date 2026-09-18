@@ -23,6 +23,7 @@ from nz_mcp.config import (
     profiles_path,
     single_profile_name_or_none,
 )
+from nz_mcp.error_hints import keyring_unavailable_hints
 from nz_mcp.errors import InvalidProfileError
 from nz_mcp.i18n import Locale, resolve_locale, t
 
@@ -72,8 +73,12 @@ def _writable_dir(path: Path) -> bool:
         cur = cur.parent
 
 
-def _probe_keyring() -> tuple[str, bool]:
-    """Return ``(backend_class_name, available)`` using a non-destructive probe."""
+def probe_keyring() -> tuple[str, bool]:
+    """Return ``(backend_class_name, available)`` using a non-destructive probe.
+
+    Public because it is not only ``doctor``'s: ``add-profile`` asks it before its first
+    question, so a missing backend is found before the person has typed anything.
+    """
     try:
         backend = keyring.get_keyring()
     except Exception:  # noqa: BLE001, RUF100
@@ -120,7 +125,7 @@ def collect_diagnostic(
                 data.active or os.environ.get("NZ_MCP_PROFILE") or single_profile_name_or_none(data)
             )
 
-    kr_name, kr_ok = _probe_keyring()
+    kr_name, kr_ok = probe_keyring()
 
     return DiagnosticReport(
         nz_mcp_version=current_version(),
@@ -192,7 +197,8 @@ def format_diagnostic_report(report: DiagnosticReport, *, locale: Locale | None 
         if not report.config_dir_writable:
             lines.append(f"- {lbl('DOCTOR.CRITICAL.CONFIG_DIR_NOT_WRITABLE')}")
         if not report.keyring_available:
-            lines.append(f"- {lbl('DOCTOR.CRITICAL.KEYRING_UNAVAILABLE')}")
+            hint = keyring_unavailable_hints()[loc]
+            lines.append(f"- {t('DOCTOR.CRITICAL.KEYRING_UNAVAILABLE', loc, hint=hint)}")
 
     return "\n".join(lines)
 
