@@ -6,7 +6,7 @@ from importlib import metadata
 
 #: Fallback for running from a source checkout, where no distribution is installed. Keep it
 #: in sync with ``pyproject.toml``; ``tests/unit/test_version.py`` fails if it drifts.
-_FALLBACK_VERSION = "0.1.0a5"
+_FALLBACK_VERSION = "0.1.0a6"
 
 
 def current_version() -> str:
