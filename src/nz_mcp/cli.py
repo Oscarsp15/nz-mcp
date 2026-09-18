@@ -889,10 +889,28 @@ def _add_profile_interactive(*, name: str, set_active: bool, assume_yes: bool = 
         raise typer.Exit(code=1)
 
     _ensure_config_dir()
-    # The credential goes first: it is the step that fails on a machine whose keyring works
-    # on paper (locked, no session bus), and failing there leaves profiles.toml untouched.
-    # Written the other way round, that failure left a profile that could never connect.
+    _save_profile(name, draft, set_active=set_active, overwriting=bool(previous), locale=locale)
+    out.success(t("CLI.PROFILE_SAVED", locale, profile=name, path=profiles_path()))
+    out.note(t("CLI.PROFILE_NEXT_STEP", locale, profile=name))
+    _print_claude_desktop_block(name, locale)
+    out.note(t("CLI.PROBE_SUGGESTION", locale, profile=name))
+
+
+def _save_profile(
+    name: str, draft: _ProfileDraft, *, set_active: bool, overwriting: bool, locale: Locale
+) -> None:
+    """Persist password and profile so that no failure leaves the two out of step.
+
+    The credential goes first: it is the step that fails on a machine whose keyring works on
+    paper (locked, no session bus), and failing there leaves profiles.toml untouched. Written
+    the other way round, that failure left a profile that could never connect.
+
+    If writing the profile then fails, the credential goes back to what it was: removed for a
+    new profile, the previous password put back for an overwrite. Without that, the profile
+    still on disk would be paired with a password that is not its own.
+    """
     try:
+        previous_password = _previous_password(name) if overwriting else None
         store_password(name, draft.password)
     except KeyringUnavailableError as exc:
         _report_keyring_unavailable(locale)
@@ -900,15 +918,19 @@ def _add_profile_interactive(*, name: str, set_active: bool, assume_yes: bool = 
     try:
         _write_profile(name=name, draft=draft, set_active=set_active)
     except Exception:
-        # A new profile must not leave its credential behind. An overwrite keeps its entry:
-        # deleting it would leave the profile that is still on disk with no credential.
-        if not previous:
+        if previous_password is None:
             _delete_password_or_warn(name, locale)
+        else:
+            store_password(name, previous_password)
         raise
-    out.success(t("CLI.PROFILE_SAVED", locale, profile=name, path=profiles_path()))
-    out.note(t("CLI.PROFILE_NEXT_STEP", locale, profile=name))
-    _print_claude_desktop_block(name, locale)
-    out.note(t("CLI.PROBE_SUGGESTION", locale, profile=name))
+
+
+def _previous_password(name: str) -> Secret | None:
+    """The password the profile being overwritten already has, or ``None`` if it has none."""
+    try:
+        return get_password(name)
+    except CredentialNotFoundError:
+        return None
 
 
 # --- collecting the draft ------------------------------------------------------

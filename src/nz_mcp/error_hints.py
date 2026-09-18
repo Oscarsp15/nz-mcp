@@ -106,14 +106,15 @@ def hints_for_error(code: str, context: Mapping[str, Any]) -> dict[str, str] | N
     if code == "CATALOG_OVERRIDE_REJECTED":
         return _catalog_override_hints(context)
     if code == "KEYRING_UNAVAILABLE":
-        return keyring_unavailable_hints()
+        return both("KEYRING_UNAVAILABLE.HINT.CLIENT")
     return None
 
 
 def keyring_unavailable_hints() -> dict[str, str]:
     """What happened and the two real ways out, with the exact command for this install.
 
-    Shared by the CLI, ``doctor`` and the MCP error payload so the three say the same thing.
+    Shared by the CLI and ``doctor``. The MCP client gets a shorter one on purpose: see
+    ``KEYRING_UNAVAILABLE.HINT.CLIENT``.
     """
     command = _KEYRING_ALT_COMMANDS[detect_installer(sys.executable, sys.prefix)]
     return both("KEYRING_UNAVAILABLE.HINT", command=command)

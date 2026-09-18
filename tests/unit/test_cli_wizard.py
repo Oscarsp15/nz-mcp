@@ -14,7 +14,7 @@ from nz_mcp.auth import get_password, store_password
 from nz_mcp.cli import app
 from nz_mcp.config import get_profile, list_profile_names, load_profiles_file
 from nz_mcp.errors import ConnectionError as NzConnectionError
-from nz_mcp.errors import CredentialNotFoundError
+from nz_mcp.errors import CredentialNotFoundError, KeyringUnavailableError
 
 runner = CliRunner()
 
@@ -487,11 +487,17 @@ def test_a_failed_profile_write_removes_the_new_credential(
         get_password("dev")
 
 
-def test_a_failed_profile_write_keeps_the_credential_of_an_existing_profile(
+def test_a_failed_overwrite_restores_the_previous_password(
     monkeypatch: pytest.MonkeyPatch, two_profiles: Path
 ) -> None:
+    """The old profile stays on disk, so it must keep the password it was saved with.
+
+    Otherwise the profile that still points at Netezza with the old credentials would be
+    paired with a new one, and the old one, which may be the only copy, would be gone.
+    """
     _patch_connection(monkeypatch)
     store_password("dev", "old-password-1")
+    before = two_profiles.read_bytes()
 
     def _disk_full(**_kwargs: object) -> None:
         raise OSError("disk full")
@@ -501,4 +507,26 @@ def test_a_failed_profile_write_keeps_the_credential_of_an_existing_profile(
     result = runner.invoke(app, ["add-profile", "dev", "--yes"], input=_answers())
 
     assert isinstance(result.exception, OSError)
-    assert get_password("dev")  # the profile still on disk still has a credential
+    assert two_profiles.read_bytes() == before
+    assert get_password("dev") == "old-password-1"
+
+
+def test_an_unreadable_previous_password_stops_before_storing_anything(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    _patch_connection(monkeypatch)
+    store_password("dev", "old-password-1")
+    before = two_profiles.read_bytes()
+
+    def _locked(_name: str) -> object:
+        raise KeyringUnavailableError(profile="dev", detail="Failed to unlock the collection!")
+
+    monkeypatch.setattr("nz_mcp.cli.get_password", _locked)
+
+    result = runner.invoke(app, ["add-profile", "dev", "--yes"], input=_answers())
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert "Traceback" not in result.stdout + result.stderr
+    assert two_profiles.read_bytes() == before
+    assert get_password("dev") == "old-password-1"

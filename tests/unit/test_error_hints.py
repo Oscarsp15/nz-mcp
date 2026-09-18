@@ -351,8 +351,23 @@ def test_keyring_hint_names_the_command_of_the_detected_installer(
     assert "WITHOUT encryption" in hints["en"]
 
 
-def test_keyring_unavailable_error_gets_the_guide_as_its_hint() -> None:
-    assert hints_for_error("KEYRING_UNAVAILABLE", {"profile": "dev"}) == keyring_unavailable_hints()
+def test_keyring_hint_for_the_client_leaves_the_decision_to_the_person() -> None:
+    """A client with a shell must not be handed a command it could run on its own.
+
+    Installing a backend, and choosing plain text over an encrypted keyring, is the
+    person's call; the hint is also kept short (ADR 0023).
+    """
+    hints = hints_for_error("KEYRING_UNAVAILABLE", {"profile": "dev"})
+    assert hints is not None
+    for text in hints.values():
+        assert len(text) <= 300
+        assert "sudo" not in text
+        assert "keyrings.alt" not in text
+        assert "`nz-mcp doctor`" in text
+    assert "decisión de la persona" in hints["es"]
+    assert "consúltale antes de actuar" in hints["es"]
+    assert "the person's decision" in hints["en"]
+    assert "ask them before acting" in hints["en"]
 
 
 def test_keyring_unavailable_payload_carries_the_hint_once(
@@ -369,6 +384,6 @@ def test_keyring_unavailable_payload_carries_the_hint_once(
     )
     error = out["error"]
     assert error["code"] == "KEYRING_UNAVAILABLE"
-    assert "keyrings.alt" in error["hint_es"]
-    assert "keyrings.alt" in error["hint_en"]
+    assert "persona" in error["hint_es"]
+    assert "person" in error["hint_en"]
     assert "hint_es" not in error["context"]

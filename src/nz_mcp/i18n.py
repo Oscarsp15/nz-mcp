@@ -268,9 +268,8 @@ MESSAGES: Final[dict[str, Message]] = {
         "es": "El backend de keyring no está disponible en este sistema.",
         "en": "The keyring backend is unavailable on this system.",
     },
-    # One guide for the three places that hit a missing keyring: the CLI, ``doctor`` and the
-    # hint the MCP client receives. ``{command}`` is the install-manager specific way to add
-    # ``keyrings.alt`` (see ``error_hints.keyring_unavailable_hints``).
+    # The guide for the person, in the CLI and ``doctor``. ``{command}`` is the install-manager
+    # specific way to add ``keyrings.alt`` (see ``error_hints.keyring_unavailable_hints``).
     "KEYRING_UNAVAILABLE.HINT": {
         "es": (
             "Es típico de WSL o de Linux sin escritorio ni Secret Service: sin un backend de "
@@ -289,6 +288,23 @@ MESSAGES: Final[dict[str, Message]] = {
             "WITHOUT encryption. Secure: install gnome-keyring and libsecret (on Ubuntu: "
             "`sudo apt install gnome-keyring libsecret-1-0`), start your session's D-Bus "
             "daemon and unlock the keyring."
+        ),
+    },
+    # What the MCP client gets instead: short (ADR 0023) and deliberately without commands.
+    # A client with a shell could run them itself and leave a plain-text password behind, and
+    # choosing between that and a secure keyring is the person's call.
+    "KEYRING_UNAVAILABLE.HINT.CLIENT": {
+        "es": (
+            "No hay backend de credenciales (típico de WSL o Linux sin escritorio). No instales "
+            "nada ni ejecutes comandos: elegir entre password en texto plano o un keyring "
+            "seguro es decisión de la persona. Explícale el problema, dile que corra "
+            "`nz-mcp doctor` y consúltale antes de actuar."
+        ),
+        "en": (
+            "There is no credential backend (typical of WSL or Linux without a desktop). Do "
+            "not install anything or run commands: choosing between a plain-text password and "
+            "a secure keyring is the person's decision. Explain the problem, tell them to run "
+            "`nz-mcp doctor` and ask them before acting."
         ),
     },
     "CREDENTIAL_NOT_FOUND": {
