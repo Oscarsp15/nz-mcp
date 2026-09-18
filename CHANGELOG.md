@@ -8,6 +8,8 @@ Cada entrada se documenta en **español** y **english**.
 
 ## [Unreleased]
 
+## [0.1.0a6] - 2026-09-18
+
 ### Added
 - ES: **comando nuevo** — `nz-mcp tools` lista el catálogo de herramientas que el servidor expone al asistente, con su modo (`read`/`write`/`admin`) y la primera frase de la descripción de cada una. La lista sale del **mismo registro** del que `serve` responde `tools/list`, así que no puede desincronizarse del catálogo real (mismo principio que #352); un test la compara contra `server.list_tools()` y otro falla si una herramienta registrada no aparece. `--json` devuelve `name`, `mode`, `description` y `annotations` para leerlo desde un script, y `--name <texto>` filtra por nombre sin distinguir mayúsculas. No lee perfiles ni toca Netezza: es el registro estático. Cierra issue #354.
 - EN: **new command** — `nz-mcp tools` lists the catalog of tools the server exposes to the assistant, with its mode (`read`/`write`/`admin`) and the first sentence of each description. The listing comes from the **same registry** `serve` answers `tools/list` from, so it cannot drift from the real catalog (same principle as #352); one test compares it against `server.list_tools()` and another fails if a registered tool is missing. `--json` returns `name`, `mode`, `description` and `annotations` to read from a script, and `--name <text>` filters by name, case-insensitively. It reads no profiles and never touches Netezza: it is the static registry. Closes issue #354.
