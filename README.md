@@ -303,7 +303,7 @@ Mide duración y filas devueltas por query; si una consulta solo falla porque no
 
 ### Otros
 
-- **`nz-mcp doctor` sale con código 1**: normalmente es el keyring. Sin backend de keyring no hay dónde guardar la password; en Linux headless hace falta instalar y desbloquear uno.
+- **`nz-mcp doctor` sale con código 1**: normalmente es el keyring. Sin backend de keyring no hay dónde guardar la password; en Linux headless o WSL hace falta instalar y desbloquear uno (`nz-mcp add-profile` lo detecta antes de preguntar nada y `doctor` lo explica). Salida rápida: instala `keyrings.alt` **en el mismo entorno que nz-mcp** (`pipx inject nz-mcp keyrings.alt`; con uv tool, `uv tool install --force nz-mcp --with keyrings.alt`; con pip, `pip install keyrings.alt`), sabiendo que la password queda en un archivo local **sin cifrar**. Salida segura: `gnome-keyring` + `libsecret` y el daemon D-Bus de tu sesión.
 - **La tool devuelve `PERMISSION_DENIED`**: el modo del perfil no llega (`read` no escribe, `write` no hace DDL). nz-mcp nunca eleva el modo: lo cambias tú con `nz-mcp edit-profile <perfil> --mode <modo>`, y aun así Netezza sigue mandando sobre sus grants.
 - **`WHERE_ALWAYS_TRUE` al actualizar o borrar**: es intencionado, ver [Seguridad](#seguridad).
 

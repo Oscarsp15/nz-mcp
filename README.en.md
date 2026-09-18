@@ -303,7 +303,7 @@ The command reports duration and row counts per query. If a query only fails bec
 
 ### Other
 
-- **`nz-mcp doctor` exits with code 1**: usually the keyring. With no keyring backend there is nowhere to store the password; on headless Linux you must install and unlock one.
+- **`nz-mcp doctor` exits with code 1**: usually the keyring. With no keyring backend there is nowhere to store the password; on headless Linux or WSL you must install and unlock one (`nz-mcp add-profile` detects it before asking anything and `doctor` explains it). Quick way out: install `keyrings.alt` **in the same environment as nz-mcp** (`pipx inject nz-mcp keyrings.alt`; with uv tool, `uv tool install --force nz-mcp --with keyrings.alt`; with pip, `pip install keyrings.alt`), knowing the password is then kept in a local file **without encryption**. Secure way out: `gnome-keyring` + `libsecret` and your session's D-Bus daemon.
 - **A tool returns `PERMISSION_DENIED`**: the profile mode is not enough (`read` does not write, `write` does not do DDL). nz-mcp never raises the mode: you change it with `nz-mcp edit-profile <profile> --mode <mode>`, and Netezza grants still have the last word.
 - **`WHERE_ALWAYS_TRUE` on an update or a delete**: that is intended, see [Security](#security).
 

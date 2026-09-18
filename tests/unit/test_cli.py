@@ -153,6 +153,23 @@ def test_test_connection_ok(monkeypatch: pytest.MonkeyPatch, two_profiles: Path)
     assert "Connecting to" not in result.stderr
 
 
+def test_test_connection_without_keyring_explains_the_way_out(
+    monkeypatch: pytest.MonkeyPatch, two_profiles: Path
+) -> None:
+    monkeypatch.setenv("NZ_MCP_LANG", "en")
+
+    def _no_keyring(_name: str) -> object:
+        raise KeyringUnavailableError(profile="dev", detail="No recommended backend was available")
+
+    monkeypatch.setattr("nz_mcp.cli.get_password", _no_keyring)
+    result = runner.invoke(app, ["test-connection"])
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert "keyrings.alt" in result.stderr
+    assert "WITHOUT encryption" in result.stderr
+    assert "KEYRING_UNAVAILABLE (" not in result.stderr
+
+
 def test_test_connection_profile_flag_ok(
     monkeypatch: pytest.MonkeyPatch, two_profiles: Path
 ) -> None:

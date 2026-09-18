@@ -74,7 +74,8 @@ from nz_mcp.config import (
     update_profile_fields,
     upsert_profile,
 )
-from nz_mcp.diagnostic import collect_diagnostic, format_diagnostic_report
+from nz_mcp.diagnostic import collect_diagnostic, format_diagnostic_report, probe_keyring
+from nz_mcp.error_hints import keyring_unavailable_hints
 from nz_mcp.errors import (
     CredentialNotFoundError,
     InvalidProfileError,
@@ -163,6 +164,7 @@ def init_cmd(
 ) -> None:
     """Interactive wizard: create the first profile."""
     locale = resolve_locale()
+    _require_keyring_or_exit(locale)
     out.heading("nz-mcp init")
     out.note(t("CLI.INIT_INTRO", locale))
     name = out.ask(t("CLI.INIT_NAME_PROMPT", locale), default="default")
@@ -190,7 +192,10 @@ def test_connection_cmd(
 
     try:
         password = get_password(prof.name)
-    except (CredentialNotFoundError, KeyringUnavailableError) as exc:
+    except KeyringUnavailableError as exc:
+        _report_keyring_unavailable(locale)
+        raise typer.Exit(code=1) from exc
+    except CredentialNotFoundError as exc:
         detail = sanitize(str(exc), known_secrets=())
         out.fail(t("CLI.TEST_CONNECTION_FAIL", locale, detail=detail))
         raise typer.Exit(code=1) from exc
@@ -275,6 +280,7 @@ def add_profile_cmd(
     yes: bool = typer.Option(False, "--yes", "-y", help=_help("CLI.HELP.OPT.YES")),
 ) -> None:
     """Add a new profile (interactive)."""
+    _require_keyring_or_exit(resolve_locale())
     _add_profile_interactive(name=name, set_active=set_active, assume_yes=yes)
 
 
@@ -798,6 +804,29 @@ def _confirm_overwrite_or_exit(name: str, locale: Locale, *, assume_yes: bool) -
         raise typer.Exit(code=1)
 
 
+def _report_keyring_unavailable(locale: Locale) -> None:
+    """Say there is no usable keyring and how to get one, instead of a traceback.
+
+    The hint is the same text ``doctor`` and the MCP error payload carry, so wherever a
+    person meets the problem they read the same two ways out.
+    """
+    out.fail(t("KEYRING_UNAVAILABLE", locale))
+    out.note(keyring_unavailable_hints()[locale])
+
+
+def _require_keyring_or_exit(locale: Locale) -> None:
+    """Stop before the first question when there is nowhere to keep the password.
+
+    A wizard that discovers this at its last step has already made someone type eight
+    answers and wait on three checks against Netezza. ``probe_keyring`` is the same
+    non-destructive probe ``doctor`` uses: it reads the backend, it writes nothing.
+    """
+    _, available = probe_keyring()
+    if not available:
+        _report_keyring_unavailable(locale)
+        raise typer.Exit(code=1)
+
+
 def _delete_password_or_warn(name: str, locale: Locale) -> None:
     """Drop the keyring entry; a broken keyring must not block removing the profile."""
     try:
@@ -860,12 +889,48 @@ def _add_profile_interactive(*, name: str, set_active: bool, assume_yes: bool = 
         raise typer.Exit(code=1)
 
     _ensure_config_dir()
-    _write_profile(name=name, draft=draft, set_active=set_active)
-    store_password(name, draft.password)
+    _save_profile(name, draft, set_active=set_active, overwriting=bool(previous), locale=locale)
     out.success(t("CLI.PROFILE_SAVED", locale, profile=name, path=profiles_path()))
     out.note(t("CLI.PROFILE_NEXT_STEP", locale, profile=name))
     _print_claude_desktop_block(name, locale)
     out.note(t("CLI.PROBE_SUGGESTION", locale, profile=name))
+
+
+def _save_profile(
+    name: str, draft: _ProfileDraft, *, set_active: bool, overwriting: bool, locale: Locale
+) -> None:
+    """Persist password and profile so that no failure leaves the two out of step.
+
+    The credential goes first: it is the step that fails on a machine whose keyring works on
+    paper (locked, no session bus), and failing there leaves profiles.toml untouched. Written
+    the other way round, that failure left a profile that could never connect.
+
+    If writing the profile then fails, the credential goes back to what it was: removed for a
+    new profile, the previous password put back for an overwrite. Without that, the profile
+    still on disk would be paired with a password that is not its own.
+    """
+    try:
+        previous_password = _previous_password(name) if overwriting else None
+        store_password(name, draft.password)
+    except KeyringUnavailableError as exc:
+        _report_keyring_unavailable(locale)
+        raise typer.Exit(code=1) from exc
+    try:
+        _write_profile(name=name, draft=draft, set_active=set_active)
+    except Exception:
+        if previous_password is None:
+            _delete_password_or_warn(name, locale)
+        else:
+            store_password(name, previous_password)
+        raise
+
+
+def _previous_password(name: str) -> Secret | None:
+    """The password the profile being overwritten already has, or ``None`` if it has none."""
+    try:
+        return get_password(name)
+    except CredentialNotFoundError:
+        return None
 
 
 # --- collecting the draft ------------------------------------------------------
